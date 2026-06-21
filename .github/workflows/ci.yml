@@ -1,0 +1,55 @@
+name: CI
+
+# Lint, type-check, and test on every push and pull request. Runs on Windows
+# because the Tauri shell crate has Windows-only code (registry, DWM titlebar);
+# the core crate is cross-platform but is covered here too.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Svelte type-check
+        run: npm run check
+
+      - name: Frontend unit tests
+        run: npm test
+
+      # Builds the frontend into dist/, which the Tauri build script embeds —
+      # so it must exist before cargo compiles the shell crate below.
+      - name: Build frontend
+        run: npm run build
+
+      - name: Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --workspace

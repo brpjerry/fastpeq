@@ -1,0 +1,8 @@
+# Normalize line endings to LF in the repo and on checkout, so tooling
+# (rustfmt --check, svelte-check) behaves the same on every platform / CI.
+* text=auto eol=lf
+
+# Treat the bundled icon binaries as binary so they're never line-ending mangled.
+*.png binary
+*.ico binary
+*.icns binary

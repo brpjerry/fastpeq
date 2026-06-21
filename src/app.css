@@ -1,0 +1,219 @@
+:root {
+  --bg: #15171c;
+  --panel: #1d2026;
+  --panel-2: #23272f;
+  --border: #2d323c;
+  --text: #e6e9ef;
+  --muted: #9aa3b2;
+  --accent: #4f8cff;
+  --accent-2: #3a6fd8;
+  --danger: #e5534b;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+#app {
+  height: 100%;
+}
+
+/* In the narrow/stacked layout the panels stack taller than the viewport, so
+   let the page itself scroll instead of forcing internal-only scroll. */
+@media (max-width: 820px) {
+  html,
+  body {
+    overflow: auto;
+  }
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  /* Tints native checkboxes and range sliders; inherits, so it follows the theme. */
+  accent-color: var(--accent);
+}
+
+/* Desktop-app feel: don't let UI chrome (labels, buttons, headings) be selected
+   by drag. Editable fields opt back in so users can still select/edit their text. */
+:root {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable=""] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Themed scrollbars (WebView2 / Chromium) — a thin floating thumb in the
+   app's grays instead of the OS default. The transparent border + padding-box
+   clip gives the thumb breathing room within the track. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3a4150;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5364;
+}
+::-webkit-scrollbar-thumb:active {
+  background: #565f70;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 7px;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+button:hover:not(:disabled) {
+  background: #2b3038;
+  border-color: #3a4150;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+button.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 9px;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Drop the native number spinners — their buttons shrink the clickable text
+   area. Values are still editable by typing or the keyboard arrows. */
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Shared component layout (scoped styles don't cross components). */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+}
+
+.err {
+  background: #2a1c1c;
+  border: 1px solid #5a2d2a;
+  color: #f0b4b0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}

@@ -1,0 +1,24 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e2433"/>
+      <stop offset="1" stop-color="#13151b"/>
+    </linearGradient>
+    <linearGradient id="cv" x1="0.15" y1="0" x2="0.85" y2="0">
+      <stop offset="0" stop-color="#67d3ff"/>
+      <stop offset="0.5" stop-color="#4f8cff"/>
+      <stop offset="1" stop-color="#7b7bff"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <rect x="6" y="6" width="1012" height="1012" rx="226" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="3"/>
+  <g stroke="#ffffff" stroke-opacity="0.05" stroke-width="3">
+    <line x1="340" y1="210" x2="340" y2="812"/>
+    <line x1="512" y1="210" x2="512" y2="812"/>
+    <line x1="684" y1="210" x2="684" y2="812"/>
+  </g>
+  <line x1="150" y1="600" x2="874" y2="600" stroke="#ffffff" stroke-opacity="0.13" stroke-width="4"/>
+  <path d="M150 600 L300 600 C392 600 430 332 512 332 C594 332 632 600 724 600 L874 600" fill="none" stroke="url(#cv)" stroke-opacity="0.20" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M150 600 L300 600 C392 600 430 332 512 332 C594 332 632 600 724 600 L874 600" fill="none" stroke="url(#cv)" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="332" r="31" fill="#ffffff" stroke="#2f6fe0" stroke-width="11"/>
+</svg>

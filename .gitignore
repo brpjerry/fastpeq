@@ -1,0 +1,21 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node / Tauri frontend (added in Phase 2)
+node_modules/
+dist/
+src-tauri/target/
+# Tauri regenerates these ACL schemas from the capabilities on every build.
+src-tauri/gen/schemas/
+
+# Claude Code local settings (per-machine)
+.claude/settings.local.json
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

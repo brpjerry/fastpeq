@@ -1,0 +1,26 @@
+//! `fastpeq-core` — the UI-agnostic heart of fastpeq.
+//!
+//! Equalizer APO is driven entirely by a plain-text `config.txt` that the APO
+//! engine watches and live-reloads. This crate owns the model of that file:
+//! detecting where it lives ([`apo::env`]), turning text into a structured
+//! [`Config`] ([`apo::parse`]), and turning a [`Config`] back into APO text
+//! ([`apo::serialize`]).
+//!
+//! The guiding invariant is a **lossless model round-trip**:
+//! `parse(serialize(config)) == config`. Anything the model does not understand
+//! is preserved verbatim as [`Line::Raw`], so a user's `Include:`, `Device:`,
+//! `Convolution:` and comment lines always survive an edit untouched.
+
+pub mod apo;
+pub mod category;
+pub mod manager;
+pub mod peace;
+pub mod store;
+pub mod tone;
+
+pub use apo::env;
+pub use apo::{parse, serialize, Channel, Config, Filter, FilterKind, Line};
+pub use category::Category;
+pub use manager::{ImportReport, Manager};
+pub use store::PresetStore;
+pub use tone::Tone;

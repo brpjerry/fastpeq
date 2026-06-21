@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 24 24"
+   fill="none"
+   stroke="currentColor"
+   stroke-width="2"
+   stroke-linecap="round"
+   stroke-linejoin="round"
+   aria-hidden="true"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="earbud.svg"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1">
+    <inkscape:path-effect
+       effect="mirror_symmetry"
+       start_point="12,0.99999914"
+       end_point="12,24.999999"
+       center_point="12,12.999999"
+       id="path-effect1"
+       is_visible="true"
+       lpeversion="1.2"
+       lpesatellites=""
+       mode="vertical"
+       discard_orig_path="false"
+       fuse_paths="false"
+       oposite_fuse="false"
+       split_items="false"
+       split_open="false"
+       link_styles="false" />
+  </defs>
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="38.916666"
+     inkscape:cx="-3.1349037"
+     inkscape:cy="13.901499"
+     inkscape:window-width="3840"
+     inkscape:window-height="2126"
+     inkscape:window-x="-11"
+     inkscape:window-y="1083"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg1" />
+  <circle
+     cx="11.9976"
+     cy="7.7476001"
+     id="circle1"
+     style="stroke-width:1.4952"
+     r="5" />
+  <path
+     style="fill:none"
+     d="m 9.8543897,13.541756 0.3982863,6.745182 1.695932,0.01284 m 2.197002,-6.758022 -0.398286,6.745182 -1.695932,0.01284"
+     id="path1"
+     inkscape:path-effect="#path-effect1"
+     inkscape:original-d="m 9.8543897,13.541756 0.3982863,6.745182 1.695932,0.01284"
+     sodipodi:nodetypes="ccc"
+     transform="translate(0,-0.99999914)" />
+  <path
+     style="fill:none"
+     d="m 12,20 v 1.5"
+     id="path2"
+     sodipodi:nodetypes="cc" />
+</svg>

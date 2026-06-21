@@ -1,0 +1,184 @@
+//! IPC commands invoked from the Svelte frontend. Each is a thin wrapper that
+//! delegates to [`AppState`] and refreshes the tray when state changes.
+
+use crate::state::{ApoStatus, AppState};
+use crate::tray;
+use fastpeq_core::{Category, Config, ImportReport, Tone};
+use std::collections::BTreeMap;
+use tauri::{AppHandle, State};
+
+#[tauri::command]
+pub fn apo_status(state: State<'_, AppState>) -> ApoStatus {
+    state.status()
+}
+
+#[tauri::command]
+pub fn list_presets(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    state.list_presets()
+}
+
+#[tauri::command]
+pub fn active_preset(state: State<'_, AppState>) -> Option<String> {
+    // Re-derive from the live config so a change made outside the app (or the
+    // tray/hotkey) is reflected; this also refreshes the cache the tray reads.
+    state.redetect_active()
+}
+
+#[tauri::command]
+pub fn apply_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    state.apply(&name)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_bypass(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.toggle_bypass()?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn bypassed(state: State<'_, AppState>) -> bool {
+    state.is_bypassed()
+}
+
+#[tauri::command]
+pub fn capture_current(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    state.capture(&name)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    state.delete(&name)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rename_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    state.rename(&from, &to)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_preset(state: State<'_, AppState>, name: String) -> Result<Config, String> {
+    state.load_config(&name)
+}
+
+#[tauri::command]
+pub fn save_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    config: Config,
+) -> Result<(), String> {
+    state.save_config(&name, &config)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn apply_live(state: State<'_, AppState>, config: Config) -> Result<(), String> {
+    state.apply_config(&config)
+}
+
+#[tauri::command]
+pub fn get_tone(state: State<'_, AppState>) -> Result<Tone, String> {
+    state.tone()
+}
+
+#[tauri::command]
+pub fn set_tone(state: State<'_, AppState>, tone: Tone) -> Result<(), String> {
+    state.set_tone(&tone)
+}
+
+#[tauri::command]
+pub fn preset_categories(state: State<'_, AppState>) -> Result<BTreeMap<String, Category>, String> {
+    state.categories()
+}
+
+#[tauri::command]
+pub fn set_category(
+    state: State<'_, AppState>,
+    name: String,
+    category: Option<Category>,
+) -> Result<(), String> {
+    state.set_category(&name, category)
+}
+
+#[tauri::command]
+pub fn import_peace_presets(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ImportReport, String> {
+    let report = state.import_peace_presets()?;
+    let _ = tray::refresh(&app);
+    Ok(report)
+}
+
+#[tauri::command]
+pub fn import_peace_files(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<ImportReport, String> {
+    let report = state.import_peace_files(paths)?;
+    let _ = tray::refresh(&app);
+    Ok(report)
+}
+
+/// Read a user-picked text file (e.g. a REW measurement export) so the UI can
+/// parse it. The path comes from the file dialog the user just confirmed.
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn presets_dir(state: State<'_, AppState>) -> String {
+    state.presets_dir()
+}
+
+#[tauri::command]
+pub fn set_presets_dir(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    state.set_presets_dir(&path)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reset_presets_dir(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.reset_presets_dir()?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_presets_dir(state: State<'_, AppState>) -> Result<(), String> {
+    state.open_presets_dir()
+}

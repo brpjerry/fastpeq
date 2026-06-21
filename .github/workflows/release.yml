@@ -1,0 +1,67 @@
+name: Package
+
+# Builds the Windows installers (.exe NSIS + .msi) with the Tauri bundler.
+#
+# - Manual run (Actions tab → "Run workflow"): builds and uploads the installers
+#   as downloadable workflow artifacts. Nothing is published.
+# - Tag push matching v* (e.g. v0.1.0): in addition, creates a *draft* GitHub
+#   Release with the installers attached, so a human reviews before it goes live.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+# tauri-action needs write access to create the release on a tag push.
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Caches the Cargo registry and the workspace target dir keyed on Cargo.lock,
+      # so repeat builds skip recompiling unchanged dependencies.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and package
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # On a v* tag, publish a draft release with the bundles attached.
+          # On a manual run these are empty, so it only builds (no release).
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: ${{ github.ref_type == 'tag' && format('fastpeq {0}', github.ref_name) || '' }}
+          releaseDraft: true
+          prerelease: false
+
+      # Always expose the installers as workflow artifacts, so manual runs (which
+      # don't create a release) still produce something downloadable.
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastpeq-windows-installers
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
