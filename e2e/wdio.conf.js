@@ -75,10 +75,16 @@ export const config = {
     if (passed || global.__dumped) return;
     global.__dumped = true;
     try {
-      const src = await browser.getPageSource();
-      console.log(`\n===PAGE SOURCE (${test.title})===\n${src.slice(0, 3500)}\n===END PAGE SOURCE===\n`);
+      const info = await browser.execute(() => ({
+        bodyText: document.body.innerText.slice(0, 400),
+        banner: document.querySelector(".banner")?.textContent?.trim() || null,
+        presetLis: document.querySelectorAll(".presets li").length,
+        hasWorkspace: !!document.querySelector("main"),
+        hasNewBtn: !!document.querySelector(".new-btn"),
+      }));
+      console.log(`===DIAG=== ${JSON.stringify(info)}`);
     } catch (e) {
-      console.log(`page-source dump failed: ${e}`);
+      console.log(`diag failed: ${e}`);
     }
   },
 
