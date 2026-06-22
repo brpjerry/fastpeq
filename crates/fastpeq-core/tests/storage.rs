@@ -354,9 +354,11 @@ fn manager_apply_backs_up_once_then_switches() {
     // Apply a preset: backup created, config.txt replaced live.
     manager.apply_preset("BassBoost", &Tone::default()).unwrap();
     assert!(backup.exists(), "backup should be created on first write");
-    assert!(fs::read_to_string(&config_file)
-        .unwrap()
-        .contains("Preamp: -3 dB"));
+    assert!(
+        fs::read_to_string(&config_file)
+            .unwrap()
+            .contains("Preamp: -3 dB")
+    );
 
     let backup_text = fs::read_to_string(&backup).unwrap();
     assert!(backup_text.contains("user's original config"));

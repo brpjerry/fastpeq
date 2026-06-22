@@ -49,8 +49,8 @@ impl std::error::Error for DetectError {}
 /// Detect the Equalizer APO installation from the registry.
 #[cfg(windows)]
 pub fn detect() -> Result<ApoInstall, DetectError> {
-    use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
+    use winreg::enums::HKEY_LOCAL_MACHINE;
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let key = hklm

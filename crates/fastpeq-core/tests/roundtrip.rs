@@ -1,7 +1,7 @@
 //! Integration tests for the parse/serialize round-trip — the core correctness
 //! guarantee of fastpeq. These drive the crate through its public API only.
 
-use fastpeq_core::{parse, serialize, Channel, Config, Filter, FilterKind, Line};
+use fastpeq_core::{Channel, Config, Filter, FilterKind, Line, parse, serialize};
 
 fn filter(kind: FilterKind, freq: f64, gain: Option<f64>, q: Option<f64>, index: u32) -> Filter {
     Filter {

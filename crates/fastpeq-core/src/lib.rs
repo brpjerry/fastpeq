@@ -19,7 +19,7 @@ pub mod store;
 pub mod tone;
 
 pub use apo::env;
-pub use apo::{parse, serialize, Channel, Config, Filter, FilterKind, Line};
+pub use apo::{Channel, Config, Filter, FilterKind, Line, parse, serialize};
 pub use category::Category;
 pub use manager::{ImportReport, Manager};
 pub use store::PresetStore;
