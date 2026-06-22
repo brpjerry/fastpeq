@@ -61,11 +61,12 @@ jobs:
           Expand-Archive $zip -DestinationPath e2e/drivers -Force
           Get-ChildItem e2e/drivers
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Build debug app
-        run: cargo build -p fastpeq
+      # Must be a `tauri build` (not a raw `cargo build`): that embeds the
+      # frontend (dist/) into the binary. A plain debug `cargo build` loads the
+      # dev-server URL instead, which doesn't exist in CI. --no-bundle skips the
+      # installers; --debug keeps it in target/debug/ where the harness looks.
+      - name: Build app with embedded frontend
+        run: npx tauri build --debug --no-bundle
 
       - name: Run E2E smokes
         run: npm run e2e
