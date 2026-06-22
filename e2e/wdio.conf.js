@@ -60,7 +60,11 @@ export const config = {
   },
 
   beforeSession() {
+    // tauri-driver launches the app, which inherits this process env — so the
+    // app reliably picks up FASTPEQ_TEST_DATA_DIR here, regardless of whether
+    // the tauri-driver build honors `tauri:options.env`.
     tauriDriver = spawn(tauriDriverBin, ["--native-driver", nativeDriver], {
+      env: { ...process.env, FASTPEQ_TEST_DATA_DIR: DATA_DIR },
       stdio: [null, process.stdout, process.stderr],
     });
   },
