@@ -10,6 +10,10 @@ src-tauri/target/
 # Tauri regenerates these ACL schemas from the capabilities on every build.
 src-tauri/gen/schemas/
 
+# E2E (WebdriverIO): throwaway seeded data dir + the downloaded native driver.
+e2e/.e2e-data/
+e2e/drivers/
+
 # Claude Code local settings (per-machine)
 .claude/settings.local.json
 
