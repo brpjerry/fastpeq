@@ -69,6 +69,19 @@ export const config = {
     });
   },
 
+  // Diagnostic: on the first failure, dump what the app actually rendered so we
+  // can tell an empty library from an "APO not detected" state.
+  async afterTest(test, _context, { passed }) {
+    if (passed || global.__dumped) return;
+    global.__dumped = true;
+    try {
+      const src = await browser.getPageSource();
+      console.log(`\n===PAGE SOURCE (${test.title})===\n${src.slice(0, 3500)}\n===END PAGE SOURCE===\n`);
+    } catch (e) {
+      console.log(`page-source dump failed: ${e}`);
+    }
+  },
+
   afterSession() {
     tauriDriver?.kill();
   },
