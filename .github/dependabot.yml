@@ -1,0 +1,38 @@
+# Dependabot keeps the three dependency surfaces current: the npm frontend/tooling,
+# the Cargo workspace, and the GitHub Actions used by CI/release.
+#
+# Minor + patch updates are grouped into a single PR per ecosystem to keep noise
+# down; major updates (e.g. vite 6→8, vitest 3→4, typescript 5→6) come as their
+# own PRs so each can be reviewed and tested in isolation.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "cargo"
+    directory: "/" # workspace root; covers src-tauri + crates/*
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
