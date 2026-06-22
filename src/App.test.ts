@@ -2,6 +2,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
 import * as api from "./lib/api";
+import { ACCENTS } from "./lib/theme";
+import {
+  getFilterSet,
+  setFilterSet,
+  getSpecialtyIcons,
+  setSpecialtyIcons,
+  setBluetoothIcons,
+} from "./lib/prefs.svelte";
 import App from "./App.svelte";
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -40,6 +48,8 @@ vi.mock("./lib/api", () => {
 
 const FLAT_TONE = { bass: 0, mid: 0, treble: 0, invert: false, swap: false };
 const rows = (root: ParentNode) => [...root.querySelectorAll(".presets li:not(.empty)")];
+const rowFor = (root: ParentNode, name: string) =>
+  rows(root).find((li) => li.querySelector(".name")?.textContent?.trim() === name)!;
 
 beforeEach(() => {
   vi.mocked(api.apoStatus).mockResolvedValue({ installed: true, config_path: "C:/config.txt", error: null });
@@ -108,5 +118,77 @@ describe("App preset list", () => {
     expect(labels).toContain("Headphone");
     expect(labels).toContain("IEM");
     expect(labels).not.toContain("Speaker"); // no speaker presets exist
+  });
+});
+
+describe("App category assignment", () => {
+  it("cycles a preset's category on left-click", async () => {
+    withLibrary();
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await fireEvent.click(rowFor(container, "Sennheiser HD600").querySelector(".cat")!);
+    await waitFor(() => expect(api.setCategory).toHaveBeenCalled());
+    const calls = vi.mocked(api.setCategory).mock.calls;
+    expect(calls[calls.length - 1][0]).toBe("Sennheiser HD600");
+  });
+
+  it("assigns a category from the right-click menu", async () => {
+    withLibrary();
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await fireEvent.contextMenu(rowFor(container, "Sennheiser HD600").querySelector(".cat")!, {
+      clientX: 20,
+      clientY: 20,
+    });
+    const menu = container.querySelector(".cat-menu:not(.type-menu)");
+    expect(menu).toBeTruthy();
+
+    const iem = [...menu!.querySelectorAll(".cat-menu-item")].find(
+      (b) => b.textContent!.trim() === "IEM",
+    );
+    await fireEvent.click(iem!);
+    await waitFor(() => expect(api.setCategory).toHaveBeenCalledWith("Sennheiser HD600", "iem"));
+  });
+});
+
+describe("App settings", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setFilterSet("full");
+    setSpecialtyIcons(false);
+    setBluetoothIcons(false);
+  });
+
+  it("applies an accent color to the document", async () => {
+    const { container } = render(App);
+    await fireEvent.click(container.querySelector(".gear")!);
+    const swatches = [...container.querySelectorAll<HTMLButtonElement>(".swatch")];
+
+    await fireEvent.click(swatches[1]);
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe(ACCENTS[1].accent);
+    expect(swatches[1].classList.contains("sel")).toBe(true);
+  });
+
+  it("switches the editor's filter set", async () => {
+    const { container } = render(App);
+    await fireEvent.click(container.querySelector(".gear")!);
+    const basic = [...container.querySelectorAll(".seg-btn")].find((b) =>
+      b.textContent!.includes("Basic"),
+    )!;
+    await fireEvent.click(basic);
+    expect(getFilterSet()).toBe("basic");
+  });
+
+  it("toggles a specialty category group", async () => {
+    const { container } = render(App);
+    await fireEvent.click(container.querySelector(".gear")!);
+    const sw = container.querySelector<HTMLInputElement>(".cat-switches input[type='checkbox']")!;
+
+    const before = getSpecialtyIcons();
+    sw.checked = !before;
+    await fireEvent.change(sw);
+    expect(getSpecialtyIcons()).toBe(!before);
   });
 });

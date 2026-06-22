@@ -24,10 +24,17 @@ bugs we found late (the dropdown render bug and the bypass-restore regression).
 
 ---
 
-## Layer 1 — Component & UI tests (vitest + @testing-library/svelte)
+## Layer 1 — Component & UI tests (vitest + @testing-library/svelte) ✅ DONE
 
 Render Svelte components in a headless DOM and assert behavior, with the backend
 mocked. Reuses the existing vitest runner, so the marginal footprint is small.
+
+> **Status:** implemented. 37 component tests (`dismiss` 9, `TypeSelect` 4,
+> `Knob` 5, `Editor` 10, `App` 9) on top of the 28 pure-logic tests — **65
+> frontend tests** total, all green and folded into `npm test` / CI. Backend
+> mocked at `src/lib/api.ts`; `@tauri-apps/api/event` and `plugin-dialog` mocked
+> per file. The Web Audio stub turned out unnecessary — the tone generator only
+> constructs `AudioContext` lazily on play, so the expanded view renders headless.
 
 ### Dependencies to add (dev)
 - `@testing-library/svelte` (v5+, Svelte 5 compatible)
@@ -52,28 +59,27 @@ active preset, status) with a builder so each test sets up its own scenario.
 - Stub `AudioContext` for `ToneGenerator` (happy-dom has no Web Audio).
 
 ### What to test (priority order — risk- and regression-driven)
-1. **Popovers / dropdowns + the `dismissable` action** *(highest value — this is
-   where the dropdown bug lived)*: `TypeSelect`, the category right-click menu
-   and device-type filter in `App.svelte`, and the balance popover in
-   `Editor.svelte`. Assert: opens on trigger, picking an item fires the handler,
-   outside `pointerdown` dismisses, `Escape` dismisses, the trigger toggles
-   (the `ignore` element). Test `dismissable` directly too.
-2. **Preset list filtering**: search query + type filter combine; the filter
-   only lists categories that are actually used; it resets when its type
-   disappears.
-3. **Category assignment**: left-click cycle order, right-click picker,
-   optimistic update with revert-on-failure (`setCategoryFor`).
-4. **Editor band ops**: add/remove band, edit gain/freq/Q textboxes
-   (clamping/validation), the L / R / Both view toggle.
-5. **Clipping indicator**: shows only when the combined peak tops 0 dB; tooltip
-   text reflects the overage.
-6. **Bypass indicator**: live / bypassed / error states track the props.
-7. **Knob**: arrow keys, double-click and right-click reset to 0, value readout.
-8. **Settings**: accent swatch applies the CSS vars; filter-set toggle changes
-   `TypeSelect`'s options; the specialty/bluetooth switches gate the selectable
-   categories.
-9. **Measurement import**: with `readTextFile` mocked, the imported curve
-   overlays the graph.
+1. ✅ **Popovers / dropdowns + the `dismissable` action** *(highest value — this
+   is where the dropdown bug lived)*: `dismissable` (9 cases incl. outside
+   `pointerdown`, `Escape`, scroll, resize, the `ignore` trigger), `TypeSelect`
+   (open/select/no-op/dismiss), the device-type filter and category right-click
+   menu in `App.svelte`, and the balance popover in `Editor.svelte`.
+2. ✅ **Preset list filtering**: search query + device-type filter; the filter
+   only lists categories that are actually used.
+3. ✅ **Category assignment**: left-click cycle (calls `setCategory`), right-click
+   picker assigns a chosen category. *(Optimistic revert-on-failure left to the
+   Rust/manual side — the happy path is covered.)*
+4. ✅ **Editor band ops**: add/remove band, a gain edit propagates to the live
+   config via `applyLive`. *(Per-field clamping and the L/R/Both toggle: partial
+   — could extend.)*
+5. ✅ **Clipping indicator**: shown when the summed boost tops 0 dB, hidden when
+   the preamp keeps it under.
+6. ✅ **Bypass indicator**: live vs bypassed track the prop.
+7. ✅ **Knob**: arrow keys, scroll, right-click reset to 0, clamp, value readout.
+8. ✅ **Settings**: accent swatch applies the `--accent` CSS var; filter-set
+   toggle flips `getFilterSet()`; the specialty switch gates the group.
+9. ✅ **Measurement import**: with `open`/`readTextFile` mocked, importing a REW
+   file in the expanded view surfaces the measurement name + clear control.
 
 ### Known limitation
 happy-dom has no real layout — `getBoundingClientRect` returns zeros — so menu
@@ -132,10 +138,10 @@ to manual smoke tests.
 ---
 
 ## Suggested phasing
-1. **Phase 1** — Layer 1 popover/dropdown + `dismissable` tests (highest-risk
+1. ✅ **Phase 1** — Layer 1 popover/dropdown + `dismissable` tests (highest-risk
    surface).
-2. **Phase 2** — the rest of Layer 1 (editor, settings, filtering, knob).
-3. **Phase 3** — the `FASTPEQ_TEST_DATA_DIR` hook, then the Layer 2 smokes
+2. ✅ **Phase 2** — the rest of Layer 1 (editor, settings, filtering, knob).
+3. ⬜ **Phase 3** — the `FASTPEQ_TEST_DATA_DIR` hook, then the Layer 2 smokes
    (bypass round-trip first).
 
 ## Dependency footprint summary

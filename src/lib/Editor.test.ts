@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { tick } from "svelte";
 import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Config } from "./types";
 import * as api from "./api";
 import Editor from "./Editor.svelte";
@@ -85,5 +87,54 @@ describe("Editor", () => {
     const { container } = renderEditor(cfg(-10, [[1000, 6, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));
     expect(container.querySelector(".clip")).toBeNull();
+  });
+
+  it("pushes a gain edit to the live config", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    vi.mocked(api.applyLive).mockClear(); // load itself doesn't apply; isolate the edit
+
+    const gain = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
+    await fireEvent.input(gain, { target: { value: "5" } });
+
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const calls = vi.mocked(api.applyLive).mock.calls;
+    const applied = calls[calls.length - 1][0] as Config;
+    expect(applied.lines.some((l) => l.kind === "Filter" && l.value.gain === 5)).toBe(true);
+  });
+
+  it("opens the balance popover and dismisses it on an outside click", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    expect(container.querySelector(".bal-pop")).toBeNull();
+
+    await fireEvent.click(container.querySelector(".chan")!);
+    expect(container.querySelector(".bal-pop")).toBeTruthy();
+    // Centered by default, so the reset control is disabled.
+    expect(container.querySelector<HTMLButtonElement>(".bal-center")!.disabled).toBe(true);
+
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await tick();
+    expect(container.querySelector(".bal-pop")).toBeNull();
+  });
+
+  it("imports a REW measurement in the expanded view", async () => {
+    vi.mocked(openDialog).mockResolvedValue("C:/curves/harman.txt");
+    vi.mocked(api.readTextFile).mockResolvedValue("20 -3\n500 0\n1000 0.5\n10000 -2");
+
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+    const importBtn = await waitFor(() => {
+      const b = [...container.querySelectorAll("button")].find((x) =>
+        x.textContent!.includes("Import REW"),
+      );
+      if (!b) throw new Error("import button not rendered yet");
+      return b;
+    });
+
+    await fireEvent.click(importBtn);
+    await waitFor(() => expect(container.querySelector(".meas-name")?.textContent).toContain("harman.txt"));
   });
 });
