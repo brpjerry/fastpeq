@@ -22,13 +22,12 @@ pub fn from_peace(text: &str) -> Config {
         .get("General")
         .and_then(|g| g.get("PreAmp"))
         .and_then(|v| v.parse::<f64>().ok())
+        && preamp != 0.0
     {
-        if preamp != 0.0 {
-            lines.push(Line::Preamp {
-                gain: preamp,
-                channel: Channel::Both,
-            });
-        }
+        lines.push(Line::Preamp {
+            gain: preamp,
+            channel: Channel::Both,
+        });
     }
 
     // Grid "" is speaker 0 (all); "1".."8" are the per-channel grids.

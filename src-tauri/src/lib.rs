@@ -26,7 +26,7 @@ mod titlebar {
     const DWMWA_TEXT_COLOR: u32 = 36;
 
     #[link(name = "dwmapi")]
-    extern "system" {
+    unsafe extern "system" {
         fn DwmSetWindowAttribute(hwnd: isize, attr: u32, value: *const c_void, size: u32) -> i32;
     }
 
@@ -72,11 +72,11 @@ pub fn run() {
         // tray stays a usable fast-switching surface with no window open. The
         // tray's "Quit fastpeq" is the real exit.
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+            {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .setup(|app| {

@@ -47,10 +47,8 @@ impl PresetStore {
         for entry in entries {
             let path = entry?.path();
             let is_preset = path.extension().and_then(|s| s.to_str()) == Some(PRESET_EXT);
-            if is_preset {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    names.push(stem.to_string());
-                }
+            if is_preset && let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                names.push(stem.to_string());
             }
         }
         names.sort_by_key(|n| n.to_lowercase());

@@ -21,11 +21,11 @@ pub fn serialize(config: &Config) -> String {
             Line::Filter(filter) => Some(&filter.channel),
             Line::Raw(_) => None,
         };
-        if let Some(channel) = channel {
-            if *channel != emitted {
-                lines.push(channel_directive(channel));
-                emitted = channel.clone();
-            }
+        if let Some(channel) = channel
+            && *channel != emitted
+        {
+            lines.push(channel_directive(channel));
+            emitted = channel.clone();
         }
 
         match line {
