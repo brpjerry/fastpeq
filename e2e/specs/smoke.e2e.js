@@ -10,8 +10,10 @@ const BYPASS = 'button[title^="Drop the EQ filters"]';
 const rows = () => $$(".presets li:not(.empty)");
 
 async function presetNames() {
-  const els = await $$(".presets li:not(.empty) .name");
-  return Promise.all(els.map((el) => el.getText().then((t) => t.trim())));
+  // WDIO's $$ .map() is async and resolves the callbacks itself — don't wrap it
+  // in Promise.all (that would try to iterate a Promise).
+  const texts = await $$(".presets li:not(.empty) .name").map((el) => el.getText());
+  return texts.map((t) => t.trim());
 }
 
 async function rowFor(name) {
