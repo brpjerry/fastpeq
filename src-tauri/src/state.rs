@@ -53,11 +53,31 @@ enum Active {
     Unknown,
 }
 
+/// E2E test override. When `FASTPEQ_TEST_DATA_DIR` is set, the app runs fully
+/// self-contained: that directory is both the app data dir *and* the APO config
+/// dir, so a run reads/writes only its own throwaway `config.txt` and preset
+/// library and never touches the machine's real Equalizer APO install. Empty is
+/// treated as unset.
+fn test_data_dir() -> Option<PathBuf> {
+    std::env::var_os("FASTPEQ_TEST_DATA_DIR")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+}
+
 /// Build the inner state for a given presets directory, (re)detecting APO. Used
 /// at startup and whenever the presets directory changes.
 fn build_inner(data_dir: &Path, presets_dir: PathBuf) -> Inner {
     let backup_path = data_dir.join("config.backup.txt");
-    match env::detect() {
+    // In E2E mode, skip the registry and treat the test data dir as the APO
+    // config dir; otherwise detect the real install.
+    let detected = if test_data_dir().is_some() {
+        Ok(env::ApoInstall {
+            config_path: data_dir.to_path_buf(),
+        })
+    } else {
+        env::detect()
+    };
+    match detected {
         Ok(install) => {
             let store = PresetStore::new(&presets_dir);
             let _ = store.ensure_dir();
@@ -110,7 +130,14 @@ struct Inner {
 
 impl AppState {
     pub fn initialize(app: &AppHandle) -> tauri::Result<Self> {
-        let data_dir = app.path().app_data_dir()?;
+        let data_dir = match test_data_dir() {
+            // The test dir may not exist on first launch; the real one does.
+            Some(dir) => {
+                let _ = std::fs::create_dir_all(&dir);
+                dir
+            }
+            None => app.path().app_data_dir()?,
+        };
         let presets_dir = load_settings(&data_dir)
             .presets_dir
             .map(PathBuf::from)

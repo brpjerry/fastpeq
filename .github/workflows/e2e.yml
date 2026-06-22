@@ -1,0 +1,55 @@
+name: E2E
+
+# End-to-end smokes over the real built app via WebdriverIO + tauri-driver.
+# Manual-dispatch only for now: it's slower than the unit suite and drives a
+# real WebView2 window, so it's kept off push/PR until proven stable. Once it
+# has a track record, add a `schedule:` (nightly) trigger here.
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver
+
+      # msedgedriver must match the runner's WebView2/Edge runtime. The app uses
+      # the Evergreen WebView2 runtime, whose version tracks the installed Edge.
+      - name: Install matching msedgedriver
+        shell: pwsh
+        run: |
+          $ver = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Edge\BLBeacon').version
+          Write-Host "Edge / WebView2 version: $ver"
+          New-Item -ItemType Directory -Force e2e/drivers | Out-Null
+          Invoke-WebRequest "https://msedgedriver.microsoft.com/$ver/edgedriver_win64.zip" -OutFile "$env:RUNNER_TEMP/edgedriver.zip"
+          Expand-Archive "$env:RUNNER_TEMP/edgedriver.zip" -DestinationPath e2e/drivers -Force
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build debug app
+        run: cargo build -p fastpeq
+
+      - name: Run E2E smokes
+        run: npm run e2e

@@ -89,11 +89,18 @@ fire), and leave pixel/positioning to Layer 2 or manual checks.
 
 ---
 
-## Layer 2 — End-to-end smokes (WebdriverIO + tauri-driver)
+## Layer 2 — End-to-end smokes (WebdriverIO + tauri-driver) 🟡 IMPLEMENTED
 
 Drive the **real built app** over WebDriver — real UI, real Rust backend, real
 `config.txt` writes. Heavier and flakier, so keep it to a handful of critical
 paths, not broad coverage.
+
+> **Status:** harness + smokes written under [`e2e/`](../../e2e/) (`wdio.conf.js`,
+> `helpers/seed.js`, `specs/smoke.e2e.js`), wired as `npm run e2e` and a
+> manual-dispatch CI job (`.github/workflows/e2e.yml`). The determinism hook
+> below is implemented and shipped. Local execution needs `tauri-driver` +
+> a WebView2-matched `msedgedriver` (see `e2e/README.md`); CI is the intended
+> venue until it's proven stable.
 
 ### Tooling to add
 - `cargo install tauri-driver` (a dev/CI binary, not a `Cargo.toml` dep).
@@ -103,12 +110,12 @@ paths, not broad coverage.
   `@wdio/spec-reporter`, plus a `wdio.conf.ts` that boots `tauri-driver`.
 - A debug app build for WDIO to launch (`target/debug/fastpeq.exe`).
 
-### Determinism prerequisite (small core change)
+### Determinism prerequisite (small core change) ✅ DONE
 The app detects APO from the registry and writes the real `config.txt`. For
-hermetic E2E, add a test override (e.g. a `FASTPEQ_TEST_DATA_DIR` /
-`FASTPEQ_TEST_CONFIG` env var) so a run points the preset store **and** the APO
-config file at temp dirs, seeded with a couple of preset files. Without this,
-E2E only works on a machine with APO installed and mutates the real config.
+hermetic E2E it now honors **`FASTPEQ_TEST_DATA_DIR`**: when set, that directory
+becomes both the app-data dir and the (fake) APO config dir, so a run points the
+preset store **and** the live `config.txt` at a temp dir and never touches the
+real install (`src-tauri/src/state.rs`). The harness seeds it before launch.
 
 ### The smokes (~4–6)
 1. **Launch** → presets render (seeded list).
@@ -141,8 +148,9 @@ to manual smoke tests.
 1. ✅ **Phase 1** — Layer 1 popover/dropdown + `dismissable` tests (highest-risk
    surface).
 2. ✅ **Phase 2** — the rest of Layer 1 (editor, settings, filtering, knob).
-3. ⬜ **Phase 3** — the `FASTPEQ_TEST_DATA_DIR` hook, then the Layer 2 smokes
-   (bypass round-trip first).
+3. 🟡 **Phase 3** — the `FASTPEQ_TEST_DATA_DIR` hook ✅ and the Layer 2 smokes
+   ✅ (launch, apply, bypass round-trip, create, device filter) are written;
+   remaining: a green run on real CI to validate the harness end-to-end.
 
 ## Dependency footprint summary
 - Layer 1: ~4 small npm dev-deps, no binaries, reuses vitest.
