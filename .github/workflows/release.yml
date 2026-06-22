@@ -21,10 +21,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -57,7 +57,7 @@ jobs:
       # Always expose the installers as workflow artifacts, so manual runs (which
       # don't create a release) still produce something downloadable.
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fastpeq-windows-installers
           if-no-files-found: error
