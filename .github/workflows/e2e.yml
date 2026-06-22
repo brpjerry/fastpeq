@@ -34,16 +34,32 @@ jobs:
       - name: Install tauri-driver
         run: cargo install tauri-driver
 
-      # msedgedriver must match the runner's WebView2/Edge runtime. The app uses
-      # the Evergreen WebView2 runtime, whose version tracks the installed Edge.
+      # msedgedriver must match the runner's Edge / WebView2 runtime (same
+      # Evergreen Chromium). Read the version from the Edge binary itself — the
+      # registry BLBeacon key isn't always present — and fall back to the latest
+      # build for that major if the exact one isn't published.
       - name: Install matching msedgedriver
         shell: pwsh
         run: |
-          $ver = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Edge\BLBeacon').version
-          Write-Host "Edge / WebView2 version: $ver"
+          $edge = Get-ChildItem `
+            "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", `
+            "C:\Program Files\Microsoft\Edge\Application\msedge.exe" `
+            -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $edge) { throw "Microsoft Edge not found on the runner" }
+          $ver = $edge.VersionInfo.ProductVersion
+          Write-Host "Edge version: $ver"
           New-Item -ItemType Directory -Force e2e/drivers | Out-Null
-          Invoke-WebRequest "https://msedgedriver.microsoft.com/$ver/edgedriver_win64.zip" -OutFile "$env:RUNNER_TEMP/edgedriver.zip"
-          Expand-Archive "$env:RUNNER_TEMP/edgedriver.zip" -DestinationPath e2e/drivers -Force
+          $zip = "$env:RUNNER_TEMP/edgedriver.zip"
+          try {
+            Invoke-WebRequest "https://msedgedriver.microsoft.com/$ver/edgedriver_win64.zip" -OutFile $zip -ErrorAction Stop
+          } catch {
+            $major = $ver.Split('.')[0]
+            $latest = (Invoke-WebRequest "https://msedgedriver.microsoft.com/LATEST_RELEASE_${major}_WINDOWS" -ErrorAction Stop).Content -replace '[^\d\.]', ''
+            Write-Host "Exact $ver unavailable; using latest $major.x: $latest"
+            Invoke-WebRequest "https://msedgedriver.microsoft.com/$latest/edgedriver_win64.zip" -OutFile $zip -ErrorAction Stop
+          }
+          Expand-Archive $zip -DestinationPath e2e/drivers -Force
+          Get-ChildItem e2e/drivers
 
       - name: Build frontend
         run: npm run build
