@@ -1,12 +1,19 @@
 <script lang="ts">
   import { responseCurve, FREQS, inChannel, balanceTrim, type CurveFilter } from "./eq";
   import { freqToX, dbToY, dbGridLines, pathFrom, type PlotBox } from "./graph";
+  import { sampleAt, type MeasPoint } from "./measurement";
 
   let {
     filters,
     preamp = 0,
     balance = 0,
-  }: { filters: CurveFilter[]; preamp?: number; balance?: number } = $props();
+    measurement = [],
+  }: {
+    filters: CurveFilter[];
+    preamp?: number;
+    balance?: number;
+    measurement?: MeasPoint[];
+  } = $props();
 
   const W = 600;
   const H = 190;
@@ -26,19 +33,29 @@
   const stereo = $derived(
     filters.some((f) => f.channel.kind !== "both") || balance !== 0,
   );
+  // With a measurement, the traces become "measurement + filters" — the
+  // corrected response — and the bare measurement shows as a faint reference.
+  const measCurve = $derived(measurement.length ? sampleAt(measurement, FREQS) : null);
+  const withMeas = (resp: number[]): number[] =>
+    measCurve ? resp.map((v, i) => v + measCurve[i]) : resp;
+  const measPath = $derived(measCurve ? pathFor(measCurve.map((v) => v + preamp)) : "");
   const leftPath = $derived(
     pathFor(
-      responseCurve(
-        filters.filter((f) => inChannel(f.channel, "left")),
-        preamp + trim.left,
+      withMeas(
+        responseCurve(
+          filters.filter((f) => inChannel(f.channel, "left")),
+          preamp + trim.left,
+        ),
       ),
     ),
   );
   const rightPath = $derived(
     pathFor(
-      responseCurve(
-        filters.filter((f) => inChannel(f.channel, "right")),
-        preamp + trim.right,
+      withMeas(
+        responseCurve(
+          filters.filter((f) => inChannel(f.channel, "right")),
+          preamp + trim.right,
+        ),
       ),
     ),
   );
@@ -65,6 +82,9 @@
     <text x={xOf(l.f)} y={H - 6} class="lbl" text-anchor="middle">{l.t}</text>
   {/each}
 
+  {#if measCurve}
+    <path d={measPath} class="resp reference" />
+  {/if}
   {#if stereo}
     <path d={rightPath} class="resp right" />
     <path d={leftPath} class="resp left" />
@@ -105,6 +125,12 @@
   }
   .resp.right {
     stroke: #e0a458;
+  }
+  .resp.reference {
+    stroke: var(--muted);
+    stroke-width: 1.25;
+    stroke-dasharray: 4 3;
+    opacity: 0.6;
   }
   .lbl {
     fill: var(--muted);

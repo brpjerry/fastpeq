@@ -6,7 +6,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Config } from "./types";
 import * as api from "./api";
 import { addTarget, removeTarget } from "./targets.svelte";
-import { getTargetId } from "./presetView.svelte";
+import { getTargetId, getMeasurement, setMeasurement } from "./presetView.svelte";
 import Editor from "./Editor.svelte";
 
 // The Editor only touches these four IPC calls; an explicit mock is clearer than
@@ -133,11 +133,11 @@ describe("Editor", () => {
     expect(container.querySelector(".bal-pop")).toBeNull();
   });
 
-  it("imports a REW measurement in the expanded view", async () => {
+  it("imports a REW measurement and saves it for the preset", async () => {
     vi.mocked(openDialog).mockResolvedValue("C:/curves/harman.txt");
     vi.mocked(api.readTextFile).mockResolvedValue("20 -3\n500 0\n1000 0.5\n10000 -2");
 
-    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "ImportMeas" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
 
     await fireEvent.click(container.querySelector(".expand-btn")!);
@@ -151,6 +151,21 @@ describe("Editor", () => {
 
     await fireEvent.click(importBtn);
     await waitFor(() => expect(container.querySelector(".meas-name")?.textContent).toContain("harman.txt"));
+    expect(getMeasurement("ImportMeas")?.name).toBe("harman.txt"); // persisted per preset
+  });
+
+  it("auto-loads a saved measurement for the preset", async () => {
+    setMeasurement("AutoLoad", {
+      name: "saved.txt",
+      points: [{ freq: 100, spl: 2 }, { freq: 1000, spl: 0 }],
+    });
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "AutoLoad" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    // The small graph shows the measurement reference with no import action.
+    expect(container.querySelector(".graph-wrap .resp.reference")).toBeTruthy();
+    // The expanded meas-tools reflect the saved name.
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+    await waitFor(() => expect(container.querySelector(".meas-name")?.textContent).toContain("saved.txt"));
   });
 
   it("wraps the expanded graph in the fixed-aspect container", async () => {

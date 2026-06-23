@@ -12,7 +12,13 @@
   import { dismissable } from "./dismiss";
   import { getFilterShapes } from "./prefs.svelte";
   import { getTargets, getTarget } from "./targets.svelte";
-  import { getTargetId, setTargetId } from "./presetView.svelte";
+  import {
+    getTargetId,
+    setTargetId,
+    getMeasurement,
+    setMeasurement,
+    clearMeasurement as clearSavedMeasurement,
+  } from "./presetView.svelte";
 
   let {
     name,
@@ -48,8 +54,6 @@
   let expanded = $state(false); // full-window graph + handle editing
   let view = $state<"both" | "left" | "right">("both"); // which channel list is shown
   let hoveredId = $state<number | null>(null); // graph handle under the cursor → row highlight
-  let measurement = $state<MeasPoint[]>([]); // imported REW reference curve (expanded view)
-  let measName = $state("");
   const BAL_MAX = 30; // balance range, dB of cut on the quieter side at full
   let rawLines = $state<string[]>([]); // preserved verbatim (comments, Device:, etc.)
   let err = $state("");
@@ -74,6 +78,12 @@
   // The per-preset target curve (Flat by default), shown on the graph as a
   // reference. Reactive to the selected target and the current preset.
   const targetPoints = $derived(getTarget(getTargetId(name)).points);
+
+  // Imported FR measurement, saved per preset and auto-loaded whenever this
+  // preset is shown again. The traces become "measurement + filters".
+  const savedMeas = $derived(getMeasurement(name));
+  const measurement = $derived<MeasPoint[]>(savedMeas?.points ?? []);
+  const measName = $derived(savedMeas?.name ?? "");
 
   // Live-apply throttle: at most one write to config.txt per THROTTLE ms while
   // dragging, with a guaranteed trailing write so the final value always lands.
@@ -314,16 +324,14 @@
         err = "No measurement data found in that file.";
         return;
       }
-      measurement = points;
-      measName = picked.split(/[\\/]/).pop() ?? "measurement";
+      setMeasurement(name, { name: picked.split(/[\\/]/).pop() ?? "measurement", points });
       err = "";
     } catch (e) {
       err = String(e);
     }
   }
   function clearMeasurement() {
-    measurement = [];
-    measName = "";
+    clearSavedMeasurement(name);
   }
 
   onDestroy(() => {
@@ -510,7 +518,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={bands} {preamp} {balance} />
+      <ResponseCurve filters={bands} {preamp} {balance} {measurement} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
