@@ -225,10 +225,9 @@ describe("Editor", () => {
     await fireEvent.click(container.querySelector(".expand-btn")!);
 
     const toggle = await waitFor(() => {
-      const label = [...container.querySelectorAll(".switch")].find((l) =>
-        l.textContent!.includes("Measurement"),
+      const t = container.querySelector<HTMLInputElement>(
+        ".meas-group .switch input[type='checkbox']",
       );
-      const t = label?.querySelector<HTMLInputElement>("input[type='checkbox']");
       if (!t) throw new Error("measurement-reference toggle not rendered");
       return t;
     });

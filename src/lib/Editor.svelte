@@ -599,31 +599,34 @@
             </label>
             <Switch
               compact
-              label="Compensate"
-              title="Show the response as deviation from the target (flat = on target)"
-              checked={getCompensate(name)}
-              onChange={(v) => setCompensate(name, v)}
-            />
-            <Switch
-              compact
-              label="Measurement"
-              title="Show the raw measurement dashed line (the FR trace keeps the measurement either way)"
-              checked={getShowMeasRef(name)}
-              onChange={(v) => setShowMeasRef(name, v)}
-            />
-            <Switch
-              compact
               label="Target"
               title="Show the target dashed line"
               checked={getShowTargetRef(name)}
               onChange={(v) => setShowTargetRef(name, v)}
             />
-            {#if measurement.length}
-              <span class="meas-name" title={measName}>{measName}</span>
-              <button onclick={clearMeasurement}>Clear measurement</button>
-            {:else}
-              <button onclick={importMeasurement}>Import REW measurement…</button>
-            {/if}
+            <Switch
+              compact
+              label="Compensate"
+              title="Show the response as deviation from the target (flat = on target)"
+              checked={getCompensate(name)}
+              onChange={(v) => setCompensate(name, v)}
+            />
+            <!-- Measurement switch (no label) + label + selector, kept on one line. -->
+            <div class="meas-group">
+              <Switch
+                compact
+                title="Show the raw measurement dashed line (the FR trace keeps the measurement either way)"
+                checked={getShowMeasRef(name)}
+                onChange={(v) => setShowMeasRef(name, v)}
+              />
+              <span class="meas-label">Measurement</span>
+              {#if measurement.length}
+                <span class="meas-name" title={measName}>{measName}</span>
+                <button onclick={clearMeasurement}>Clear</button>
+              {:else}
+                <button onclick={importMeasurement}>Import REW…</button>
+              {/if}
+            </div>
           </div>
         </div>
         <div class="graph-fit">
@@ -770,19 +773,33 @@
     color: var(--muted);
     font-size: 12px;
   }
-  /* Hint on its own line above the controls so the controls (which wrap) can
-     never squish the instruction text. */
+  /* Hint centered on its own line above the controls so the controls (which
+     wrap) can never squish the instruction text. */
   .graph-tools {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: 6px;
   }
   .meas-tools {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 12px;
     flex-wrap: wrap;
+  }
+  /* The measurement switch, label and selector stay together as one unit when
+     the controls wrap. */
+  .meas-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+  .meas-label {
+    font-size: 12px;
+    color: var(--muted);
   }
   .meas-tools button {
     padding: 3px 10px;
