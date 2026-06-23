@@ -197,24 +197,44 @@
     if (!rect) return null;
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
+  // Drag via window-level listeners rather than setPointerCapture: a captured
+  // pointer renders the cursor at 1x (pixelated) on high-DPI WebView. While
+  // dragging, the grab cursor is driven from <body> (an HTML element, so it
+  // rasterizes at the native device scale).
   function onDown(e: PointerEvent, b: Band) {
     e.preventDefault();
     dragId = b.id;
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    const p = ptToData(e);
+    if (p) cursorX = p.x;
   }
-  function onMove(e: PointerEvent, b: Band) {
-    if (dragId !== b.id) return;
+  function onDragMove(e: PointerEvent) {
+    const b = dragId === null ? undefined : bands.find((x) => x.id === dragId);
+    if (!b) return;
     const p = ptToData(e);
     if (!p) return;
-    cursorX = p.x; // keep the crosshair with the drag (capture hides svg moves)
+    cursorX = p.x;
     b.freq = Math.round(clampFreq(freqAt(p.x)));
     if (kindHasGain(b.kind)) b.gain = round1(clampGain(gainAt(p.y)));
     onChange();
   }
-  function onUp(e: PointerEvent, b: Band) {
-    if (dragId === b.id) dragId = null;
-    (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+  function onDragEnd() {
+    dragId = null;
   }
+  // Attach the move/up listeners and the grab cursor only while a drag is live;
+  // the cleanup runs on drag end (dragId → null) and on unmount.
+  $effect(() => {
+    if (dragId === null) return;
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", onDragEnd);
+    window.addEventListener("pointercancel", onDragEnd);
+    document.body.style.cursor = "grabbing";
+    return () => {
+      window.removeEventListener("pointermove", onDragMove);
+      window.removeEventListener("pointerup", onDragEnd);
+      window.removeEventListener("pointercancel", onDragEnd);
+      document.body.style.cursor = "";
+    };
+  });
   function onWheel(e: WheelEvent, b: Band) {
     if (!kindHasQ(b.kind)) return;
     e.preventDefault();
@@ -305,8 +325,6 @@
           class:dragging={dragId === band.id}
           class:active={hoveredId === band.id}
           onpointerdown={(e) => onDown(e, band)}
-          onpointermove={(e) => onMove(e, band)}
-          onpointerup={(e) => onUp(e, band)}
           onpointerenter={() => onHover?.(band.id)}
           onpointerleave={() => onHover?.(null)}
           onwheel={(e) => onWheel(e, band)}
