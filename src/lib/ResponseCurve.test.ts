@@ -26,7 +26,7 @@ describe("ResponseCurve", () => {
     expect(container.querySelector(".resp.reference")).toBeTruthy();
   });
 
-  it("hides the measurement reference when showRefs is off", () => {
+  it("hides the measurement reference when showMeas is off", () => {
     const { container } = render(ResponseCurve, {
       props: {
         filters: [],
@@ -35,7 +35,7 @@ describe("ResponseCurve", () => {
           { freq: 100, spl: 3 },
           { freq: 1000, spl: 0 },
         ],
-        showRefs: false,
+        showMeas: false,
       },
     });
     expect(container.querySelector(".resp.reference")).toBeNull();

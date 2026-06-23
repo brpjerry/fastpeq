@@ -7,6 +7,7 @@
   import CurveEditor from "./CurveEditor.svelte";
   import ToneGenerator from "./ToneGenerator.svelte";
   import TypeSelect from "./TypeSelect.svelte";
+  import Switch from "./Switch.svelte";
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, balanceFromTrim, toneFilters, peakGainDb, type CurveFilter } from "./eq";
   import { parseRew, normalize, type MeasPoint } from "./measurement";
   import { dismissable } from "./dismiss";
@@ -17,8 +18,10 @@
     setTargetId,
     getCompensate,
     setCompensate,
-    getShowRefs,
-    setShowRefs,
+    getShowMeasRef,
+    setShowMeasRef,
+    getShowTargetRef,
+    setShowTargetRef,
     getMeasurement,
     setMeasurement,
     clearMeasurement as clearSavedMeasurement,
@@ -91,8 +94,9 @@
 
   // Whether to show the response compensated to the selected target (per preset).
   const compensate = $derived(getCompensate(name));
-  // Whether the target/measurement dashed reference lines are drawn (per preset).
-  const showRefs = $derived(getShowRefs(name));
+  // Independent per-preset visibility of the dashed reference lines.
+  const showMeas = $derived(getShowMeasRef(name));
+  const showTarget = $derived(getShowTargetRef(name));
 
   // Live-apply throttle: at most one write to config.txt per THROTTLE ms while
   // dragging, with a guaranteed trailing write so the final value always lands.
@@ -527,7 +531,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} {showRefs} />
+      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -593,22 +597,27 @@
                 {/each}
               </select>
             </label>
-            <label class="compensate" title="Show the response as deviation from the target (flat = on target)">
-              <input
-                type="checkbox"
-                checked={getCompensate(name)}
-                onchange={(e) => setCompensate(name, e.currentTarget.checked)}
-              />
-              Compensate
-            </label>
-            <label class="compensate" title="Show the target and measurement dashed reference lines">
-              <input
-                type="checkbox"
-                checked={getShowRefs(name)}
-                onchange={(e) => setShowRefs(name, e.currentTarget.checked)}
-              />
-              References
-            </label>
+            <Switch
+              compact
+              label="Compensate"
+              title="Show the response as deviation from the target (flat = on target)"
+              checked={getCompensate(name)}
+              onChange={(v) => setCompensate(name, v)}
+            />
+            <Switch
+              compact
+              label="Measurement"
+              title="Show the raw measurement dashed line (the FR trace keeps the measurement either way)"
+              checked={getShowMeasRef(name)}
+              onChange={(v) => setShowMeasRef(name, v)}
+            />
+            <Switch
+              compact
+              label="Target"
+              title="Show the target dashed line"
+              checked={getShowTargetRef(name)}
+              onChange={(v) => setShowTargetRef(name, v)}
+            />
             {#if measurement.length}
               <span class="meas-name" title={measName}>{measName}</span>
               <button onclick={clearMeasurement}>Clear measurement</button>
@@ -626,7 +635,8 @@
             {measurement}
             target={targetPoints}
             {compensate}
-            {showRefs}
+            {showMeas}
+            {showTarget}
             {hoveredId}
             filterShapes={getFilterShapes()}
             onChange={schedule}
@@ -760,17 +770,19 @@
     color: var(--muted);
     font-size: 12px;
   }
+  /* Hint on its own line above the controls so the controls (which wrap) can
+     never squish the instruction text. */
   .graph-tools {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
   }
   .meas-tools {
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex: none;
+    gap: 12px;
+    flex-wrap: wrap;
   }
   .meas-tools button {
     padding: 3px 10px;
@@ -794,13 +806,6 @@
   .target-select select {
     padding: 2px 4px;
     font-size: 12px;
-  }
-  .compensate {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    color: var(--muted);
   }
 
   .preamp {

@@ -5,8 +5,10 @@ import {
   setTargetId,
   getCompensate,
   setCompensate,
-  getShowRefs,
-  setShowRefs,
+  getShowMeasRef,
+  setShowMeasRef,
+  getShowTargetRef,
+  setShowTargetRef,
   getMeasurement,
   setMeasurement,
   clearMeasurement,
@@ -29,11 +31,15 @@ describe("presetView store", () => {
     expect(getCompensate("D")).toBe(false);
   });
 
-  it("defaults references to on and toggles per preset", () => {
-    expect(getShowRefs("F")).toBe(true);
-    setShowRefs("F", false);
-    expect(getShowRefs("F")).toBe(false);
-    expect(getShowRefs("G")).toBe(true);
+  it("defaults both reference toggles on and tracks them independently per preset", () => {
+    expect(getShowMeasRef("F")).toBe(true);
+    expect(getShowTargetRef("F")).toBe(true);
+    setShowMeasRef("F", false);
+    expect(getShowMeasRef("F")).toBe(false);
+    expect(getShowTargetRef("F")).toBe(true); // independent of the measurement ref
+    setShowTargetRef("F", false);
+    expect(getShowTargetRef("F")).toBe(false);
+    expect(getShowMeasRef("G")).toBe(true); // independent per preset
   });
 
   it("stores and clears a per-preset measurement", () => {

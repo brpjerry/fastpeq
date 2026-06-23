@@ -44,7 +44,8 @@
     measurement = [],
     target = [],
     compensate = false,
-    showRefs = true,
+    showMeas = true,
+    showTarget = true,
     hoveredId = null,
     filterShapes = false,
     onChange,
@@ -57,7 +58,8 @@
     measurement?: MeasPoint[];
     target?: MeasPoint[];
     compensate?: boolean;
-    showRefs?: boolean;
+    showMeas?: boolean;
+    showTarget?: boolean;
     hoveredId?: number | null;
     filterShapes?: boolean;
     onChange: () => void;
@@ -279,10 +281,10 @@
         </g>
       {/if}
 
-      {#if targetCurve && !compensate && showRefs}
+      {#if targetCurve && !compensate && showTarget}
         <path d={targetPath} class="resp target" />
       {/if}
-      {#if measCurve && showRefs}
+      {#if measCurve && showMeas}
         <path d={measPath} class="resp reference" />
       {/if}
       {#if stereo}

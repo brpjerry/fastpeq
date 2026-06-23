@@ -10,7 +10,7 @@
     measurement = [],
     target = [],
     compensate = false,
-    showRefs = true,
+    showMeas = true,
   }: {
     filters: CurveFilter[];
     preamp?: number;
@@ -18,7 +18,7 @@
     measurement?: MeasPoint[];
     target?: MeasPoint[];
     compensate?: boolean;
-    showRefs?: boolean;
+    showMeas?: boolean;
   } = $props();
 
   const W = 600;
@@ -98,7 +98,7 @@
     <text x={xOf(l.f)} y={H - 6} class="lbl" text-anchor="middle">{l.t}</text>
   {/each}
 
-  {#if measCurve && showRefs}
+  {#if measCurve && showMeas}
     <path d={measPath} class="resp reference" />
   {/if}
   {#if stereo}

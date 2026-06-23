@@ -15,7 +15,8 @@ export interface PresetMeasurement {
 interface PresetView {
   targetId?: string;
   compensate?: boolean;
-  showRefs?: boolean;
+  showMeasRef?: boolean;
+  showTargetRef?: boolean;
   measurement?: PresetMeasurement;
 }
 
@@ -42,13 +43,20 @@ export function setCompensate(name: string, on: boolean): void {
   patch(name, { compensate: on });
 }
 
-// Whether the target + measurement dashed reference lines are drawn (the FR
-// trace always keeps the measurement data). Shown by default.
-export function getShowRefs(name: string): boolean {
-  return store[name]?.showRefs ?? true;
+// Whether the raw-measurement and target dashed reference lines are drawn
+// (independently). The FR trace always keeps the measurement data regardless.
+// Both shown by default.
+export function getShowMeasRef(name: string): boolean {
+  return store[name]?.showMeasRef ?? true;
 }
-export function setShowRefs(name: string, on: boolean): void {
-  patch(name, { showRefs: on });
+export function setShowMeasRef(name: string, on: boolean): void {
+  patch(name, { showMeasRef: on });
+}
+export function getShowTargetRef(name: string): boolean {
+  return store[name]?.showTargetRef ?? true;
+}
+export function setShowTargetRef(name: string, on: boolean): void {
+  patch(name, { showTargetRef: on });
 }
 
 export function getMeasurement(name: string): PresetMeasurement | null {

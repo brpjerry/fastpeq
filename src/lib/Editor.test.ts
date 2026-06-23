@@ -11,7 +11,7 @@ import {
   getMeasurement,
   setMeasurement,
   getCompensate,
-  getShowRefs,
+  getShowMeasRef,
 } from "./presetView.svelte";
 import Editor from "./Editor.svelte";
 
@@ -206,7 +206,10 @@ describe("Editor", () => {
     await fireEvent.click(container.querySelector(".expand-btn")!);
 
     const toggle = await waitFor(() => {
-      const t = container.querySelector<HTMLInputElement>(".compensate input[type='checkbox']");
+      const label = [...container.querySelectorAll(".switch")].find((l) =>
+        l.textContent!.includes("Compensate"),
+      );
+      const t = label?.querySelector<HTMLInputElement>("input[type='checkbox']");
       if (!t) throw new Error("compensate toggle not rendered");
       return t;
     });
@@ -216,22 +219,22 @@ describe("Editor", () => {
     expect(getCompensate("CompPreset")).toBe(true);
   });
 
-  it("toggles the reference lines per preset", async () => {
+  it("toggles the measurement reference per preset", async () => {
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "RefPreset" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
     await fireEvent.click(container.querySelector(".expand-btn")!);
 
     const toggle = await waitFor(() => {
-      const label = [...container.querySelectorAll(".compensate")].find((l) =>
-        l.textContent!.includes("References"),
+      const label = [...container.querySelectorAll(".switch")].find((l) =>
+        l.textContent!.includes("Measurement"),
       );
       const t = label?.querySelector<HTMLInputElement>("input[type='checkbox']");
-      if (!t) throw new Error("references toggle not rendered");
+      if (!t) throw new Error("measurement-reference toggle not rendered");
       return t;
     });
-    expect(getShowRefs("RefPreset")).toBe(true);
+    expect(getShowMeasRef("RefPreset")).toBe(true);
     toggle.checked = false;
     await fireEvent.change(toggle);
-    expect(getShowRefs("RefPreset")).toBe(false);
+    expect(getShowMeasRef("RefPreset")).toBe(false);
   });
 });
