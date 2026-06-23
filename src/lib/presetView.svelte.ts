@@ -29,6 +29,22 @@ function patch(name: string, p: Partial<PresetView>): void {
   saveJson(KEY, store);
 }
 
+// Keep the per-preset view state in step with rename/delete of the preset
+// itself (it's keyed by name), so settings follow a rename and don't orphan on
+// delete.
+export function renamePresetView(from: string, to: string): void {
+  if (from === to || !store[from]) return;
+  const { [from]: entry, ...rest } = store;
+  store = { ...rest, [to]: entry };
+  saveJson(KEY, store);
+}
+export function clearPresetView(name: string): void {
+  if (!(name in store)) return;
+  const { [name]: _removed, ...rest } = store;
+  store = rest;
+  saveJson(KEY, store);
+}
+
 export function getTargetId(name: string): string {
   return store[name]?.targetId ?? "flat";
 }

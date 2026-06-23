@@ -10,6 +10,7 @@
   import { ACCENTS, currentAccentId, applyAccent } from "./lib/theme";
   import { starterConfig, BAND_COUNTS, defaultBandCount, setDefaultBandCount } from "./lib/starter";
   import { getTargets, addTarget, removeTarget, FLAT_TARGET } from "./lib/targets.svelte";
+  import { renamePresetView, clearPresetView } from "./lib/presetView.svelte";
   import { parseRew, normalize } from "./lib/measurement";
   import {
     getFilterSet,
@@ -369,6 +370,7 @@
   const remove = (name: string) =>
     guard(async () => {
       await api.deletePreset(name);
+      clearPresetView(name); // drop its curve-editor view state too
       if (selected === name) selected = null;
       flash(`Deleted “${name}”`);
       await reload();
@@ -498,6 +500,7 @@
     }
     guard(async () => {
       await api.renamePreset(from, to);
+      renamePresetView(from, to); // carry its curve-editor view state across
       if (selected === from) selected = to;
       await reload();
       flash(`Renamed to “${to}”`);
