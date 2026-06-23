@@ -589,21 +589,22 @@
         <div class="graph-tools">
           <p class="graph-hint">Drag a handle to set frequency &amp; gain · scroll over a handle to change Q</p>
           <div class="meas-tools">
-            <label class="target-select" title="Reference target curve (add targets in Settings)">
-              Target
-              <select value={getTargetId(name)} onchange={(e) => setTargetId(name, e.currentTarget.value)}>
-                {#each getTargets() as t (t.id)}
-                  <option value={t.id}>{t.name}</option>
-                {/each}
-              </select>
-            </label>
-            <Switch
-              compact
-              label="Target"
-              title="Show the target dashed line"
-              checked={getShowTargetRef(name)}
-              onChange={(v) => setShowTargetRef(name, v)}
-            />
+            <div class="target-group">
+              <Switch
+                compact
+                title="Show the target dashed line"
+                checked={getShowTargetRef(name)}
+                onChange={(v) => setShowTargetRef(name, v)}
+              />
+              <label class="target-select" title="Reference target curve (add targets in Settings)">
+                Target
+                <select value={getTargetId(name)} onchange={(e) => setTargetId(name, e.currentTarget.value)}>
+                  {#each getTargets() as t (t.id)}
+                    <option value={t.id}>{t.name}</option>
+                  {/each}
+                </select>
+              </label>
+            </div>
             <Switch
               compact
               label="Compensate"
@@ -788,8 +789,9 @@
     gap: 12px;
     flex-wrap: wrap;
   }
-  /* The measurement switch, label and selector stay together as one unit when
-     the controls wrap. */
+  /* A bare toggle stays beside its labeled control as one unit when the row
+     wraps. */
+  .target-group,
   .meas-group {
     display: inline-flex;
     align-items: center;
