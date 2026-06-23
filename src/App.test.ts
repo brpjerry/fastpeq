@@ -226,6 +226,24 @@ describe("App scroll-to-active", () => {
     await waitFor(() => expect(scrollSpy).toHaveBeenCalledWith({ block: "center" }));
   });
 
+  it("centers the opened preset after pressing Enter in the search box", async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    vi.mocked(api.listPresets).mockResolvedValue(["64 Audio U12t", "Sennheiser HD600"]);
+
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    scrollSpy.mockClear(); // ignore any on-open scroll
+
+    const search = container.querySelector(".search")!;
+    await fireEvent.input(search, { target: { value: "Senn" } });
+    await fireEvent.keyDown(search, { key: "Enter" });
+
+    // Enter opens the top match, clears the query, and scrolls it into view.
+    await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD600"));
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledWith({ block: "center" }));
+  });
+
   it("re-centers the active preset when returning from settings", async () => {
     const scrollSpy = vi.fn();
     Element.prototype.scrollIntoView = scrollSpy;

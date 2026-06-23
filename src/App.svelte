@@ -633,9 +633,12 @@
           type="search"
           placeholder="Search presets…"
           bind:value={query}
-          onkeydown={(e) => {
+          onkeydown={async (e) => {
             if (e.key === "Enter" && filteredPresets.length) {
-              open(filteredPresets[0]);
+              // Await the open so `selected` is set before clearing the query —
+              // otherwise the scroll effect fires while it still points at the
+              // old preset and the list never jumps to the new one.
+              await open(filteredPresets[0]);
               query = "";
             }
           }}
