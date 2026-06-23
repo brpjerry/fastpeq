@@ -78,7 +78,6 @@
   let svgEl = $state<SVGSVGElement | null>(null);
   let dragId = $state<number | null>(null);
   let cursorX = $state<number | null>(null); // pointer x for the freq crosshair
-  let cursorY = $state<number | null>(null); // pointer y, for the dB-gap label
 
   const dbMax = 30; // vertical range; matches the gain slider's ±30
   const padL = 42;
@@ -213,7 +212,6 @@
     const p = ptToData(e);
     if (!p) return;
     cursorX = p.x;
-    cursorY = p.y;
     b.freq = Math.round(clampFreq(freqAt(p.x)));
     if (kindHasGain(b.kind)) b.gain = round1(clampGain(gainAt(p.y)));
     onChange();
@@ -243,11 +241,9 @@
   function onCursorMove(e: PointerEvent) {
     const p = ptToData(e);
     cursorX = p ? p.x : null;
-    cursorY = p ? p.y : null;
   }
   function onCursorLeave() {
     cursorX = null;
-    cursorY = null;
   }
 
   const fmtFreq = (f: number) =>
@@ -274,8 +270,9 @@
     const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
     const fr = responseCurve(sideFilters("left"), preamp + trim.left, [f])[0] + measVal;
     const gap = Math.abs(fr - tgtVal).toFixed(1) + " dB";
-    // Place the gap label at the pointer (clamped into the plot), just above it.
-    const ly = Math.max(padT + 12, Math.min(h - padB - 4, (cursorY ?? padT) - 8));
+    // Sit the label where the crosshair meets the target line (the Flat target
+    // is the centerline), just above the intersection, clamped into the plot.
+    const ly = Math.max(padT + 12, Math.min(h - padB - 4, yOf(tgtVal) - 5));
     return { x: cursorX, text, lx, width, gap, ly };
   });
 </script>
