@@ -78,6 +78,11 @@
   .switch input:disabled + .track {
     opacity: 0.5;
   }
+  .switch:has(input:disabled) {
+    cursor: not-allowed;
+    color: var(--muted);
+    opacity: 0.7;
+  }
 
   /* Compact: smaller track/thumb for tight rows like the curve-editor tools. */
   .switch.compact {

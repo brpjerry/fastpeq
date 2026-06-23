@@ -11,6 +11,7 @@ import {
   getMeasurement,
   setMeasurement,
   getCompensate,
+  setCompensate,
   getShowMeasRef,
 } from "./presetView.svelte";
 import Editor from "./Editor.svelte";
@@ -220,6 +221,7 @@ describe("Editor", () => {
   });
 
   it("toggles the measurement reference per preset", async () => {
+    setMeasurement("RefPreset", { name: "m.txt", points: [{ freq: 100, spl: 1 }, { freq: 1000, spl: 0 }] });
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "RefPreset" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
     await fireEvent.click(container.querySelector(".expand-btn")!);
@@ -231,9 +233,55 @@ describe("Editor", () => {
       if (!t) throw new Error("measurement-reference toggle not rendered");
       return t;
     });
+    expect(toggle.disabled).toBe(false); // enabled because a measurement exists
     expect(getShowMeasRef("RefPreset")).toBe(true);
     toggle.checked = false;
     await fireEvent.change(toggle);
     expect(getShowMeasRef("RefPreset")).toBe(false);
+  });
+
+  it("forces the target switch on and disabled while compensating", async () => {
+    setCompensate("CompTgt", true);
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "CompTgt" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+
+    const sw = await waitFor(() => {
+      const t = container.querySelector<HTMLInputElement>(
+        ".target-group .switch input[type='checkbox']",
+      );
+      if (!t) throw new Error("target switch not rendered");
+      return t;
+    });
+    expect(sw.disabled).toBe(true);
+    expect(sw.checked).toBe(true);
+  });
+
+  it("disables the measurement switch until a measurement is imported", async () => {
+    vi.mocked(openDialog).mockResolvedValue("C:/m.txt");
+    vi.mocked(api.readTextFile).mockResolvedValue("100 1\n1000 0\n10000 -1");
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "AutoEnable" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+
+    const sw = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
+    expect(sw.disabled).toBe(true);
+    expect(sw.checked).toBe(false);
+
+    const importBtn = await waitFor(() => {
+      const b = [...container.querySelectorAll("button")].find((x) =>
+        x.textContent!.includes("Import REW"),
+      );
+      if (!b) throw new Error("import button not rendered");
+      return b;
+    });
+    await fireEvent.click(importBtn);
+
+    await waitFor(() => {
+      const t = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
+      expect(t.disabled).toBe(false);
+      expect(t.checked).toBe(true);
+    });
+    expect(getShowMeasRef("AutoEnable")).toBe(true);
   });
 });

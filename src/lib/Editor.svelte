@@ -338,6 +338,7 @@
         return;
       }
       setMeasurement(name, { name: picked.split(/[\\/]/).pop() ?? "measurement", points });
+      setShowMeasRef(name, true); // a fresh import is shown by default
       err = "";
     } catch (e) {
       err = String(e);
@@ -592,8 +593,11 @@
             <div class="target-group">
               <Switch
                 compact
-                title="Show the target dashed line"
-                checked={getShowTargetRef(name)}
+                disabled={compensate}
+                title={compensate
+                  ? "Compensating — the target is the reference (flat line)"
+                  : "Show the target dashed line"}
+                checked={compensate || getShowTargetRef(name)}
                 onChange={(v) => setShowTargetRef(name, v)}
               />
               <label class="target-select" title="Reference target curve (add targets in Settings)">
@@ -616,8 +620,11 @@
             <div class="meas-group">
               <Switch
                 compact
-                title="Show the raw measurement dashed line (the FR trace keeps the measurement either way)"
-                checked={getShowMeasRef(name)}
+                disabled={measurement.length === 0}
+                title={measurement.length
+                  ? "Show the raw measurement dashed line (the FR trace keeps the measurement either way)"
+                  : "Import a measurement to enable"}
+                checked={measurement.length > 0 && getShowMeasRef(name)}
                 onChange={(v) => setShowMeasRef(name, v)}
               />
               {#if measurement.length}
