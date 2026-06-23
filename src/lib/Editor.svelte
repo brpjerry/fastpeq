@@ -92,11 +92,13 @@
   const measurement = $derived<MeasPoint[]>(savedMeas?.points ?? []);
   const measName = $derived(savedMeas?.name ?? "");
 
-  // Whether to show the response compensated to the selected target (per preset).
-  const compensate = $derived(getCompensate(name));
   // Independent per-preset visibility of the dashed reference lines.
   const showMeas = $derived(getShowMeasRef(name));
   const showTarget = $derived(getShowTargetRef(name));
+  // Effective compensation: only meaningful with the target shown and a
+  // non-flat target selected (otherwise there's nothing to compensate against).
+  const canCompensate = $derived(showTarget && targetPoints.length > 0);
+  const compensate = $derived(getCompensate(name) && canCompensate);
 
   // Live-apply throttle: at most one write to config.txt per THROTTLE ms while
   // dragging, with a guaranteed trailing write so the final value always lands.
@@ -612,8 +614,11 @@
             <Switch
               compact
               label="Compensate"
-              title="Show the response as deviation from the target (flat = on target)"
-              checked={getCompensate(name)}
+              disabled={!canCompensate}
+              title={canCompensate
+                ? "Show the response as deviation from the target (flat = on target)"
+                : "Select a non-flat target and show it to compensate"}
+              checked={compensate}
               onChange={(v) => setCompensate(name, v)}
             />
             <!-- Measurement switch (no label) + label + selector, kept on one line. -->

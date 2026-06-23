@@ -8,6 +8,7 @@ import * as api from "./api";
 import { addTarget, removeTarget } from "./targets.svelte";
 import {
   getTargetId,
+  setTargetId,
   getMeasurement,
   setMeasurement,
   getCompensate,
@@ -201,7 +202,9 @@ describe("Editor", () => {
     removeTarget(id);
   });
 
-  it("toggles compensate per preset", async () => {
+  it("toggles compensate per preset (with a non-flat target)", async () => {
+    const id = addTarget("Tc", [{ freq: 100, spl: 1 }, { freq: 1000, spl: 0 }]);
+    setTargetId("CompPreset", id);
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "CompPreset" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
     await fireEvent.click(container.querySelector(".expand-btn")!);
@@ -214,10 +217,27 @@ describe("Editor", () => {
       if (!t) throw new Error("compensate toggle not rendered");
       return t;
     });
+    expect(toggle.disabled).toBe(false); // enabled with a non-flat target shown
     expect(getCompensate("CompPreset")).toBe(false);
     toggle.checked = true;
     await fireEvent.change(toggle);
     expect(getCompensate("CompPreset")).toBe(true);
+    removeTarget(id);
+  });
+
+  it("disables the compensate switch on a flat target", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "FlatComp" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+    const toggle = await waitFor(() => {
+      const label = [...container.querySelectorAll(".switch")].find((l) =>
+        l.textContent!.includes("Compensate"),
+      );
+      const t = label?.querySelector<HTMLInputElement>("input[type='checkbox']");
+      if (!t) throw new Error("compensate switch not rendered");
+      return t;
+    });
+    expect(toggle.disabled).toBe(true); // nothing to compensate against
   });
 
   it("toggles the measurement reference per preset", async () => {
@@ -241,6 +261,8 @@ describe("Editor", () => {
   });
 
   it("forces the target switch on and disabled while compensating", async () => {
+    const id = addTarget("Tf", [{ freq: 100, spl: 1 }, { freq: 1000, spl: 0 }]);
+    setTargetId("CompTgt", id);
     setCompensate("CompTgt", true);
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "CompTgt" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
@@ -255,6 +277,7 @@ describe("Editor", () => {
     });
     expect(sw.disabled).toBe(true);
     expect(sw.checked).toBe(true);
+    removeTarget(id);
   });
 
   it("disables the measurement switch until a measurement is imported", async () => {
