@@ -9,7 +9,7 @@
   import TypeSelect from "./TypeSelect.svelte";
   import Switch from "./Switch.svelte";
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, balanceFromTrim, toneFilters, peakGainDb, type CurveFilter } from "./eq";
-  import { parseRew, normalize, type MeasPoint } from "./measurement";
+  import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { dismissable } from "./dismiss";
   import { getFilterShapes } from "./prefs.svelte";
   import { getTargets, getTarget } from "./targets.svelte";
@@ -334,7 +334,7 @@
         filters: [{ name: "Measurement (text)", extensions: ["txt"] }],
       });
       if (!picked || Array.isArray(picked)) return;
-      const points = normalize(parseRew(await api.readTextFile(picked)));
+      const points = downsample(normalize(parseRew(await api.readTextFile(picked))));
       if (!points.length) {
         err = "No measurement data found in that file.";
         return;

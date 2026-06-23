@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRew, normalize, sampleAt } from "./measurement";
+import { parseRew, normalize, sampleAt, downsample, type MeasPoint } from "./measurement";
 
 describe("parseRew", () => {
   it("parses freq/SPL rows, skipping comments and headers, sorted by freq", () => {
@@ -38,4 +38,28 @@ describe("sampleAt", () => {
     expect(sampleAt(pts, [Math.sqrt(100 * 1000)])[0]).toBeCloseTo(5, 6);
   });
   it("returns 0 for an empty measurement", () => expect(sampleAt([], [1000])[0]).toBe(0));
+});
+
+describe("downsample", () => {
+  it("leaves a small measurement untouched", () => {
+    const small: MeasPoint[] = [
+      { freq: 100, spl: 1 },
+      { freq: 1000, spl: 2 },
+    ];
+    expect(downsample(small, 256)).toBe(small);
+  });
+
+  it("caps a large measurement at n points, preserving the range and shape", () => {
+    // 5000 dense points from 20 Hz to 20 kHz, SPL = log-freq ramp 0..40.
+    const dense: MeasPoint[] = Array.from({ length: 5000 }, (_, i) => {
+      const f = 20 * Math.pow(1000, i / 4999);
+      return { freq: f, spl: (Math.log10(f / 20) / 3) * 40 };
+    });
+    const ds = downsample(dense, 256);
+    expect(ds.length).toBe(256);
+    expect(ds[0].freq).toBeCloseTo(20, 1);
+    expect(ds[ds.length - 1].freq).toBeCloseTo(20000, 0);
+    // The resampled curve still tracks the original ramp at the midband.
+    expect(sampleAt(ds, [1000])[0]).toBeCloseTo((Math.log10(1000 / 20) / 3) * 40, 1);
+  });
 });

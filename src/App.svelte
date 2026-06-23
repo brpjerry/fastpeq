@@ -11,7 +11,7 @@
   import { starterConfig, BAND_COUNTS, defaultBandCount, setDefaultBandCount } from "./lib/starter";
   import { getTargets, addTarget, removeTarget, FLAT_TARGET } from "./lib/targets.svelte";
   import { renamePresetView, clearPresetView } from "./lib/presetView.svelte";
-  import { parseRew, normalize } from "./lib/measurement";
+  import { parseRew, normalize, downsample } from "./lib/measurement";
   import {
     getFilterSet,
     setFilterSet,
@@ -317,7 +317,7 @@
         filters: [{ name: "Curve (text/CSV)", extensions: ["txt", "csv"] }],
       });
       if (!picked || Array.isArray(picked)) return;
-      const points = normalize(parseRew(await api.readTextFile(picked)));
+      const points = downsample(normalize(parseRew(await api.readTextFile(picked))));
       if (!points.length) {
         flash("No curve data found in that file");
         return;
