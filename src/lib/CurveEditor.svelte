@@ -128,6 +128,15 @@
   const compensated = (resp: number[]): number[] =>
     compCurve ? resp.map((v, i) => v - compCurve[i]) : resp;
 
+  // The target line as displayed: the target curve normally, but a flat
+  // centerline when compensating (the target collapses to flat) or when the
+  // Flat target is selected.
+  const targetLine = $derived.by<number[] | null>(() => {
+    if (!ready) return null;
+    if (!compensate && targetCurve) return targetCurve.map((v) => v + preamp);
+    return freqs.map(() => preamp);
+  });
+
   const leftPath = $derived(
     ready ? pathFor(compensated(withMeas(responseCurve(sideFilters("left"), preamp + trim.left, freqs)))) : "",
   );
@@ -137,7 +146,7 @@
   // The reference gets the preamp too, so it sits at the same baseline as the
   // result traces and the gap between them is purely the filter shaping.
   const measPath = $derived(measCurve ? pathFor(compensated(measCurve.map((v) => v + preamp))) : "");
-  const targetPath = $derived(targetCurve ? pathFor(targetCurve.map((v) => v + preamp)) : "");
+  const targetPath = $derived(targetLine ? pathFor(targetLine) : "");
 
   // Full 1–9-per-decade log grid; the 1-2-5 lines (labelled) draw brighter than
   // the minor lines in between, giving a denser but still readable frequency grid.
@@ -264,15 +273,21 @@
     const width = text.length * 6.3 + 12;
     const lx = Math.max(padL + width / 2, Math.min(w - padR - width / 2, cursorX));
 
-    // Absolute dB gap from the FR trace to the target at this frequency (Flat
-    // target → the 0 dB centerline). Shown alongside the crosshair.
-    const tgtVal = (target.length ? sampleAt(target, [f])[0] : 0) + preamp;
-    const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
-    const fr = responseCurve(sideFilters("left"), preamp + trim.left, [f])[0] + measVal;
-    const gap = Math.abs(fr - tgtVal).toFixed(1) + " dB";
-    // Sit the label where the crosshair meets the target line (the Flat target
-    // is the centerline), just above the intersection, clamped into the plot.
-    const ly = Math.max(padT + 12, Math.min(h - padB - 4, yOf(tgtVal) - 5));
+    // Absolute dB gap from the FR trace to the target, shown only when the
+    // target is enabled. Works in compensate mode too — the value is the same;
+    // the target line just sits flat on the centerline there.
+    let gap: string | null = null;
+    let ly = padT + 12;
+    if (showTarget) {
+      const tgtVal = (target.length ? sampleAt(target, [f])[0] : 0) + preamp;
+      const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
+      const fr = responseCurve(sideFilters("left"), preamp + trim.left, [f])[0] + measVal;
+      gap = Math.abs(fr - tgtVal).toFixed(1) + " dB";
+      // Sit at the crosshair–target intersection; compensating flattens the
+      // target onto the centerline.
+      const lineVal = compensate ? preamp : tgtVal;
+      ly = Math.max(padT + 12, Math.min(h - padB - 4, yOf(lineVal) - 5));
+    }
     return { x: cursorX, text, lx, width, gap, ly };
   });
 </script>
@@ -313,7 +328,7 @@
         </g>
       {/if}
 
-      {#if targetCurve && !compensate && showTarget}
+      {#if showTarget && targetPath}
         <path d={targetPath} class="resp target" />
       {/if}
       {#if measCurve && showMeas}
