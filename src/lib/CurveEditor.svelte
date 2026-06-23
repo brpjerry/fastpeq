@@ -254,13 +254,29 @@
     if (f >= 1000) return (f / 1000).toFixed(2) + " kHz";
     return Math.round(f) + " Hz";
   }
-  // Crosshair readout: a vertical line + frequency label that track the pointer.
+  // Crosshair readout: a vertical line + frequency label that track the pointer,
+  // plus the dB gap from each FR trace to the target (only when the target line
+  // is actually drawn).
   const cursor = $derived.by(() => {
     if (!ready || cursorX === null || cursorX < padL || cursorX > w - padR) return null;
-    const text = freqLabel(freqAt(cursorX));
+    const f = freqAt(cursorX);
+    const text = freqLabel(f);
     const width = text.length * 6.3 + 12;
     const lx = Math.max(padL + width / 2, Math.min(w - padR - width / 2, cursorX));
-    return { x: cursorX, text, lx, width };
+
+    const deltas: { y: number; text: string }[] = [];
+    if (targetCurve && !compensate && showTarget) {
+      const tgtVal = sampleAt(target, [f])[0] + preamp;
+      const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
+      const sides = stereo ? (["left", "right"] as const) : (["left"] as const);
+      for (const side of sides) {
+        const fr = responseCurve(sideFilters(side), preamp + trim[side], [f])[0] + measVal;
+        const d = fr - tgtVal; // gap from the FR line to the target line, in dB
+        const y = Math.max(padT + 8, Math.min(h - padB - 4, yOf(fr)));
+        deltas.push({ y, text: `${d >= 0 ? "+" : ""}${d.toFixed(1)} dB` });
+      }
+    }
+    return { x: cursorX, text, lx, width, deltas };
   });
 </script>
 
@@ -359,6 +375,14 @@
           class="cursor-bg"
         />
         <text x={cursor.lx} y={h - 8} class="cursor-lbl" text-anchor="middle">{cursor.text}</text>
+        {#each cursor.deltas as d}
+          <text
+            x={cursor.x + (cursor.x > w - 64 ? -6 : 6)}
+            y={d.y}
+            dy="0.35em"
+            class="delta-lbl"
+            text-anchor={cursor.x > w - 64 ? "end" : "start"}>{d.text}</text>
+        {/each}
       {/if}
     </svg>
   {/if}
@@ -422,6 +446,16 @@
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     pointer-events: none;
+  }
+  /* FR-to-target gap readout, in the target line's colour. */
+  .delta-lbl {
+    fill: #6fcf97;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: #11141a;
+    stroke-width: 3;
   }
   .resp {
     fill: none;
