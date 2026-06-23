@@ -1448,7 +1448,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px;
+    padding: 3px 4px;
     border-radius: 8px;
     border: 1px solid transparent;
   }
@@ -1529,7 +1529,7 @@
     text-align: left;
     background: transparent;
     border: none;
-    padding: 7px 8px;
+    padding: 5px 8px;
   }
   .name:hover {
     background: var(--panel-2);
