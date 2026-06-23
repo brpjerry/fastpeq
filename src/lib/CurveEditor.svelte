@@ -197,10 +197,9 @@
     if (!rect) return null;
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
-  // Drag via window-level listeners rather than setPointerCapture: a captured
-  // pointer renders the cursor at 1x (pixelated) on high-DPI WebView. While
-  // dragging, the grab cursor is driven from <body> (an HTML element, so it
-  // rasterizes at the native device scale).
+  // Drag via window-level listeners rather than setPointerCapture (a captured
+  // pointer renders the cursor pixelated at 1x on high-DPI WebView). No cursor
+  // override while dragging — the hover cursor just stays as-is.
   function onDown(e: PointerEvent, b: Band) {
     e.preventDefault();
     dragId = b.id;
@@ -227,12 +226,10 @@
     window.addEventListener("pointermove", onDragMove);
     window.addEventListener("pointerup", onDragEnd);
     window.addEventListener("pointercancel", onDragEnd);
-    document.body.style.cursor = "grabbing";
     return () => {
       window.removeEventListener("pointermove", onDragMove);
       window.removeEventListener("pointerup", onDragEnd);
       window.removeEventListener("pointercancel", onDragEnd);
-      document.body.style.cursor = "";
     };
   });
   function onWheel(e: WheelEvent, b: Band) {
@@ -453,9 +450,6 @@
   }
   .handle {
     cursor: pointer;
-  }
-  .handle.dragging {
-    cursor: grabbing;
   }
   .handle.off {
     opacity: 0.4;
