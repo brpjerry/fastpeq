@@ -150,4 +150,12 @@ describe("Editor", () => {
     await fireEvent.click(importBtn);
     await waitFor(() => expect(container.querySelector(".meas-name")?.textContent).toContain("harman.txt"));
   });
+
+  it("wraps the expanded graph in the fixed-aspect container", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+    await waitFor(() => expect(container.querySelector(".graph-fit")).toBeTruthy());
+    expect(container.querySelector(".graph-fit .ce-wrap")).toBeTruthy();
+  });
 });

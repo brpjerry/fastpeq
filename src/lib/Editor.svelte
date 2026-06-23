@@ -569,16 +569,18 @@
             {/if}
           </div>
         </div>
-        <CurveEditor
-          {bands}
-          {preamp}
-          {balance}
-          {view}
-          {measurement}
-          {hoveredId}
-          onChange={schedule}
-          onHover={(id) => (hoveredId = id)}
-        />
+        <div class="graph-fit">
+          <CurveEditor
+            {bands}
+            {preamp}
+            {balance}
+            {view}
+            {measurement}
+            {hoveredId}
+            onChange={schedule}
+            onHover={(id) => (hoveredId = id)}
+          />
+        </div>
         <ToneGenerator />
       </div>
     </div>
@@ -690,6 +692,16 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+  /* Holds the big graph at a fixed 8:5 aspect ratio: size containment lets the
+     graph itself scale to the largest 8:5 box that fits this area (via cqw/cqh
+     in CurveEditor), so it grows/shrinks with the pane but never overflows. */
+  .graph-fit {
+    flex: 1;
+    min-height: 0;
+    container-type: size;
+    display: grid;
+    place-items: center;
   }
   .graph-hint {
     margin: 0;

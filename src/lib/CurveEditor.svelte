@@ -297,9 +297,14 @@
 <style>
   .ce-wrap {
     position: relative;
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
+    /* Largest 8:5 box that fits the size-containment parent (.graph-fit):
+       width is capped by both the parent's width (100cqw) and 1.6× its height
+       (160cqh), and aspect-ratio fixes the height. Scales with the pane, never
+       overflows → no scrollbar. */
+    width: min(100cqw, 160cqh);
+    aspect-ratio: 8 / 5;
+    max-width: 100%;
+    max-height: 100%;
   }
   .ce-svg {
     display: block;
