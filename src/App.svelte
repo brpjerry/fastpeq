@@ -422,6 +422,14 @@
     if (searchCleared || filterChanged) scrollCurrentIntoView();
   });
 
+  // Returning from Settings recreates the preset list (resetting its scroll to
+  // the top), so jump back to the active preset instead of leaving it at top.
+  let wasInSettings = false;
+  $effect(() => {
+    if (wasInSettings && !showSettings) scrollCurrentIntoView();
+    wasInSettings = showSettings;
+  });
+
   function takeName(): string | null {
     const name = newName.trim();
     if (!name) {
