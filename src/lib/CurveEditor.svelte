@@ -264,11 +264,12 @@
     const width = text.length * 6.3 + 12;
     const lx = Math.max(padL + width / 2, Math.min(w - padR - width / 2, cursorX));
 
-    // Absolute dB gap between the FR trace and the target at this frequency,
-    // shown beside the crosshair only when the target line is drawn.
+    // Absolute dB gap between the FR trace and the target at this frequency.
+    // Shown whenever the target reference is in play (target switch on, not
+    // compensating); for the Flat target the reference is the 0 dB centerline.
     let gap: string | null = null;
-    if (targetCurve && !compensate && showTarget) {
-      const tgtVal = sampleAt(target, [f])[0] + preamp;
+    if (!compensate && showTarget) {
+      const tgtVal = (target.length ? sampleAt(target, [f])[0] : 0) + preamp;
       const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
       const fr = responseCurve(sideFilters("left"), preamp + trim.left, [f])[0] + measVal;
       gap = Math.abs(fr - tgtVal).toFixed(1) + " dB";
