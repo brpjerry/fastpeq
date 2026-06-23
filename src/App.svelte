@@ -364,13 +364,14 @@
   }
 
   // Scroll the current preset — the one open in the editor, or failing that the
-  // active one — into view, once the list has settled. A no-op if it isn't in
-  // the visible (filtered) list.
+  // active one — into view, once the list has settled. Centers it so the list
+  // lands on the active preset by default rather than at the top. A no-op if it
+  // isn't in the visible (filtered) list.
   async function scrollCurrentIntoView() {
     await tick();
     const el =
       presetListEl?.querySelector("li.selected") ?? presetListEl?.querySelector("li.active");
-    el?.scrollIntoView({ block: "nearest" });
+    el?.scrollIntoView({ block: "center" });
   }
 
   // After creating a preset, make sure it's actually visible: a new preset is

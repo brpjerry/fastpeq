@@ -192,3 +192,17 @@ describe("App settings", () => {
     expect(getSpecialtyIcons()).toBe(!before);
   });
 });
+
+describe("App scroll-to-active", () => {
+  it("centers the active preset in the list on open", async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    vi.mocked(api.listPresets).mockResolvedValue(["64 Audio U12t", "Sennheiser HD600"]);
+    vi.mocked(api.activePreset).mockResolvedValue("Sennheiser HD600");
+
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    // The active preset is centered (not left at the top of the list).
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledWith({ block: "center" }));
+  });
+});
