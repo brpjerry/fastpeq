@@ -375,7 +375,10 @@
     aspect-ratio: 8 / 5;
     max-width: 100%;
     max-height: 100%;
-    /* Clip the sub-pixel gap left by the integer-sized SVG below. */
+    /* Border on the wrap (an HTML element) rather than the SVG rect stroke,
+       which sat on the viewBox edge and got half-clipped — vanishing at some
+       scales. Clip the sub-pixel gap left by the integer-sized SVG. */
+    border: 1px solid var(--border);
     overflow: hidden;
   }
   /* Sized to the integer client box (matching the viewBox) so the SVG renders at
@@ -388,7 +391,6 @@
   }
   .bg {
     fill: #181b21;
-    stroke: var(--border);
   }
   .grid {
     stroke: #2a2f38;
