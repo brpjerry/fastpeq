@@ -64,6 +64,19 @@ describe("Editor", () => {
     expect(bandCount(container)).toBe(1);
   });
 
+  it("removes all gain filters sitting at 0 dB", async () => {
+    const { container } = renderEditor(cfg(-10, [[100, 3, 1], [1000, 0, 1], [5000, 0, 2]]));
+    await waitFor(() => expect(bandCount(container)).toBe(3));
+    await fireEvent.click(container.querySelector(".clear-flat")!);
+    expect(bandCount(container)).toBe(1); // only the +3 dB band survives
+  });
+
+  it("disables the Remove 0 dB button when nothing is flat", async () => {
+    const { container } = renderEditor(cfg(-10, [[100, 3, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    expect(container.querySelector<HTMLButtonElement>(".clear-flat")!.disabled).toBe(true);
+  });
+
   it("shows the live indicator when not bypassed", async () => {
     const { container } = renderEditor(cfg(-10, [[100, 0, 1]]));
     await waitFor(() => expect(container.querySelector(".live")).toBeTruthy());

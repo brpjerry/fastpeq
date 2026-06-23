@@ -256,6 +256,15 @@
     schedule();
   }
 
+  // Gain filters left at 0 dB do nothing; this clears them out across all
+  // channels in one go (a common tidy-up after dialing in a curve).
+  const isFlat = (b: Band) => kindHasGain(b.kind) && b.gain === 0;
+  const flatCount = $derived(bands.filter(isFlat).length);
+  function removeZeroGain() {
+    bands = bands.filter((b) => !isFlat(b));
+    schedule();
+  }
+
   function sortBands() {
     // Sort only the bands in the current list, leaving the other channels put.
     const sorted = [...shown].sort((a, b) => a.freq - b.freq);
@@ -471,6 +480,14 @@
   <div class="band-actions">
     <button class="add" onclick={addBand}>+ Add band</button>
     <button onclick={sortBands} disabled={shown.length < 2}>Sort by Hz</button>
+    <button
+      class="clear-flat"
+      onclick={removeZeroGain}
+      disabled={flatCount === 0}
+      title="Remove every gain filter sitting at 0 dB (they have no effect)"
+    >
+      Remove 0 dB{flatCount ? ` · ${flatCount}` : ""}
+    </button>
   </div>
 {/snippet}
 
