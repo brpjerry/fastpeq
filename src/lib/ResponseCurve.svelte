@@ -120,15 +120,15 @@
     display: block;
   }
   .bg {
-    fill: #181b21;
+    fill: var(--graph-bg);
     stroke: var(--border);
   }
   .grid {
-    stroke: #2a2f38;
+    stroke: var(--graph-grid);
     stroke-width: 1;
   }
   .axis {
-    stroke: #3a4150;
+    stroke: var(--graph-axis);
     stroke-width: 1;
   }
   .resp {
@@ -140,7 +140,7 @@
     stroke: var(--accent);
   }
   .resp.right {
-    stroke: #e0a458;
+    stroke: var(--chan-right);
   }
   .resp.reference {
     stroke: var(--muted);

@@ -197,7 +197,7 @@
       ),
     );
 
-  const handleColor = (b: Band) => (b.channel.kind === "right" ? "#e0a458" : "var(--accent)");
+  const handleColor = (b: Band) => (b.channel.kind === "right" ? "var(--chan-right)" : "var(--accent)");
   // Handles sit at the filter's output level (preamp + gain), so with the
   // preamp-centred view a flat filter lands on the centre line.
   const handleY = (b: Band) => yOf(preamp + (kindHasGain(b.kind) ? clampGain(b.gain) : 0));
@@ -425,10 +425,10 @@
     touch-action: none;
   }
   .bg {
-    fill: #181b21;
+    fill: var(--graph-bg);
   }
   .grid {
-    stroke: #2a2f38;
+    stroke: var(--graph-grid);
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
@@ -436,7 +436,7 @@
     stroke: #21252c;
   }
   .axis {
-    stroke: #3a4150;
+    stroke: var(--graph-axis);
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
@@ -448,7 +448,7 @@
     vector-effect: non-scaling-stroke;
   }
   .cursor-bg {
-    fill: #181b21;
+    fill: var(--graph-bg);
     opacity: 0.92;
     pointer-events: none;
   }
@@ -460,12 +460,12 @@
   }
   /* FR-to-target gap readout, in the target line's colour. */
   .delta-lbl {
-    fill: #6fcf97;
+    fill: var(--target);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     pointer-events: none;
     paint-order: stroke;
-    stroke: #11141a;
+    stroke: var(--label-outline);
     stroke-width: 3;
   }
   .resp {
@@ -477,7 +477,7 @@
     stroke: var(--accent);
   }
   .resp.right {
-    stroke: #e0a458;
+    stroke: var(--chan-right);
   }
   .resp.reference {
     stroke: var(--muted);
@@ -486,7 +486,7 @@
     opacity: 0.65;
   }
   .resp.target {
-    stroke: #6fcf97;
+    stroke: var(--target);
     stroke-width: 1.5;
     stroke-dasharray: 6 4;
     opacity: 0.8;
@@ -507,7 +507,7 @@
   }
   .dot {
     pointer-events: none;
-    stroke: #11141a;
+    stroke: var(--label-outline);
     stroke-width: 1.5;
   }
   /* Light up on direct hover, or when highlighted from the list (hover/edit). */
@@ -546,7 +546,7 @@
     font-size: 12px;
     font-variant-numeric: tabular-nums;
     paint-order: stroke;
-    stroke: #11141a;
+    stroke: var(--label-outline);
     stroke-width: 3;
   }
 </style>
