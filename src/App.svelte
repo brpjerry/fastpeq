@@ -6,6 +6,7 @@
   import Editor from "./lib/Editor.svelte";
   import CategoryIcon from "./lib/CategoryIcon.svelte";
   import Knob from "./lib/Knob.svelte";
+  import Switch from "./lib/Switch.svelte";
   import { dismissable } from "./lib/dismiss";
   import { ACCENTS, currentAccentId, applyAccent } from "./lib/theme";
   import { starterConfig, BAND_COUNTS, defaultBandCount, setDefaultBandCount } from "./lib/starter";
@@ -623,15 +624,11 @@
           <h3>Curve editor</h3>
           <p class="hint">How band handles are drawn on the expanded graph.</p>
           <div class="cat-switches">
-            <label class="switch">
-              <input
-                type="checkbox"
-                checked={getFilterShapes()}
-                onchange={(e) => setFilterShapes(e.currentTarget.checked)}
-              />
-              <span class="track"><span class="thumb"></span></span>
-              <span class="sw-label">Show filter shape</span>
-            </label>
+            <Switch
+              label="Show filter shape"
+              checked={getFilterShapes()}
+              onChange={(v) => setFilterShapes(v)}
+            />
           </div>
         </section>
         <section class="settings-section">
@@ -666,24 +663,16 @@
             group off.
           </p>
           <div class="cat-switches">
-            <label class="switch">
-              <input
-                type="checkbox"
-                checked={getSpecialtyIcons()}
-                onchange={(e) => setSpecialtyIcons(e.currentTarget.checked)}
-              />
-              <span class="track"><span class="thumb"></span></span>
-              <span class="sw-label">Specialty (electrostatic, earbud)</span>
-            </label>
-            <label class="switch">
-              <input
-                type="checkbox"
-                checked={getBluetoothIcons()}
-                onchange={(e) => setBluetoothIcons(e.currentTarget.checked)}
-              />
-              <span class="track"><span class="thumb"></span></span>
-              <span class="sw-label">Bluetooth (headphone, IEM, earbud)</span>
-            </label>
+            <Switch
+              label="Specialty (electrostatic, earbud)"
+              checked={getSpecialtyIcons()}
+              onChange={(v) => setSpecialtyIcons(v)}
+            />
+            <Switch
+              label="Bluetooth (headphone, IEM, earbud)"
+              checked={getBluetoothIcons()}
+              onChange={(v) => setBluetoothIcons(v)}
+            />
           </div>
         </section>
         <section class="settings-section">
@@ -752,16 +741,24 @@
         <Knob label="Treble" value={tone.treble} onInput={(v) => setKnob("treble", v)} />
       </div>
       <div class="switches">
-        <label class="switch">
-          <input type="checkbox" bind:checked={tone.invert} onchange={pushTone} disabled={!status?.installed} />
-          <span class="track"><span class="thumb"></span></span>
-          <span class="sw-label">Invert polarity</span>
-        </label>
-        <label class="switch">
-          <input type="checkbox" bind:checked={tone.swap} onchange={pushTone} disabled={!status?.installed} />
-          <span class="track"><span class="thumb"></span></span>
-          <span class="sw-label">Switch L / R</span>
-        </label>
+        <Switch
+          label="Invert polarity"
+          disabled={!status?.installed}
+          checked={tone.invert}
+          onChange={(v) => {
+            tone.invert = v;
+            pushTone();
+          }}
+        />
+        <Switch
+          label="Switch L / R"
+          disabled={!status?.installed}
+          checked={tone.swap}
+          onChange={(v) => {
+            tone.swap = v;
+            pushTone();
+          }}
+        />
       </div>
     </div>
   </section>
@@ -1278,59 +1275,8 @@
     flex-direction: column;
     gap: 12px;
   }
-  .switch {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    cursor: pointer;
-    user-select: none;
-    font-size: 13px;
-  }
-  .switch input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-  .switch .track {
-    position: relative;
-    flex: none;
-    width: 36px;
-    height: 20px;
-    border-radius: 10px;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    transition:
-      background 0.15s ease,
-      border-color 0.15s ease;
-  }
-  .switch .thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--muted);
-    transition:
-      transform 0.15s ease,
-      background 0.15s ease;
-  }
-  .switch input:checked + .track {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .switch input:checked + .track .thumb {
-    transform: translateX(16px);
-    background: #fff;
-  }
-  .switch input:focus-visible + .track {
-    box-shadow: 0 0 0 2px var(--accent);
-  }
-  .switch input:disabled + .track {
-    opacity: 0.5;
-  }
-
+  /* Toggle look lives in Switch.svelte now; only the tone panel's narrow-layout
+     stacking stays here (targets the component via :global). */
   .grid {
     flex: 1;
     min-height: 0;
@@ -1372,7 +1318,7 @@
       align-items: center;
       gap: 16px;
     }
-    .switches .switch {
+    .switches :global(.switch) {
       flex-direction: column;
       gap: 6px;
       text-align: center;
