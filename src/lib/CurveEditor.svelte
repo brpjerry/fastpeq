@@ -78,6 +78,7 @@
   let svgEl = $state<SVGSVGElement | null>(null);
   let dragId = $state<number | null>(null);
   let cursorX = $state<number | null>(null); // pointer x for the freq crosshair
+  let cursorY = $state<number | null>(null); // pointer y, for the dB-gap label
 
   const dbMax = 30; // vertical range; matches the gain slider's ±30
   const padL = 42;
@@ -212,6 +213,7 @@
     const p = ptToData(e);
     if (!p) return;
     cursorX = p.x;
+    cursorY = p.y;
     b.freq = Math.round(clampFreq(freqAt(p.x)));
     if (kindHasGain(b.kind)) b.gain = round1(clampGain(gainAt(p.y)));
     onChange();
@@ -241,9 +243,11 @@
   function onCursorMove(e: PointerEvent) {
     const p = ptToData(e);
     cursorX = p ? p.x : null;
+    cursorY = p ? p.y : null;
   }
   function onCursorLeave() {
     cursorX = null;
+    cursorY = null;
   }
 
   const fmtFreq = (f: number) =>
@@ -264,17 +268,15 @@
     const width = text.length * 6.3 + 12;
     const lx = Math.max(padL + width / 2, Math.min(w - padR - width / 2, cursorX));
 
-    // Absolute dB gap between the FR trace and the target at this frequency.
-    // Shown whenever the target reference is in play (target switch on, not
-    // compensating); for the Flat target the reference is the 0 dB centerline.
-    let gap: string | null = null;
-    if (!compensate && showTarget) {
-      const tgtVal = (target.length ? sampleAt(target, [f])[0] : 0) + preamp;
-      const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
-      const fr = responseCurve(sideFilters("left"), preamp + trim.left, [f])[0] + measVal;
-      gap = Math.abs(fr - tgtVal).toFixed(1) + " dB";
-    }
-    return { x: cursorX, text, lx, width, gap };
+    // Absolute dB gap from the FR trace to the target at this frequency (Flat
+    // target → the 0 dB centerline). Shown alongside the crosshair.
+    const tgtVal = (target.length ? sampleAt(target, [f])[0] : 0) + preamp;
+    const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
+    const fr = responseCurve(sideFilters("left"), preamp + trim.left, [f])[0] + measVal;
+    const gap = Math.abs(fr - tgtVal).toFixed(1) + " dB";
+    // Place the gap label at the pointer (clamped into the plot), just above it.
+    const ly = Math.max(padT + 12, Math.min(h - padB - 4, (cursorY ?? padT) - 8));
+    return { x: cursorX, text, lx, width, gap, ly };
   });
 </script>
 
@@ -375,8 +377,8 @@
         <text x={cursor.lx} y={h - 8} class="cursor-lbl" text-anchor="middle">{cursor.text}</text>
         {#if cursor.gap}
           <text
-            x={cursor.x + (cursor.x > w - 56 ? -6 : 6)}
-            y={padT + 11}
+            x={cursor.x + (cursor.x > w - 56 ? -8 : 8)}
+            y={cursor.ly}
             class="delta-lbl"
             text-anchor={cursor.x > w - 56 ? "end" : "start"}>{cursor.gap}</text>
         {/if}
