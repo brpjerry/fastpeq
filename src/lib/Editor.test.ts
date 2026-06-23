@@ -5,6 +5,8 @@ import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Config } from "./types";
 import * as api from "./api";
+import { addTarget, removeTarget } from "./targets.svelte";
+import { getTargetId } from "./presetView.svelte";
 import Editor from "./Editor.svelte";
 
 // The Editor only touches these four IPC calls; an explicit mock is clearer than
@@ -157,5 +159,23 @@ describe("Editor", () => {
     await fireEvent.click(container.querySelector(".expand-btn")!);
     await waitFor(() => expect(container.querySelector(".graph-fit")).toBeTruthy());
     expect(container.querySelector(".graph-fit .ce-wrap")).toBeTruthy();
+  });
+
+  it("offers the target dropdown and persists the selection per preset", async () => {
+    const id = addTarget("Harman", [{ freq: 100, spl: 1 }, { freq: 1000, spl: 0 }]);
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "TgtPreset" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+
+    const select = await waitFor(() => {
+      const s = container.querySelector<HTMLSelectElement>(".target-select select");
+      if (!s) throw new Error("target select not rendered");
+      return s;
+    });
+    expect([...select.options].map((o) => o.textContent)).toContain("Flat");
+
+    await fireEvent.change(select, { target: { value: id } });
+    expect(getTargetId("TgtPreset")).toBe(id);
+    removeTarget(id);
   });
 });

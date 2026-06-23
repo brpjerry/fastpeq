@@ -42,6 +42,7 @@
     balance = 0,
     view = "both",
     measurement = [],
+    target = [],
     hoveredId = null,
     filterShapes = false,
     onChange,
@@ -52,6 +53,7 @@
     balance?: number;
     view?: "both" | "left" | "right";
     measurement?: MeasPoint[];
+    target?: MeasPoint[];
     hoveredId?: number | null;
     filterShapes?: boolean;
     onChange: () => void;
@@ -120,6 +122,11 @@
   // The reference gets the preamp too, so it sits at the same baseline as the
   // result traces and the gap between them is purely the filter shaping.
   const measPath = $derived(measCurve ? pathFor(measCurve.map((v) => v + preamp)) : "");
+
+  // The selected target curve, drawn as a reference to aim for. Empty target
+  // (Flat) draws nothing — it would just sit on the centre line.
+  const targetCurve = $derived(ready && target.length ? sampleAt(target, freqs) : null);
+  const targetPath = $derived(targetCurve ? pathFor(targetCurve.map((v) => v + preamp)) : "");
 
   // Full 1–9-per-decade log grid; the 1-2-5 lines (labelled) draw brighter than
   // the minor lines in between, giving a denser but still readable frequency grid.
@@ -253,6 +260,9 @@
         <text x={xOf(l.f)} y={h - 8} class="lbl" text-anchor="middle">{l.t}</text>
       {/each}
 
+      {#if targetCurve}
+        <path d={targetPath} class="resp target" />
+      {/if}
       {#if measCurve}
         <path d={measPath} class="resp reference" />
       {/if}
@@ -388,6 +398,12 @@
     stroke-width: 1.5;
     stroke-dasharray: 4 3;
     opacity: 0.65;
+  }
+  .resp.target {
+    stroke: #6fcf97;
+    stroke-width: 1.5;
+    stroke-dasharray: 6 4;
+    opacity: 0.8;
   }
   .lbl {
     fill: var(--muted);

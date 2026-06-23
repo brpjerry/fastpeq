@@ -11,6 +11,8 @@
   import { parseRew, normalize, type MeasPoint } from "./measurement";
   import { dismissable } from "./dismiss";
   import { getFilterShapes } from "./prefs.svelte";
+  import { getTargets, getTarget } from "./targets.svelte";
+  import { getTargetId, setTargetId } from "./presetView.svelte";
 
   let {
     name,
@@ -68,6 +70,10 @@
     ),
   );
   const clipping = $derived(clipPeak > 0.05);
+
+  // The per-preset target curve (Flat by default), shown on the graph as a
+  // reference. Reactive to the selected target and the current preset.
+  const targetPoints = $derived(getTarget(getTargetId(name)).points);
 
   // Live-apply throttle: at most one write to config.txt per THROTTLE ms while
   // dragging, with a guaranteed trailing write so the final value always lands.
@@ -562,6 +568,14 @@
         <div class="graph-tools">
           <p class="graph-hint">Drag a handle to set frequency &amp; gain · scroll over a handle to change Q</p>
           <div class="meas-tools">
+            <label class="target-select" title="Reference target curve (add targets in Settings)">
+              Target
+              <select value={getTargetId(name)} onchange={(e) => setTargetId(name, e.currentTarget.value)}>
+                {#each getTargets() as t (t.id)}
+                  <option value={t.id}>{t.name}</option>
+                {/each}
+              </select>
+            </label>
             {#if measurement.length}
               <span class="meas-name" title={measName}>{measName}</span>
               <button onclick={clearMeasurement}>Clear measurement</button>
@@ -577,6 +591,7 @@
             {balance}
             {view}
             {measurement}
+            target={targetPoints}
             {hoveredId}
             filterShapes={getFilterShapes()}
             onChange={schedule}
@@ -733,6 +748,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .target-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .target-select select {
+    padding: 2px 4px;
+    font-size: 12px;
   }
 
   .preamp {

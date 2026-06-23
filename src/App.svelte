@@ -9,6 +9,8 @@
   import { dismissable } from "./lib/dismiss";
   import { ACCENTS, currentAccentId, applyAccent } from "./lib/theme";
   import { starterConfig, BAND_COUNTS, defaultBandCount, setDefaultBandCount } from "./lib/starter";
+  import { getTargets, addTarget, removeTarget, FLAT_TARGET } from "./lib/targets.svelte";
+  import { parseRew, normalize } from "./lib/measurement";
   import {
     getFilterSet,
     setFilterSet,
@@ -302,6 +304,26 @@
       await reload();
       showSettings = false;
       flashImport(r, "Nothing imported");
+    });
+
+  // Add a target curve from a REW/CSV text file (freq + level rows), normalised
+  // to a 0 dB midband like measurements, so the two compare directly.
+  const addTargetCurve = () =>
+    guard(async () => {
+      const picked = await openDialog({
+        multiple: false,
+        title: "Import target curve",
+        filters: [{ name: "Curve (text/CSV)", extensions: ["txt", "csv"] }],
+      });
+      if (!picked || Array.isArray(picked)) return;
+      const points = normalize(parseRew(await api.readTextFile(picked)));
+      if (!points.length) {
+        flash("No curve data found in that file");
+        return;
+      }
+      const name = (picked.split(/[\\/]/).pop() ?? "target").replace(/\.[^.]+$/, "");
+      addTarget(name, points);
+      flash(`Added target “${name}”`);
     });
 
   const openPresets = () => guard(async () => await api.openPresetsDir());
@@ -599,6 +621,30 @@
               <span class="track"><span class="thumb"></span></span>
               <span class="sw-label">Show each filter's shape (instead of a stem to the preamp)</span>
             </label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3>Target curves</h3>
+          <p class="hint">
+            Reference responses to aim for in the curve editor (REW/CSV text). Flat is always
+            available; the editor's compensate toggle measures against the selected one.
+          </p>
+          <ul class="target-list">
+            {#each getTargets() as t (t.id)}
+              <li>
+                <span class="target-name">{t.name}</span>
+                {#if t.id === FLAT_TARGET.id}
+                  <span class="target-builtin">built-in</span>
+                {:else}
+                  <button class="danger icon" onclick={() => removeTarget(t.id)} title="Remove target">
+                    &#10005;
+                  </button>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+          <div class="settings-actions">
+            <button class="primary" onclick={addTargetCurve} disabled={busy}>Add target curve…</button>
           </div>
         </section>
         <section class="settings-section">
@@ -1063,6 +1109,30 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+  }
+  .target-list {
+    list-style: none;
+    margin: 0 0 10px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .target-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .target-name {
+    font-size: 13px;
+  }
+  .target-builtin {
+    font-size: 11px;
+    color: var(--muted);
   }
   .swatches {
     display: flex;
