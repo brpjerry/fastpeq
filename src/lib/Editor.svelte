@@ -620,7 +620,6 @@
                 checked={getShowMeasRef(name)}
                 onChange={(v) => setShowMeasRef(name, v)}
               />
-              <span class="meas-label">Measurement</span>
               {#if measurement.length}
                 <span class="meas-name" title={measName}>{measName}</span>
                 <button onclick={clearMeasurement}>Clear</button>
@@ -798,10 +797,6 @@
     gap: 8px;
     flex-wrap: nowrap;
     white-space: nowrap;
-  }
-  .meas-label {
-    font-size: 12px;
-    color: var(--muted);
   }
   .meas-tools button {
     padding: 3px 10px;
