@@ -15,6 +15,8 @@
   import {
     getTargetId,
     setTargetId,
+    getCompensate,
+    setCompensate,
     getMeasurement,
     setMeasurement,
     clearMeasurement as clearSavedMeasurement,
@@ -84,6 +86,9 @@
   const savedMeas = $derived(getMeasurement(name));
   const measurement = $derived<MeasPoint[]>(savedMeas?.points ?? []);
   const measName = $derived(savedMeas?.name ?? "");
+
+  // Whether to show the response compensated to the selected target (per preset).
+  const compensate = $derived(getCompensate(name));
 
   // Live-apply throttle: at most one write to config.txt per THROTTLE ms while
   // dragging, with a guaranteed trailing write so the final value always lands.
@@ -518,7 +523,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={bands} {preamp} {balance} {measurement} />
+      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -584,6 +589,14 @@
                 {/each}
               </select>
             </label>
+            <label class="compensate" title="Show the response as deviation from the target (flat = on target)">
+              <input
+                type="checkbox"
+                checked={getCompensate(name)}
+                onchange={(e) => setCompensate(name, e.currentTarget.checked)}
+              />
+              Compensate
+            </label>
             {#if measurement.length}
               <span class="meas-name" title={measName}>{measName}</span>
               <button onclick={clearMeasurement}>Clear measurement</button>
@@ -600,6 +613,7 @@
             {view}
             {measurement}
             target={targetPoints}
+            {compensate}
             {hoveredId}
             filterShapes={getFilterShapes()}
             onChange={schedule}
@@ -767,6 +781,13 @@
   .target-select select {
     padding: 2px 4px;
     font-size: 12px;
+  }
+  .compensate {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
   }
 
   .preamp {

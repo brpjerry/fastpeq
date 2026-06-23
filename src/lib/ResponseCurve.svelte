@@ -8,11 +8,15 @@
     preamp = 0,
     balance = 0,
     measurement = [],
+    target = [],
+    compensate = false,
   }: {
     filters: CurveFilter[];
     preamp?: number;
     balance?: number;
     measurement?: MeasPoint[];
+    target?: MeasPoint[];
+    compensate?: boolean;
   } = $props();
 
   const W = 600;
@@ -38,23 +42,33 @@
   const measCurve = $derived(measurement.length ? sampleAt(measurement, FREQS) : null);
   const withMeas = (resp: number[]): number[] =>
     measCurve ? resp.map((v, i) => v + measCurve[i]) : resp;
-  const measPath = $derived(measCurve ? pathFor(measCurve.map((v) => v + preamp)) : "");
+  // Mirror the big editor's compensate view: subtract the target so a perfect
+  // result reads flat. Kept in sync so the small graph matches per preset.
+  const targetCurve = $derived(target.length ? sampleAt(target, FREQS) : null);
+  const compCurve = $derived(compensate && targetCurve ? targetCurve : null);
+  const compensated = (resp: number[]): number[] =>
+    compCurve ? resp.map((v, i) => v - compCurve[i]) : resp;
+  const measPath = $derived(measCurve ? pathFor(compensated(measCurve.map((v) => v + preamp))) : "");
   const leftPath = $derived(
     pathFor(
-      withMeas(
-        responseCurve(
-          filters.filter((f) => inChannel(f.channel, "left")),
-          preamp + trim.left,
+      compensated(
+        withMeas(
+          responseCurve(
+            filters.filter((f) => inChannel(f.channel, "left")),
+            preamp + trim.left,
+          ),
         ),
       ),
     ),
   );
   const rightPath = $derived(
     pathFor(
-      withMeas(
-        responseCurve(
-          filters.filter((f) => inChannel(f.channel, "right")),
-          preamp + trim.right,
+      compensated(
+        withMeas(
+          responseCurve(
+            filters.filter((f) => inChannel(f.channel, "right")),
+            preamp + trim.right,
+          ),
         ),
       ),
     ),

@@ -25,4 +25,18 @@ describe("ResponseCurve", () => {
     });
     expect(container.querySelector(".resp.reference")).toBeTruthy();
   });
+
+  it("compensating to a target shifts the trace", () => {
+    const target = [
+      { freq: 20, spl: 6 },
+      { freq: 20000, spl: 6 },
+    ]; // ~+6 dB across the band
+    const dOf = (compensate: boolean) =>
+      render(ResponseCurve, { props: { filters: [], preamp: 0, target, compensate } })
+        .container.querySelector(".resp.left")!
+        .getAttribute("d");
+
+    // Flat response minus a +6 dB target ≠ the uncompensated flat trace.
+    expect(dOf(true)).not.toBe(dOf(false));
+  });
 });

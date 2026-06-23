@@ -43,6 +43,7 @@
     view = "both",
     measurement = [],
     target = [],
+    compensate = false,
     hoveredId = null,
     filterShapes = false,
     onChange,
@@ -54,6 +55,7 @@
     view?: "both" | "left" | "right";
     measurement?: MeasPoint[];
     target?: MeasPoint[];
+    compensate?: boolean;
     hoveredId?: number | null;
     filterShapes?: boolean;
     onChange: () => void;
@@ -113,19 +115,24 @@
   const measCurve = $derived(ready && measurement.length ? sampleAt(measurement, freqs) : null);
   const withMeas = (resp: number[]): number[] =>
     measCurve ? resp.map((v, i) => v + measCurve[i]) : resp;
+
+  // The selected target, sampled onto the grid. With "compensate" on, every
+  // trace is shown as deviation from the target (flat = on target), so the
+  // target itself collapses to the centre line and isn't drawn.
+  const targetCurve = $derived(ready && target.length ? sampleAt(target, freqs) : null);
+  const compCurve = $derived(compensate && targetCurve ? targetCurve : null);
+  const compensated = (resp: number[]): number[] =>
+    compCurve ? resp.map((v, i) => v - compCurve[i]) : resp;
+
   const leftPath = $derived(
-    ready ? pathFor(withMeas(responseCurve(sideFilters("left"), preamp + trim.left, freqs))) : "",
+    ready ? pathFor(compensated(withMeas(responseCurve(sideFilters("left"), preamp + trim.left, freqs)))) : "",
   );
   const rightPath = $derived(
-    ready ? pathFor(withMeas(responseCurve(sideFilters("right"), preamp + trim.right, freqs))) : "",
+    ready ? pathFor(compensated(withMeas(responseCurve(sideFilters("right"), preamp + trim.right, freqs)))) : "",
   );
   // The reference gets the preamp too, so it sits at the same baseline as the
   // result traces and the gap between them is purely the filter shaping.
-  const measPath = $derived(measCurve ? pathFor(measCurve.map((v) => v + preamp)) : "");
-
-  // The selected target curve, drawn as a reference to aim for. Empty target
-  // (Flat) draws nothing — it would just sit on the centre line.
-  const targetCurve = $derived(ready && target.length ? sampleAt(target, freqs) : null);
+  const measPath = $derived(measCurve ? pathFor(compensated(measCurve.map((v) => v + preamp))) : "");
   const targetPath = $derived(targetCurve ? pathFor(targetCurve.map((v) => v + preamp)) : "");
 
   // Full 1–9-per-decade log grid; the 1-2-5 lines (labelled) draw brighter than
@@ -260,7 +267,7 @@
         <text x={xOf(l.f)} y={h - 8} class="lbl" text-anchor="middle">{l.t}</text>
       {/each}
 
-      {#if targetCurve}
+      {#if targetCurve && !compensate}
         <path d={targetPath} class="resp target" />
       {/if}
       {#if measCurve}
