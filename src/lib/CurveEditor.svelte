@@ -264,19 +264,16 @@
     const width = text.length * 6.3 + 12;
     const lx = Math.max(padL + width / 2, Math.min(w - padR - width / 2, cursorX));
 
-    const deltas: { y: number; text: string }[] = [];
+    // Absolute dB gap between the FR trace and the target at this frequency,
+    // shown beside the crosshair only when the target line is drawn.
+    let gap: string | null = null;
     if (targetCurve && !compensate && showTarget) {
       const tgtVal = sampleAt(target, [f])[0] + preamp;
       const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
-      const sides = stereo ? (["left", "right"] as const) : (["left"] as const);
-      for (const side of sides) {
-        const fr = responseCurve(sideFilters(side), preamp + trim[side], [f])[0] + measVal;
-        const d = fr - tgtVal; // gap from the FR line to the target line, in dB
-        const y = Math.max(padT + 8, Math.min(h - padB - 4, yOf(fr)));
-        deltas.push({ y, text: `${d >= 0 ? "+" : ""}${d.toFixed(1)} dB` });
-      }
+      const fr = responseCurve(sideFilters("left"), preamp + trim.left, [f])[0] + measVal;
+      gap = Math.abs(fr - tgtVal).toFixed(1) + " dB";
     }
-    return { x: cursorX, text, lx, width, deltas };
+    return { x: cursorX, text, lx, width, gap };
   });
 </script>
 
@@ -375,14 +372,13 @@
           class="cursor-bg"
         />
         <text x={cursor.lx} y={h - 8} class="cursor-lbl" text-anchor="middle">{cursor.text}</text>
-        {#each cursor.deltas as d}
+        {#if cursor.gap}
           <text
-            x={cursor.x + (cursor.x > w - 64 ? -6 : 6)}
-            y={d.y}
-            dy="0.35em"
+            x={cursor.x + (cursor.x > w - 56 ? -6 : 6)}
+            y={padT + 11}
             class="delta-lbl"
-            text-anchor={cursor.x > w - 64 ? "end" : "start"}>{d.text}</text>
-        {/each}
+            text-anchor={cursor.x > w - 56 ? "end" : "start"}>{cursor.gap}</text>
+        {/if}
       {/if}
     </svg>
   {/if}
