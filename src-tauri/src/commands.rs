@@ -149,9 +149,18 @@ pub fn import_peace_files(
 }
 
 /// Read a user-picked text file (e.g. a REW measurement export) so the UI can
-/// parse it. The path comes from the file dialog the user just confirmed.
+/// parse it. The path comes from the file dialog the user just confirmed; we
+/// still verify it's a regular file and cap the size as defense-in-depth.
 #[tauri::command]
 pub fn read_text_file(path: String) -> Result<String, String> {
+    const MAX_BYTES: u64 = 32 * 1024 * 1024; // measurements are small text files
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("Not a regular file".to_string());
+    }
+    if meta.len() > MAX_BYTES {
+        return Err("File is too large".to_string());
+    }
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
