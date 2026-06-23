@@ -252,6 +252,8 @@
     <svg
       bind:this={svgEl}
       viewBox="0 0 {w} {h}"
+      width={w}
+      height={h}
       class="ce-svg"
       preserveAspectRatio="none"
       role="application"
@@ -358,11 +360,14 @@
     aspect-ratio: 8 / 5;
     max-width: 100%;
     max-height: 100%;
+    /* Clip the sub-pixel gap left by the integer-sized SVG below. */
+    overflow: hidden;
   }
+  /* Sized to the integer client box (matching the viewBox) so the SVG renders at
+     exactly 1:1 — a fractional scale otherwise pixelates the content and the
+     cursor while dragging. */
   .ce-svg {
     display: block;
-    width: 100%;
-    height: 100%;
     user-select: none;
     touch-action: none;
   }
