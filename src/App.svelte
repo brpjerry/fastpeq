@@ -18,6 +18,8 @@
     setSpecialtyIcons,
     getBluetoothIcons,
     setBluetoothIcons,
+    getFilterShapes,
+    setFilterShapes,
   } from "./lib/prefs.svelte";
 
   let status = $state<api.ApoStatus | null>(null);
@@ -582,6 +584,21 @@
             >
               All filters
             </button>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3>Curve editor</h3>
+          <p class="hint">How band handles are drawn on the expanded graph.</p>
+          <div class="cat-switches">
+            <label class="switch">
+              <input
+                type="checkbox"
+                checked={getFilterShapes()}
+                onchange={(e) => setFilterShapes(e.currentTarget.checked)}
+              />
+              <span class="track"><span class="thumb"></span></span>
+              <span class="sw-label">Show each filter's shape (instead of a stem to the preamp)</span>
+            </label>
           </div>
         </section>
         <section class="settings-section">

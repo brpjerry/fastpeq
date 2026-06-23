@@ -58,3 +58,14 @@ export function setBluetoothIcons(v: boolean): void {
   bluetoothIcons = v;
   save("fastpeq.bluetoothIcons", v);
 }
+
+// Curve-editor handle style: draw each band's actual filter shape (default) or
+// the older dashed stem from the handle down to the preamp line.
+let filterShapes = $state<boolean>(loadBool("fastpeq.filterShapes", true));
+export function getFilterShapes(): boolean {
+  return filterShapes;
+}
+export function setFilterShapes(v: boolean): void {
+  filterShapes = v;
+  save("fastpeq.filterShapes", v);
+}

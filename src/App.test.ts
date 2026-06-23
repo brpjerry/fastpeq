@@ -9,6 +9,8 @@ import {
   getSpecialtyIcons,
   setSpecialtyIcons,
   setBluetoothIcons,
+  getFilterShapes,
+  setFilterShapes,
 } from "./lib/prefs.svelte";
 import App from "./App.svelte";
 
@@ -159,6 +161,7 @@ describe("App settings", () => {
     setFilterSet("full");
     setSpecialtyIcons(false);
     setBluetoothIcons(false);
+    setFilterShapes(true);
   });
 
   it("applies an accent color to the document", async () => {
@@ -184,12 +187,29 @@ describe("App settings", () => {
   it("toggles a specialty category group", async () => {
     const { container } = render(App);
     await fireEvent.click(container.querySelector(".gear")!);
-    const sw = container.querySelector<HTMLInputElement>(".cat-switches input[type='checkbox']")!;
+    const label = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("Specialty"),
+    )!;
+    const sw = label.querySelector<HTMLInputElement>("input[type='checkbox']")!;
 
     const before = getSpecialtyIcons();
     sw.checked = !before;
     await fireEvent.change(sw);
     expect(getSpecialtyIcons()).toBe(!before);
+  });
+
+  it("toggles the filter-shapes handle style", async () => {
+    const { container } = render(App);
+    await fireEvent.click(container.querySelector(".gear")!);
+    const label = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("filter's shape"),
+    )!;
+    const cb = label.querySelector<HTMLInputElement>("input[type='checkbox']")!;
+
+    const before = getFilterShapes();
+    cb.checked = !before;
+    await fireEvent.change(cb);
+    expect(getFilterShapes()).toBe(!before);
   });
 });
 

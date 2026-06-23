@@ -43,6 +43,7 @@
     view = "both",
     measurement = [],
     hoveredId = null,
+    filterShapes = false,
     onChange,
     onHover,
   }: {
@@ -52,6 +53,7 @@
     view?: "both" | "left" | "right";
     measurement?: MeasPoint[];
     hoveredId?: number | null;
+    filterShapes?: boolean;
     onChange: () => void;
     onHover?: (id: number | null) => void;
   } = $props();
@@ -146,6 +148,26 @@
     { f: 20000, t: "20k" },
   ];
   const majorF = new Set(labF.map((l) => l.f));
+
+  // One band's own response shape (preamp-centred), so the trace passes through
+  // its handle. Drawn instead of the dashed stem when filter shapes are on.
+  const shapePath = (b: Band) =>
+    pathFor(
+      responseCurve(
+        [
+          {
+            enabled: true,
+            kind: b.kind,
+            freq: b.freq,
+            gain: kindHasGain(b.kind) ? b.gain : null,
+            q: kindHasQ(b.kind) ? b.q : null,
+            channel: b.channel,
+          },
+        ],
+        preamp,
+        freqs,
+      ),
+    );
 
   const handleColor = (b: Band) => (b.channel.kind === "right" ? "#e0a458" : "var(--accent)");
   // Handles sit at the filter's output level (preamp + gain), so with the
@@ -260,7 +282,9 @@
           aria-label={`Band ${i + 1}`}
           aria-valuenow={band.freq}
         >
-          {#if kindHasGain(band.kind)}
+          {#if filterShapes}
+            <path d={shapePath(band)} class="shape" style:stroke={handleColor(band)} />
+          {:else if kindHasGain(band.kind)}
             <line x1={hx} y1={yOf(preamp)} x2={hx} y2={hy} class="stem" style:stroke={handleColor(band)} />
           {/if}
           <circle cx={hx} cy={hy} r="11" class="hit" />
@@ -398,6 +422,14 @@
     stroke-width: 1.5;
     stroke-dasharray: 2 3;
     opacity: 0.7;
+    vector-effect: non-scaling-stroke;
+  }
+  /* Per-band filter shape passing through its handle. */
+  .shape {
+    fill: none;
+    pointer-events: none;
+    stroke-width: 1.5;
+    opacity: 0.5;
     vector-effect: non-scaling-stroke;
   }
   .hnum {

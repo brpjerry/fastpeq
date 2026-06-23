@@ -10,6 +10,7 @@
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, balanceFromTrim, toneFilters, peakGainDb, type CurveFilter } from "./eq";
   import { parseRew, normalize, type MeasPoint } from "./measurement";
   import { dismissable } from "./dismiss";
+  import { getFilterShapes } from "./prefs.svelte";
 
   let {
     name,
@@ -577,6 +578,7 @@
             {view}
             {measurement}
             {hoveredId}
+            filterShapes={getFilterShapes()}
             onChange={schedule}
             onHover={(id) => (hoveredId = id)}
           />
