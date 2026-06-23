@@ -24,6 +24,7 @@
     F_MAX,
     type PlotBox,
   } from "./graph";
+  import { gapDb, targetValueAt, compensateCurve } from "./curve";
   import type { Channel, FilterKind } from "./types";
 
   type Band = {
@@ -126,7 +127,7 @@
   const targetCurve = $derived(ready && target.length ? sampleAt(target, freqs) : null);
   const compCurve = $derived(compensate && targetCurve ? targetCurve : null);
   const compensated = (resp: number[]): number[] =>
-    compCurve ? resp.map((v, i) => v - compCurve[i]) : resp;
+    compCurve ? compensateCurve(resp, compCurve) : resp;
 
   // The target line as displayed: the target curve normally, but a flat
   // centerline when compensating (the target collapses to flat) or when the
@@ -279,13 +280,12 @@
     let gap: string | null = null;
     let ly = padT + 12;
     if (showTarget) {
-      const tgtVal = (target.length ? sampleAt(target, [f])[0] : 0) + preamp;
-      const measVal = measurement.length ? sampleAt(measurement, [f])[0] : 0;
-      const fr = responseCurve(sideFilters("left"), preamp + trim.left, [f])[0] + measVal;
-      gap = Math.abs(fr - tgtVal).toFixed(1) + " dB";
+      gap =
+        gapDb(sideFilters("left"), preamp + trim.left, measurement, target, preamp, f).toFixed(1) +
+        " dB";
       // Sit at the crosshair–target intersection; compensating flattens the
       // target onto the centerline.
-      const lineVal = compensate ? preamp : tgtVal;
+      const lineVal = compensate ? preamp : targetValueAt(target, preamp, f);
       ly = Math.max(padT + 12, Math.min(h - padB - 4, yOf(lineVal) - 5));
     }
     return { x: cursorX, text, lx, width, gap, ly };
