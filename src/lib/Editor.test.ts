@@ -6,7 +6,13 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Config } from "./types";
 import * as api from "./api";
 import { addTarget, removeTarget } from "./targets.svelte";
-import { getTargetId, getMeasurement, setMeasurement, getCompensate } from "./presetView.svelte";
+import {
+  getTargetId,
+  getMeasurement,
+  setMeasurement,
+  getCompensate,
+  getShowRefs,
+} from "./presetView.svelte";
 import Editor from "./Editor.svelte";
 
 // The Editor only touches these four IPC calls; an explicit mock is clearer than
@@ -208,5 +214,24 @@ describe("Editor", () => {
     toggle.checked = true;
     await fireEvent.change(toggle);
     expect(getCompensate("CompPreset")).toBe(true);
+  });
+
+  it("toggles the reference lines per preset", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "RefPreset" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+
+    const toggle = await waitFor(() => {
+      const label = [...container.querySelectorAll(".compensate")].find((l) =>
+        l.textContent!.includes("References"),
+      );
+      const t = label?.querySelector<HTMLInputElement>("input[type='checkbox']");
+      if (!t) throw new Error("references toggle not rendered");
+      return t;
+    });
+    expect(getShowRefs("RefPreset")).toBe(true);
+    toggle.checked = false;
+    await fireEvent.change(toggle);
+    expect(getShowRefs("RefPreset")).toBe(false);
   });
 });

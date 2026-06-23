@@ -5,6 +5,8 @@ import {
   setTargetId,
   getCompensate,
   setCompensate,
+  getShowRefs,
+  setShowRefs,
   getMeasurement,
   setMeasurement,
   clearMeasurement,
@@ -25,6 +27,13 @@ describe("presetView store", () => {
     setCompensate("C", true);
     expect(getCompensate("C")).toBe(true);
     expect(getCompensate("D")).toBe(false);
+  });
+
+  it("defaults references to on and toggles per preset", () => {
+    expect(getShowRefs("F")).toBe(true);
+    setShowRefs("F", false);
+    expect(getShowRefs("F")).toBe(false);
+    expect(getShowRefs("G")).toBe(true);
   });
 
   it("stores and clears a per-preset measurement", () => {

@@ -26,6 +26,21 @@ describe("ResponseCurve", () => {
     expect(container.querySelector(".resp.reference")).toBeTruthy();
   });
 
+  it("hides the measurement reference when showRefs is off", () => {
+    const { container } = render(ResponseCurve, {
+      props: {
+        filters: [],
+        preamp: 0,
+        measurement: [
+          { freq: 100, spl: 3 },
+          { freq: 1000, spl: 0 },
+        ],
+        showRefs: false,
+      },
+    });
+    expect(container.querySelector(".resp.reference")).toBeNull();
+  });
+
   it("compensating to a target shifts the trace", () => {
     const target = [
       { freq: 20, spl: 6 },

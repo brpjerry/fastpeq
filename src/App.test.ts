@@ -202,7 +202,7 @@ describe("App settings", () => {
     const { container } = render(App);
     await fireEvent.click(container.querySelector(".gear")!);
     const label = [...container.querySelectorAll(".switch")].find((l) =>
-      l.textContent!.includes("filter's shape"),
+      l.textContent!.includes("filter shape"),
     )!;
     const cb = label.querySelector<HTMLInputElement>("input[type='checkbox']")!;
 

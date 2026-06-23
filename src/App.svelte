@@ -619,7 +619,7 @@
                 onchange={(e) => setFilterShapes(e.currentTarget.checked)}
               />
               <span class="track"><span class="thumb"></span></span>
-              <span class="sw-label">Show each filter's shape (instead of a stem to the preamp)</span>
+              <span class="sw-label">Show filter shape</span>
             </label>
           </div>
         </section>

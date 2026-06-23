@@ -44,6 +44,7 @@
     measurement = [],
     target = [],
     compensate = false,
+    showRefs = true,
     hoveredId = null,
     filterShapes = false,
     onChange,
@@ -56,6 +57,7 @@
     measurement?: MeasPoint[];
     target?: MeasPoint[];
     compensate?: boolean;
+    showRefs?: boolean;
     hoveredId?: number | null;
     filterShapes?: boolean;
     onChange: () => void;
@@ -267,10 +269,20 @@
         <text x={xOf(l.f)} y={h - 8} class="lbl" text-anchor="middle">{l.t}</text>
       {/each}
 
-      {#if targetCurve && !compensate}
+      <!-- Per-band shapes in one group: the group opacity flattens overlaps so
+           crossing shapes don't darken where they stack. Drawn behind the traces. -->
+      {#if filterShapes}
+        <g class="shapes">
+          {#each handleBands as band (band.id)}
+            <path d={shapePath(band)} class="shape" style:stroke={handleColor(band)} />
+          {/each}
+        </g>
+      {/if}
+
+      {#if targetCurve && !compensate && showRefs}
         <path d={targetPath} class="resp target" />
       {/if}
-      {#if measCurve}
+      {#if measCurve && showRefs}
         <path d={measPath} class="resp reference" />
       {/if}
       {#if stereo}
@@ -299,9 +311,7 @@
           aria-label={`Band ${i + 1}`}
           aria-valuenow={band.freq}
         >
-          {#if filterShapes}
-            <path d={shapePath(band)} class="shape" style:stroke={handleColor(band)} />
-          {:else if kindHasGain(band.kind)}
+          {#if !filterShapes && kindHasGain(band.kind)}
             <line x1={hx} y1={yOf(preamp)} x2={hx} y2={hy} class="stem" style:stroke={handleColor(band)} />
           {/if}
           <circle cx={hx} cy={hy} r="11" class="hit" />
@@ -447,12 +457,15 @@
     opacity: 0.7;
     vector-effect: non-scaling-stroke;
   }
-  /* Per-band filter shape passing through its handle. */
+  /* Per-band filter shapes. The group opacity (not per-path) keeps overlapping
+     shapes from compounding into darker bands; kept low so they stay subtle. */
+  .shapes {
+    opacity: 0.25;
+  }
   .shape {
     fill: none;
     pointer-events: none;
     stroke-width: 1.5;
-    opacity: 0.5;
     vector-effect: non-scaling-stroke;
   }
   .hnum {

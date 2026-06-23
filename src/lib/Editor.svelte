@@ -17,6 +17,8 @@
     setTargetId,
     getCompensate,
     setCompensate,
+    getShowRefs,
+    setShowRefs,
     getMeasurement,
     setMeasurement,
     clearMeasurement as clearSavedMeasurement,
@@ -89,6 +91,8 @@
 
   // Whether to show the response compensated to the selected target (per preset).
   const compensate = $derived(getCompensate(name));
+  // Whether the target/measurement dashed reference lines are drawn (per preset).
+  const showRefs = $derived(getShowRefs(name));
 
   // Live-apply throttle: at most one write to config.txt per THROTTLE ms while
   // dragging, with a guaranteed trailing write so the final value always lands.
@@ -523,7 +527,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} />
+      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} {showRefs} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -597,6 +601,14 @@
               />
               Compensate
             </label>
+            <label class="compensate" title="Show the target and measurement dashed reference lines">
+              <input
+                type="checkbox"
+                checked={getShowRefs(name)}
+                onchange={(e) => setShowRefs(name, e.currentTarget.checked)}
+              />
+              References
+            </label>
             {#if measurement.length}
               <span class="meas-name" title={measName}>{measName}</span>
               <button onclick={clearMeasurement}>Clear measurement</button>
@@ -614,6 +626,7 @@
             {measurement}
             target={targetPoints}
             {compensate}
+            {showRefs}
             {hoveredId}
             filterShapes={getFilterShapes()}
             onChange={schedule}
