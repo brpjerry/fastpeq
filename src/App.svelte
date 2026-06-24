@@ -422,7 +422,10 @@
       flash("Type a name first");
       return null;
     }
-    if (presets.includes(name)) {
+    // Case-insensitive: the preset store is a folder of .txt files and Windows
+    // treats "HD600" and "hd600" as the same file, so allowing both would
+    // silently overwrite one.
+    if (presets.some((p) => p.toLowerCase() === name.toLowerCase())) {
       flash(`“${name}” already exists`);
       return null;
     }
@@ -451,9 +454,9 @@
       await api.captureCurrent(name);
       cancelCreate();
       await reload();
-      active = name; // the capture matches the live config, so it's active
+      active = name; // the saved config matches the live config, so it's active
       selected = name;
-      flash(`Captured “${name}”`);
+      flash(`Saved current config as “${name}”`);
       await revealSelected();
     });
 
@@ -478,7 +481,9 @@
     renaming = null; // leave edit mode regardless of outcome
     const to = renameValue.trim();
     if (!to || to === from) return;
-    if (presets.includes(to)) {
+    // Collide case-insensitively (Windows filesystem), but ignore `from` itself
+    // so fixing only the capitalisation of a name is still allowed.
+    if (presets.some((p) => p !== from && p.toLowerCase() === to.toLowerCase())) {
       flash(`“${to}” already exists`);
       return;
     }
@@ -714,7 +719,7 @@
           <li class="empty">
             {query.trim() || typeFilter
               ? "No presets match your filters."
-              : "No presets yet — create or capture one below."}
+              : "No presets yet — create or save one below."}
           </li>
         {/each}
       </ul>
@@ -744,9 +749,9 @@
               class="capture-btn"
               onclick={capture}
               disabled={busy || !status?.installed}
-              title="Build the preset from the current live Equalizer APO config"
+              title="Save the current live Equalizer APO config as this preset"
             >
-              Capture current
+              Save current
             </button>
             <button class="ghost create-cancel" onclick={cancelCreate} title="Cancel">Cancel</button>
           </div>
@@ -775,7 +780,7 @@
       />
     {:else}
       <section class="panel">
-        <div class="placeholder">Select a preset to edit its filters, or capture your current config.</div>
+        <div class="placeholder">Select a preset to edit its filters, or save your current config.</div>
       </section>
     {/if}
   </div>

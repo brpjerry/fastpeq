@@ -213,6 +213,26 @@ describe("App settings", () => {
   });
 });
 
+describe("App name-conflict guards", () => {
+  it("rejects a new preset whose name collides case-insensitively", async () => {
+    withLibrary(); // includes "Sennheiser HD600"
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await fireEvent.click(container.querySelector(".new-btn")!);
+    await fireEvent.input(container.querySelector(".create input")!, {
+      target: { value: "sennheiser hd600" },
+    });
+    const fromScratch = [...container.querySelectorAll(".create-actions button")].find((b) =>
+      b.textContent!.includes("From scratch"),
+    )!;
+    await fireEvent.click(fromScratch);
+
+    expect(api.savePreset).not.toHaveBeenCalled();
+    await waitFor(() => expect(container.textContent).toContain("already exists"));
+  });
+});
+
 describe("App scroll-to-active", () => {
   it("centers the active preset in the list on open", async () => {
     const scrollSpy = vi.fn();
