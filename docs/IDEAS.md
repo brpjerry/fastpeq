@@ -18,16 +18,15 @@ Guiding principles, to keep the bar high:
 
 ## High value, low risk (do first)
 
-- **Duplicate / "Save as" a preset** *(S)* — clone the current preset under a new
-  name. Today the only way to fork a tuning is to hand-copy it. Pure store op.
-- **Undo / redo in the editor** *(M)* — edits apply live with no take-back; a
-  bounded undo stack (band add/remove/edit, preamp, balance) would make
-  experimentation safe. Frontend-only, keyed off the existing `schedule` points.
-- **A/B compare** *(S–M)* — a momentary "compare" button (or hotkey) that flips
-  between the working tuning and the last-saved version (or a pinned B preset),
-  so you can hear the difference instantly. Leans on the instant-switch design.
-- **Reveal-on-conflict rename / duplicate-name guard** *(S)* — surface a clear
-  error when a rename/duplicate would collide, instead of failing silently.
+- ✅ **Duplicate / "Save as" a preset** — done via **Save current** (the create
+  panel's "Save current" button writes the live config as a new preset).
+- ✅ **Undo / redo in the editor** — done. Bounded history of bands + preamp +
+  balance, coalesced per gesture, with toolbar buttons and `Ctrl+Z`/`Ctrl+Y`.
+- ✅ **Conflict rename / duplicate-name guard** — done. Create/rename now collide
+  **case-insensitively** (Windows filesystem) with a clear error, while a
+  case-only rename of the same preset is still allowed (core `rename` fix).
+- **A/B compare** *(S–M)* — flip between the working tuning and the last-saved
+  version to hear the difference instantly. **Detailed proposal below.**
 
 ## Preset workflow
 
@@ -89,6 +88,83 @@ Guiding principles, to keep the bar high:
   bright environments.
 - **Empty/zero states** *(S)* — friendlier copy when there are no presets, no APO,
   or no targets yet.
+
+---
+
+## A/B compare — detailed proposal
+
+**Goal:** while tuning, instantly hear "is my edit actually better?" by flipping
+the live output between the working edit and a reference, without losing the
+edit.
+
+### What A and B are
+
+- **A = the working edit** (the current in-editor state, possibly unsaved).
+- **B = the last-saved version** of the same preset (the reference).
+
+This covers the dominant need — judging unsaved edits — and reuses state the
+editor already has. A later extension can let B be a *pinned other preset* for
+cross-headphone comparison (see end).
+
+### Where the control goes
+
+A single **Compare** toggle in the editor header actions, immediately left of
+**Save** (so the cluster reads `↶ ↷ | Compare | Save`):
+
+```
+Beyerdynamic DT990 Pro 250        ● live   ↶  ↷   [ A ⇄ B ]   [ Save ]
+```
+
+- **Enabled only when `dirty`** — with no unsaved changes, A and B are identical,
+  so there's nothing to compare (button greyed with a "no unsaved changes to
+  compare" tooltip).
+- The button shows which side is live: **`A ⇄ B`** with the active side
+  highlighted (A = accent while editing, B = a distinct "reference" colour while
+  comparing). A small **`B · saved`** badge replaces the `● live` indicator while
+  on B, so it's obvious you're hearing the reference.
+- **Keyboard:** `Tab`-free shortcut — hold **`\``** (backtick) or press
+  **`Ctrl+\``** to toggle; guarded so it never fires while a text field is
+  focused (same guard as the new undo shortcuts).
+
+### Behaviour
+
+- **Toggle model** (recommended over press-and-hold for discoverability): click
+  (or shortcut) flips A→B→A. While on **B**, fastpeq `applyLive`s the saved
+  config; flipping back `applyLive`s the working config.
+- **Editing is locked on B** — band rows, sliders and the preamp go read-only
+  (dimmed) while comparing, with a hint "Comparing with the saved version —
+  switch back to A to edit." This prevents edits against the wrong baseline.
+- **Graph:** draw the *inactive* side as a faded dashed reference (reuse the
+  existing measurement/target reference styling) so the difference is visible as
+  well as audible.
+- **Exiting:** leaving compare, saving, or switching presets always restores **A**
+  and unlocks editing. `Esc` exits compare.
+
+### Implementation sketch
+
+- The editor already builds the working config with `buildConfig()`. Capture the
+  **saved** config once at load and after each save: `savedConfig =
+  $state.snapshot` of the loaded `Config` (or re-`buildConfig()` right after a
+  successful `save()`).
+- Add `comparing = $state(false)`. An `$effect`/handler applies the right side:
+  `api.applyLive(comparing ? savedConfig : buildConfig())`. The existing throttle
+  path is reused; comparing just swaps the source.
+- Gate the live-apply `schedule()` while `comparing` so in-flight edits don't
+  fight the reference (belt-and-braces with the read-only lock).
+- Pass a `comparing`/`reference` prop to `CurveEditor`/`ResponseCurve` to render
+  the faded other-side trace.
+- Restore on `onDestroy`, preset change, and save.
+
+**Effort:** ~**M**. Most of the plumbing (live apply, reference traces, the header
+action slot, the keyboard-guard pattern) already exists; the new parts are the
+`comparing` state machine, the read-only lock, and the saved-config cache.
+
+### Later: cross-preset B
+
+Add "Pin as compare (B)" to a preset's right-click menu. When a B preset is
+pinned, Compare flips between the active preset and B by `applyLive`-ing each
+(no editor lock needed since neither is "the edit"). This is purely additive on
+top of the toggle above.
 
 ---
 
