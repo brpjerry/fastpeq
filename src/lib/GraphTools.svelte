@@ -14,6 +14,7 @@
     setShowMeasRef,
   } from "./presetView.svelte";
   import Switch from "./Switch.svelte";
+  import SelectMenu from "./SelectMenu.svelte";
   import type { MeasPoint } from "./measurement";
 
   let {
@@ -48,14 +49,14 @@
         checked={compensate || getShowTargetRef(name)}
         onChange={(v) => setShowTargetRef(name, v)}
       />
-      <label class="target-select" title="Reference target curve (add targets in Settings)">
+      <span class="target-select" title="Reference target curve (add targets in Settings)">
         Target
-        <select value={getTargetId(name)} onchange={(e) => setTargetId(name, e.currentTarget.value)}>
-          {#each getTargets() as t (t.id)}
-            <option value={t.id}>{t.name}</option>
-          {/each}
-        </select>
-      </label>
+        <SelectMenu
+          value={getTargetId(name)}
+          options={getTargets().map((t) => ({ value: t.id, label: t.name }))}
+          onChange={(v) => setTargetId(name, v)}
+        />
+      </span>
     </div>
     <Switch
       compact
@@ -136,9 +137,5 @@
     gap: 5px;
     font-size: 12px;
     color: var(--muted);
-  }
-  .target-select select {
-    padding: 2px 4px;
-    font-size: 12px;
   }
 </style>

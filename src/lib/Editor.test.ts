@@ -190,14 +190,21 @@ describe("Editor", () => {
     await waitFor(() => expect(bandCount(container)).toBe(1));
     await fireEvent.click(container.querySelector(".expand-btn")!);
 
-    const select = await waitFor(() => {
-      const s = container.querySelector<HTMLSelectElement>(".target-select select");
-      if (!s) throw new Error("target select not rendered");
-      return s;
+    const trigger = await waitFor(() => {
+      const b = container.querySelector<HTMLButtonElement>(".target-select .sm-btn");
+      if (!b) throw new Error("target dropdown not rendered");
+      return b;
     });
-    expect([...select.options].map((o) => o.textContent)).toContain("Flat");
+    await fireEvent.click(trigger);
 
-    await fireEvent.change(select, { target: { value: id } });
+    const items = await waitFor(() => {
+      const list = [...container.querySelectorAll<HTMLButtonElement>(".sm-menu .sm-item")];
+      if (!list.length) throw new Error("target menu not open");
+      return list;
+    });
+    expect(items.map((i) => i.textContent!.trim())).toContain("Flat");
+
+    await fireEvent.click(items.find((i) => i.textContent!.trim() === "Harman")!);
     expect(getTargetId("TgtPreset")).toBe(id);
     removeTarget(id);
   });
