@@ -1,8 +1,9 @@
 <script lang="ts">
   // A custom dropdown for a plain list of options, styled like the rest of the
-  // app's menus (TypeSelect, the device-type filter) instead of the native OS
-  // <select>. Same fixed-position + dismissable popup pattern as TypeSelect.
-  import { dismissable } from "./dismiss";
+  // app's menus instead of the native OS <select>. The popup chrome and dismiss
+  // wiring live in FloatingMenu; this supplies the trigger and the option list.
+  import FloatingMenu from "./FloatingMenu.svelte";
+  import { anchorBelow, type Anchor } from "./floating";
 
   let {
     value,
@@ -19,7 +20,7 @@
   } = $props();
 
   let open = $state(false);
-  let pos = $state<{ left: number; top: number; width: number } | null>(null);
+  let anchor = $state<Anchor | null>(null);
   let btn = $state<HTMLButtonElement | null>(null);
 
   const current = $derived(options.find((o) => o.value === value));
@@ -29,8 +30,7 @@
       open = false;
       return;
     }
-    const r = btn.getBoundingClientRect();
-    pos = { left: r.left, top: r.bottom + 4, width: Math.max(r.width, minWidth) };
+    anchor = anchorBelow(btn, minWidth);
     open = true;
   }
 
@@ -47,19 +47,13 @@
   </svg>
 </button>
 
-{#if open && pos}
-  <div
-    class="sm-menu"
-    style="left:{pos.left}px; top:{pos.top}px; min-width:{pos.width}px"
-    use:dismissable={{ onDismiss: () => (open = false), ignore: btn }}
-  >
-    {#each options as o (o.value)}
-      <button class="sm-item" class:sel={o.value === value} type="button" onclick={() => pick(o.value)}>
-        {o.label}
-      </button>
-    {/each}
-  </div>
-{/if}
+<FloatingMenu class="sm-menu" {open} {anchor} onDismiss={() => (open = false)} ignore={btn}>
+  {#each options as o (o.value)}
+    <button class="menu-item sm-item" class:sel={o.value === value} type="button" onclick={() => pick(o.value)}>
+      {o.label}
+    </button>
+  {/each}
+</FloatingMenu>
 
 <style>
   .sm-btn {
@@ -80,33 +74,7 @@
     flex: none;
     opacity: 0.55;
   }
-  .sm-menu {
-    position: fixed;
-    z-index: 51;
-    max-height: 280px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    padding: 4px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  }
   .sm-item {
-    text-align: left;
-    white-space: nowrap;
-    border: none;
-    background: transparent;
-    padding: 6px 8px;
-    border-radius: 5px;
-    font-size: 13px;
     color: var(--muted);
-  }
-  .sm-item:hover {
-    background: var(--panel-2);
-  }
-  .sm-item.sel {
-    color: var(--accent);
   }
 </style>

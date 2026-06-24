@@ -8,7 +8,8 @@
   import Knob from "./lib/Knob.svelte";
   import Switch from "./lib/Switch.svelte";
   import Settings from "./lib/Settings.svelte";
-  import { dismissable } from "./lib/dismiss";
+  import FloatingMenu from "./lib/FloatingMenu.svelte";
+  import { anchorBelow, type Anchor } from "./lib/floating";
   import { starterConfig, defaultBandCount } from "./lib/starter";
   import { addTarget } from "./lib/targets.svelte";
   import { renamePresetView, clearPresetView } from "./lib/presetView.svelte";
@@ -233,7 +234,7 @@
   // Custom device-type filter dropdown. A native <select> can't render the
   // category icons in its options, so this mirrors the right-click picker:
   // a trigger button plus a fixed-positioned themed menu anchored under it.
-  let typeMenu = $state<{ left: number; top: number; minW: number } | null>(null);
+  let typeMenu = $state<Anchor | null>(null);
   let typeTriggerEl = $state<HTMLButtonElement | null>(null);
   const typeFilterLabel = $derived(
     typeFilter === ""
@@ -247,14 +248,8 @@
       typeMenu = null;
       return;
     }
-    const el = typeTriggerEl;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    typeMenu = {
-      left: Math.max(8, Math.min(r.left, window.innerWidth - 200)),
-      top: r.bottom + 4,
-      minW: r.width,
-    };
+    if (!typeTriggerEl) return;
+    typeMenu = anchorBelow(typeTriggerEl);
   }
   function pickType(v: string) {
     typeFilter = v;
@@ -789,18 +784,21 @@
 
   {#if catMenu}
     {@const menu = catMenu}
-    <div
+    <FloatingMenu
       class="cat-menu"
-      style="left:{menu.x}px; top:{menu.y}px"
-      use:dismissable={{ onDismiss: () => (catMenu = null) }}
+      open={true}
+      anchor={{ left: menu.x, top: menu.y, minWidth: 184 }}
+      onDismiss={() => (catMenu = null)}
+      zIndex={81}
+      maxHeight="70vh"
     >
-      <button class="cat-menu-item" class:sel={!categories[menu.name]} onclick={() => pickCategory(menu.name, null)}>
+      <button class="menu-item cat-menu-item" class:sel={!categories[menu.name]} onclick={() => pickCategory(menu.name, null)}>
         <span class="cat-menu-icon"><CategoryIcon category={undefined} /></span>
         Uncategorized
       </button>
       {#each selectableCategories as c}
         <button
-          class="cat-menu-item"
+          class="menu-item cat-menu-item"
           class:sel={categories[menu.name] === c.value}
           onclick={() => pickCategory(menu.name, c.value)}
         >
@@ -808,35 +806,36 @@
           {c.label}
         </button>
       {/each}
-    </div>
+    </FloatingMenu>
   {/if}
 
-  {#if typeMenu}
-    {@const m = typeMenu}
-    <div
-      class="cat-menu type-menu"
-      role="listbox"
-      style="left:{m.left}px; top:{m.top}px; min-width:{m.minW}px"
-      use:dismissable={{ onDismiss: () => (typeMenu = null), ignore: typeTriggerEl }}
-    >
-      <button class="cat-menu-item" class:sel={typeFilter === ""} onclick={() => pickType("")}>
-        <span class="cat-menu-icon"><svg class="type-all-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" /></svg></span>
-        All types
+  <FloatingMenu
+    class="cat-menu type-menu"
+    role="listbox"
+    open={!!typeMenu}
+    anchor={typeMenu}
+    onDismiss={() => (typeMenu = null)}
+    ignore={typeTriggerEl}
+    zIndex={81}
+    maxHeight="70vh"
+  >
+    <button class="menu-item cat-menu-item" class:sel={typeFilter === ""} onclick={() => pickType("")}>
+      <span class="cat-menu-icon"><svg class="type-all-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" /></svg></span>
+      All types
+    </button>
+    {#each usedCategories as c}
+      <button class="menu-item cat-menu-item" class:sel={typeFilter === c.value} onclick={() => pickType(c.value)}>
+        <span class="cat-menu-icon"><CategoryIcon category={c.value} /></span>
+        {c.label}
       </button>
-      {#each usedCategories as c}
-        <button class="cat-menu-item" class:sel={typeFilter === c.value} onclick={() => pickType(c.value)}>
-          <span class="cat-menu-icon"><CategoryIcon category={c.value} /></span>
-          {c.label}
-        </button>
-      {/each}
-      {#if hasUncategorized}
-        <button class="cat-menu-item" class:sel={typeFilter === "__none"} onclick={() => pickType("__none")}>
-          <span class="cat-menu-icon"><CategoryIcon category={undefined} /></span>
-          Uncategorized
-        </button>
-      {/if}
-    </div>
-  {/if}
+    {/each}
+    {#if hasUncategorized}
+      <button class="menu-item cat-menu-item" class:sel={typeFilter === "__none"} onclick={() => pickType("__none")}>
+        <span class="cat-menu-icon"><CategoryIcon category={undefined} /></span>
+        Uncategorized
+      </button>
+    {/if}
+  </FloatingMenu>
 
   {#if message}
     <div class="toast">{message}</div>
@@ -1156,37 +1155,13 @@
   }
 
   /* Right-click device-type picker, positioned at the cursor. */
-  .cat-menu {
-    position: fixed;
-    z-index: 81;
-    min-width: 184px;
-    max-height: 70vh;
-    overflow-y: auto;
-    padding: 4px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  }
+  /* The popup chrome and base item look come from FloatingMenu; these are the
+     category menus' specifics — the icon row and a brighter label. */
   .cat-menu-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 100%;
-    text-align: left;
-    white-space: nowrap;
-    border: none;
-    background: transparent;
-    padding: 6px 8px;
-    border-radius: 5px;
-    font-size: 13px;
     color: var(--text);
-  }
-  .cat-menu-item:hover {
-    background: var(--panel-2);
-  }
-  .cat-menu-item.sel {
-    color: var(--accent);
   }
   .cat-menu-icon {
     flex: none;
