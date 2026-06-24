@@ -3,7 +3,7 @@
   // visibility, compensate, and measurement import — all per preset. Reads/writes
   // its per-preset state via presetView; the editor passes the effective
   // compensate/canCompensate it already derives plus the import/clear actions.
-  import { getTargets } from "./targets.svelte";
+  import { getTargets, getTarget } from "./targets.svelte";
   import {
     getTargetId,
     setTargetId,
@@ -12,6 +12,10 @@
     setShowTargetRef,
     getShowMeasRef,
     setShowMeasRef,
+    getTargetOffset,
+    setTargetOffset,
+    getTargetMatchFreq,
+    setTargetMatchFreq,
   } from "./presetView.svelte";
   import Switch from "./Switch.svelte";
   import SelectMenu from "./SelectMenu.svelte";
@@ -25,6 +29,7 @@
     measName,
     onImport,
     onClear,
+    onMatch,
   }: {
     name: string;
     compensate: boolean;
@@ -33,7 +38,13 @@
     measName: string;
     onImport: () => void;
     onClear: () => void;
+    onMatch: () => void;
   } = $props();
+
+  // Offset/match only do something for a real (non-flat) target, so the trace
+  // controls only appear then — keeps the primary row uncluttered for Flat.
+  const adjustable = $derived(getTarget(getTargetId(name)).points.length > 0);
+  const clampFreq = (v: number) => Math.max(20, Math.min(20000, v || 1000));
 </script>
 
 <div class="graph-tools">
@@ -87,6 +98,41 @@
       {/if}
     </div>
   </div>
+  {#if adjustable}
+    <!-- Target trace controls — a manual offset and an align-at-frequency Match,
+         only shown for a non-flat target. -->
+    <div class="target-adjust">
+      <label class="adj-group" title="Shift the whole target trace up or down">
+        Target offset
+        <input
+          class="num"
+          type="number"
+          step="0.5"
+          value={getTargetOffset(name)}
+          onchange={(e) => setTargetOffset(name, Number(e.currentTarget.value) || 0)}
+        />
+        <small>dB</small>
+      </label>
+      <span class="adj-group">
+        <label title="The frequency Match aligns the target to the response at">
+          Match at
+          <input
+            class="num"
+            type="number"
+            min="20"
+            max="20000"
+            step="10"
+            value={getTargetMatchFreq(name)}
+            onchange={(e) => setTargetMatchFreq(name, clampFreq(Number(e.currentTarget.value)))}
+          />
+          <small>Hz</small>
+        </label>
+        <button onclick={onMatch} title="Shift the target so it meets the response at this frequency">
+          Match
+        </button>
+      </span>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -137,5 +183,31 @@
     gap: 5px;
     font-size: 12px;
     color: var(--muted);
+  }
+  /* Second, contextual row: the target trace adjustments (offset + match). */
+  .target-adjust {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .adj-group,
+  .adj-group label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .target-adjust .num {
+    width: 58px;
+    padding: 2px 5px;
+    font-size: 12px;
+  }
+  .target-adjust button {
+    padding: 3px 10px;
+    font-size: 12px;
   }
 </style>

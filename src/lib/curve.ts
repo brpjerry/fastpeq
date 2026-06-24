@@ -43,3 +43,18 @@ export function gapDb(
 export function compensateCurve(resp: number[], target: number[]): number[] {
   return resp.map((v, i) => v - target[i]);
 }
+
+/**
+ * The dB offset that shifts `target` so its displayed line meets the FR at
+ * `freq`. Both the FR and the target line carry the preamp, so it cancels and
+ * the offset is just (filters + measurement) − target at that frequency.
+ */
+export function matchOffset(
+  filters: CurveFilter[],
+  preamp: number,
+  measurement: MeasPoint[],
+  target: MeasPoint[],
+  freq: number,
+): number {
+  return frValueAt(filters, preamp, measurement, freq) - preamp - valueAt(target, freq);
+}

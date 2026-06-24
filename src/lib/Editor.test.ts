@@ -14,6 +14,7 @@ import {
   getCompensate,
   setCompensate,
   getShowMeasRef,
+  getTargetOffset,
 } from "./presetView.svelte";
 import Editor from "./Editor.svelte";
 
@@ -257,6 +258,29 @@ describe("Editor", () => {
       return t;
     });
     expect(toggle.disabled).toBe(true); // nothing to compensate against
+    // The target trace controls are hidden for the Flat target.
+    expect(container.querySelector(".target-adjust")).toBeNull();
+  });
+
+  it("matches the target offset to the response at the match frequency", async () => {
+    const id = addTarget("Tm", [{ freq: 100, spl: 2 }, { freq: 1000, spl: 6 }]);
+    setTargetId("MatchPreset", id);
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "MatchPreset" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+
+    const matchBtn = await waitFor(() => {
+      const b = [...container.querySelectorAll(".target-adjust button")].find((x) =>
+        x.textContent!.includes("Match"),
+      );
+      if (!b) throw new Error("match button not rendered");
+      return b;
+    });
+    // Default match freq 1 kHz, target=6 there, flat 0 dB bands → offset -6.
+    expect(getTargetOffset("MatchPreset")).toBe(0);
+    await fireEvent.click(matchBtn);
+    expect(getTargetOffset("MatchPreset")).toBeCloseTo(-6, 1);
+    removeTarget(id);
   });
 
   it("toggles the measurement reference per preset", async () => {

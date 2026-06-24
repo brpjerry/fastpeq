@@ -14,6 +14,10 @@ import {
   clearMeasurement,
   renamePresetView,
   clearPresetView,
+  getTargetOffset,
+  setTargetOffset,
+  getTargetMatchFreq,
+  setTargetMatchFreq,
 } from "./presetView.svelte";
 
 beforeEach(() => localStorage.clear());
@@ -42,6 +46,17 @@ describe("presetView store", () => {
     setShowTargetRef("F", false);
     expect(getShowTargetRef("F")).toBe(false);
     expect(getShowMeasRef("G")).toBe(true); // independent per preset
+  });
+
+  it("defaults the target offset to 0 dB and match freq to 1 kHz, per preset", () => {
+    expect(getTargetOffset("H")).toBe(0);
+    expect(getTargetMatchFreq("H")).toBe(1000);
+    setTargetOffset("H", -3.5);
+    setTargetMatchFreq("H", 500);
+    expect(getTargetOffset("H")).toBe(-3.5);
+    expect(getTargetMatchFreq("H")).toBe(500);
+    expect(getTargetOffset("I")).toBe(0); // independent per preset
+    expect(getTargetMatchFreq("I")).toBe(1000);
   });
 
   it("stores and clears a per-preset measurement", () => {

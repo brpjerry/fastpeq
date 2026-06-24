@@ -23,7 +23,11 @@
     getMeasurement,
     setMeasurement,
     clearMeasurement as clearSavedMeasurement,
+    getTargetOffset,
+    setTargetOffset,
+    getTargetMatchFreq,
   } from "./presetView.svelte";
+  import { matchOffset } from "./curve";
 
   let {
     name,
@@ -81,8 +85,23 @@
   const clipping = $derived(clipPeak > 0.05);
 
   // The per-preset target curve (Flat by default), shown on the graph as a
-  // reference. Reactive to the selected target and the current preset.
-  const targetPoints = $derived(getTarget(getTargetId(name)).points);
+  // reference. Reactive to the selected target and the current preset. A manual
+  // dB offset (set directly or by the "Match" action) shifts the whole trace; it
+  // bakes into the points so the gap readout and compensation pick it up too.
+  const targetBase = $derived(getTarget(getTargetId(name)).points);
+  const targetOffset = $derived(getTargetOffset(name));
+  const targetPoints = $derived(
+    targetOffset && targetBase.length
+      ? targetBase.map((p) => ({ freq: p.freq, spl: p.spl + targetOffset }))
+      : targetBase,
+  );
+
+  // Shift the target so its line meets the current response at the saved match
+  // frequency — the standard "align at a reference frequency" for headphone EQ.
+  function matchTarget() {
+    const off = matchOffset(bands as CurveFilter[], preamp, measurement, targetBase, getTargetMatchFreq(name));
+    setTargetOffset(name, Math.round(off * 10) / 10);
+  }
 
   // Imported FR measurement, saved per preset and auto-loaded whenever this
   // preset is shown again. The traces become "measurement + filters".
@@ -557,6 +576,7 @@
           {measName}
           onImport={importMeasurement}
           onClear={clearMeasurement}
+          onMatch={matchTarget}
         />
         <div class="graph-fit">
           <CurveEditor
