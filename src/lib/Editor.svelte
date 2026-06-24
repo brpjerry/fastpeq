@@ -450,18 +450,21 @@
 {/snippet}
 
 {#snippet bandsBody()}
-  {#each shown as band (band.id)}
-    <BandRow
-      {band}
-      hovered={band.id === hoveredId}
-      onChange={schedule}
-      onChangeKind={() => changeKind(band)}
-      onRemove={() => removeBand(band.id)}
-      onHover={(h) => (hoveredId = h ? band.id : null)}
-    />
-  {:else}
-    <p class="none">{emptyMsg(view)}</p>
+  {#each bands as band, i (band.id)}
+    {#if inView(band.channel, view)}
+      <BandRow
+        bind:band={bands[i]}
+        hovered={band.id === hoveredId}
+        onChange={schedule}
+        onChangeKind={() => changeKind(band)}
+        onRemove={() => removeBand(band.id)}
+        onHover={(h) => (hoveredId = h ? band.id : null)}
+      />
+    {/if}
   {/each}
+  {#if shown.length === 0}
+    <p class="none">{emptyMsg(view)}</p>
+  {/if}
 {/snippet}
 
 {#snippet bandActions()}

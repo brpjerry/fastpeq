@@ -20,7 +20,7 @@
   };
 
   let {
-    band,
+    band = $bindable(),
     hovered,
     onChange,
     onChangeKind,
