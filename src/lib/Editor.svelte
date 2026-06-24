@@ -6,9 +6,9 @@
   import ResponseCurve from "./ResponseCurve.svelte";
   import CurveEditor from "./CurveEditor.svelte";
   import ToneGenerator from "./ToneGenerator.svelte";
-  import TypeSelect from "./TypeSelect.svelte";
   import Switch from "./Switch.svelte";
   import GraphTools from "./GraphTools.svelte";
+  import BandRow from "./BandRow.svelte";
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, balanceFromTrim, toneFilters, peakGainDb, type CurveFilter } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { dismissable } from "./dismiss";
@@ -451,55 +451,14 @@
 
 {#snippet bandsBody()}
   {#each shown as band (band.id)}
-    <div
-      class="band"
-      class:off={!band.enabled}
-      class:hover={band.id === hoveredId}
-      onmouseenter={() => (hoveredId = band.id)}
-      onmouseleave={() => (hoveredId = null)}
-      role="presentation"
-    >
-      <input type="checkbox" bind:checked={band.enabled} onchange={schedule} title="Enable / disable" />
-      <TypeSelect
-        value={band.kind}
-        onChange={(v) => {
-          band.kind = v;
-          changeKind(band);
-        }}
-      />
-      <span class="field freq">
-        <input type="number" min="10" max="24000" step="1" bind:value={band.freq} onchange={schedule} />
-        <small>Hz</small>
-      </span>
-      {#if kindHasGain(band.kind)}
-        <span class="field gain">
-          <input
-            type="range"
-            min="-30"
-            max="30"
-            step="0.1"
-            bind:value={band.gain}
-            oninput={schedule}
-            oncontextmenu={() => {
-              band.gain = 0;
-              schedule();
-            }}
-            title="Right-click to reset to 0 dB"
-          />
-          <input type="number" min="-30" max="30" step="0.1" bind:value={band.gain} onchange={schedule} />
-          <small>dB</small>
-        </span>
-      {/if}
-      {#if kindHasQ(band.kind)}
-        <span class="field q">
-          <small>Q</small>
-          <input type="number" min="0.1" max="36" step="0.1" bind:value={band.q} onchange={schedule} />
-        </span>
-      {/if}
-      <button class="danger remove" onclick={() => removeBand(band.id)} title="Remove band">
-        &#10005;
-      </button>
-    </div>
+    <BandRow
+      {band}
+      hovered={band.id === hoveredId}
+      onChange={schedule}
+      onChangeKind={() => changeKind(band)}
+      onRemove={() => removeBand(band.id)}
+      onHover={(h) => (hoveredId = h ? band.id : null)}
+    />
   {:else}
     <p class="none">{emptyMsg(view)}</p>
   {/each}
@@ -710,11 +669,12 @@
     min-height: 0;
   }
   /* The dense band row is tuned for the wider inline panel; let the gain slider
-     give up more space so it still fits the narrower side column. */
-  .overlay-side .field.gain {
+     give up more space so it still fits the narrower side column. The row lives
+     in BandRow now, so :global reaches its .field.gain through the boundary. */
+  .overlay-side :global(.field.gain) {
     min-width: 56px;
   }
-  .overlay-side .field.gain input[type="range"] {
+  .overlay-side :global(.field.gain input[type="range"]) {
     min-width: 38px;
   }
   .overlay-graph {
@@ -873,78 +833,6 @@
     overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: 8px;
-  }
-  .band {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 6px;
-    border-bottom: 1px solid var(--border);
-  }
-  .band:last-child {
-    border-bottom: none;
-  }
-  .band:hover {
-    background: var(--panel-2);
-  }
-  /* Highlighted from the graph: hovering a handle marks its row. */
-  .band.hover {
-    background: var(--panel-2);
-    box-shadow: inset 2px 0 0 var(--accent);
-  }
-  .band.off {
-    opacity: 0.45;
-  }
-  .band input {
-    padding: 2px 5px;
-    font-size: 12px;
-  }
-  .field {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    color: var(--muted);
-    font-size: 11px;
-  }
-  /* Widths fit each field's longest value; no spinner arrows to leave room for. */
-  .field input[type="number"] {
-    width: 46px;
-  }
-  .field.freq input[type="number"] {
-    width: 50px; /* up to 5 digits, e.g. 20000 */
-  }
-  .field.q input[type="number"] {
-    width: 40px; /* e.g. 12.5 */
-  }
-  .field.gain {
-    flex: 1;
-    min-width: 84px;
-  }
-  .field.gain input[type="range"] {
-    flex: 1;
-    min-width: 50px;
-    /* Keep the slider no taller than the other controls so hiding it (for
-       no-gain filter types) doesn't change the row height. */
-    height: 20px;
-    padding: 0;
-  }
-  .field.gain input[type="number"] {
-    width: 46px; /* e.g. -12.3 */
-    flex: none;
-  }
-  .field small {
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-  .remove {
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    font-size: 12px;
-    line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
   }
   .none {
     color: var(--muted);
