@@ -1,12 +1,25 @@
 <script lang="ts">
   import { responseCurve, FREQS, inChannel, balanceTrim, type CurveFilter } from "./eq";
   import { freqToX, dbToY, dbGridLines, pathFrom, type PlotBox } from "./graph";
+  import { sampleAt, type MeasPoint } from "./measurement";
 
   let {
     filters,
     preamp = 0,
     balance = 0,
-  }: { filters: CurveFilter[]; preamp?: number; balance?: number } = $props();
+    measurement = [],
+    target = [],
+    compensate = false,
+    showMeas = true,
+  }: {
+    filters: CurveFilter[];
+    preamp?: number;
+    balance?: number;
+    measurement?: MeasPoint[];
+    target?: MeasPoint[];
+    compensate?: boolean;
+    showMeas?: boolean;
+  } = $props();
 
   const W = 600;
   const H = 190;
@@ -26,19 +39,39 @@
   const stereo = $derived(
     filters.some((f) => f.channel.kind !== "both") || balance !== 0,
   );
+  // With a measurement, the traces become "measurement + filters" — the
+  // corrected response — and the bare measurement shows as a faint reference.
+  const measCurve = $derived(measurement.length ? sampleAt(measurement, FREQS) : null);
+  const withMeas = (resp: number[]): number[] =>
+    measCurve ? resp.map((v, i) => v + measCurve[i]) : resp;
+  // Mirror the big editor's compensate view: subtract the target so a perfect
+  // result reads flat. Kept in sync so the small graph matches per preset.
+  const targetCurve = $derived(target.length ? sampleAt(target, FREQS) : null);
+  const compCurve = $derived(compensate && targetCurve ? targetCurve : null);
+  const compensated = (resp: number[]): number[] =>
+    compCurve ? resp.map((v, i) => v - compCurve[i]) : resp;
+  const measPath = $derived(measCurve ? pathFor(compensated(measCurve.map((v) => v + preamp))) : "");
   const leftPath = $derived(
     pathFor(
-      responseCurve(
-        filters.filter((f) => inChannel(f.channel, "left")),
-        preamp + trim.left,
+      compensated(
+        withMeas(
+          responseCurve(
+            filters.filter((f) => inChannel(f.channel, "left")),
+            preamp + trim.left,
+          ),
+        ),
       ),
     ),
   );
   const rightPath = $derived(
     pathFor(
-      responseCurve(
-        filters.filter((f) => inChannel(f.channel, "right")),
-        preamp + trim.right,
+      compensated(
+        withMeas(
+          responseCurve(
+            filters.filter((f) => inChannel(f.channel, "right")),
+            preamp + trim.right,
+          ),
+        ),
       ),
     ),
   );
@@ -65,6 +98,9 @@
     <text x={xOf(l.f)} y={H - 6} class="lbl" text-anchor="middle">{l.t}</text>
   {/each}
 
+  {#if measCurve && showMeas}
+    <path d={measPath} class="resp reference" />
+  {/if}
   {#if stereo}
     <path d={rightPath} class="resp right" />
     <path d={leftPath} class="resp left" />
@@ -84,15 +120,15 @@
     display: block;
   }
   .bg {
-    fill: #181b21;
+    fill: var(--graph-bg);
     stroke: var(--border);
   }
   .grid {
-    stroke: #2a2f38;
+    stroke: var(--graph-grid);
     stroke-width: 1;
   }
   .axis {
-    stroke: #3a4150;
+    stroke: var(--graph-axis);
     stroke-width: 1;
   }
   .resp {
@@ -104,7 +140,13 @@
     stroke: var(--accent);
   }
   .resp.right {
-    stroke: #e0a458;
+    stroke: var(--chan-right);
+  }
+  .resp.reference {
+    stroke: var(--muted);
+    stroke-width: 1.25;
+    stroke-dasharray: 4 3;
+    opacity: 0.6;
   }
   .lbl {
     fill: var(--muted);

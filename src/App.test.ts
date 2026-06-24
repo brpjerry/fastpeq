@@ -9,6 +9,8 @@ import {
   getSpecialtyIcons,
   setSpecialtyIcons,
   setBluetoothIcons,
+  getFilterShapes,
+  setFilterShapes,
 } from "./lib/prefs.svelte";
 import App from "./App.svelte";
 
@@ -159,6 +161,7 @@ describe("App settings", () => {
     setFilterSet("full");
     setSpecialtyIcons(false);
     setBluetoothIcons(false);
+    setFilterShapes(true);
   });
 
   it("applies an accent color to the document", async () => {
@@ -184,11 +187,75 @@ describe("App settings", () => {
   it("toggles a specialty category group", async () => {
     const { container } = render(App);
     await fireEvent.click(container.querySelector(".gear")!);
-    const sw = container.querySelector<HTMLInputElement>(".cat-switches input[type='checkbox']")!;
+    const label = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("Specialty"),
+    )!;
+    const sw = label.querySelector<HTMLInputElement>("input[type='checkbox']")!;
 
     const before = getSpecialtyIcons();
     sw.checked = !before;
     await fireEvent.change(sw);
     expect(getSpecialtyIcons()).toBe(!before);
+  });
+
+  it("toggles the filter-shapes handle style", async () => {
+    const { container } = render(App);
+    await fireEvent.click(container.querySelector(".gear")!);
+    const label = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("filter shape"),
+    )!;
+    const cb = label.querySelector<HTMLInputElement>("input[type='checkbox']")!;
+
+    const before = getFilterShapes();
+    cb.checked = !before;
+    await fireEvent.change(cb);
+    expect(getFilterShapes()).toBe(!before);
+  });
+});
+
+describe("App scroll-to-active", () => {
+  it("centers the active preset in the list on open", async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    vi.mocked(api.listPresets).mockResolvedValue(["64 Audio U12t", "Sennheiser HD600"]);
+    vi.mocked(api.activePreset).mockResolvedValue("Sennheiser HD600");
+
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    // The active preset is centered (not left at the top of the list).
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledWith({ block: "center" }));
+  });
+
+  it("centers the opened preset after pressing Enter in the search box", async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    vi.mocked(api.listPresets).mockResolvedValue(["64 Audio U12t", "Sennheiser HD600"]);
+
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    scrollSpy.mockClear(); // ignore any on-open scroll
+
+    const search = container.querySelector(".search")!;
+    await fireEvent.input(search, { target: { value: "Senn" } });
+    await fireEvent.keyDown(search, { key: "Enter" });
+
+    // Enter opens the top match, clears the query, and scrolls it into view.
+    await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD600"));
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledWith({ block: "center" }));
+  });
+
+  it("re-centers the active preset when returning from settings", async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    vi.mocked(api.listPresets).mockResolvedValue(["64 Audio U12t", "Sennheiser HD600"]);
+    vi.mocked(api.activePreset).mockResolvedValue("Sennheiser HD600");
+
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    scrollSpy.mockClear(); // ignore the on-open scroll
+
+    await fireEvent.click(container.querySelector(".gear")!); // enter settings
+    await fireEvent.click(container.querySelector(".gear")!); // exit settings
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledWith({ block: "center" }));
   });
 });

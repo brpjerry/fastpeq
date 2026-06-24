@@ -4,7 +4,8 @@
   // different closed/open text, hence this small custom control.
   import { FILTER_TYPES, BASIC_FILTER_KINDS } from "./eq";
   import { getFilterSet } from "./prefs.svelte";
-  import { dismissable } from "./dismiss";
+  import FloatingMenu from "./FloatingMenu.svelte";
+  import { anchorBelow, type Anchor } from "./floating";
   import type { FilterKind } from "./types";
 
   let { value, onChange }: { value: FilterKind; onChange: (v: FilterKind) => void } = $props();
@@ -18,7 +19,7 @@
   );
 
   let open = $state(false);
-  let pos = $state<{ left: number; top: number; width: number } | null>(null);
+  let anchor = $state<Anchor | null>(null);
   let btn = $state<HTMLButtonElement | null>(null);
 
   const current = $derived(FILTER_TYPES.find((t) => t.value === value));
@@ -28,8 +29,7 @@
       open = false;
       return;
     }
-    const r = btn.getBoundingClientRect();
-    pos = { left: r.left, top: r.bottom + 4, width: Math.max(r.width, 170) };
+    anchor = anchorBelow(btn, 170);
     open = true;
   }
 
@@ -52,19 +52,13 @@
   </svg>
 </button>
 
-{#if open && pos}
-  <div
-    class="ts-menu"
-    style="left:{pos.left}px; top:{pos.top}px; min-width:{pos.width}px"
-    use:dismissable={{ onDismiss: () => (open = false), ignore: btn }}
-  >
-    {#each visibleTypes as t}
-      <button class="ts-item" class:sel={t.value === value} type="button" onclick={() => pick(t.value)}>
-        <span class="tok">{t.token}</span> — {t.label}
-      </button>
-    {/each}
-  </div>
-{/if}
+<FloatingMenu class="ts-menu" {open} {anchor} onDismiss={() => (open = false)} ignore={btn}>
+  {#each visibleTypes as t}
+    <button class="menu-item ts-item" class:sel={t.value === value} type="button" onclick={() => pick(t.value)}>
+      <span class="tok">{t.token}</span> — {t.label}
+    </button>
+  {/each}
+</FloatingMenu>
 
 <style>
   .ts-btn {
@@ -84,34 +78,9 @@
     flex: none;
     opacity: 0.55;
   }
-  .ts-menu {
-    position: fixed;
-    z-index: 51;
-    max-height: 280px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    padding: 4px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  }
+  /* Dimmer label, brighter bold token; the rest of the item look is shared. */
   .ts-item {
-    text-align: left;
-    white-space: nowrap;
-    border: none;
-    background: transparent;
-    padding: 6px 8px;
-    border-radius: 5px;
-    font-size: 13px;
     color: var(--muted);
-  }
-  .ts-item:hover {
-    background: var(--panel-2);
-  }
-  .ts-item.sel {
-    color: var(--accent);
   }
   .ts-item .tok {
     font-weight: 600;

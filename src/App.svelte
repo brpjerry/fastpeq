@@ -6,19 +6,15 @@
   import Editor from "./lib/Editor.svelte";
   import CategoryIcon from "./lib/CategoryIcon.svelte";
   import Knob from "./lib/Knob.svelte";
-  import { dismissable } from "./lib/dismiss";
-  import { ACCENTS, currentAccentId, applyAccent } from "./lib/theme";
-  import { starterConfig, BAND_COUNTS, defaultBandCount, setDefaultBandCount } from "./lib/starter";
-  import {
-    getFilterSet,
-    setFilterSet,
-    getToneVolumeCap,
-    setToneVolumeCap,
-    getSpecialtyIcons,
-    setSpecialtyIcons,
-    getBluetoothIcons,
-    setBluetoothIcons,
-  } from "./lib/prefs.svelte";
+  import Switch from "./lib/Switch.svelte";
+  import Settings from "./lib/Settings.svelte";
+  import FloatingMenu from "./lib/FloatingMenu.svelte";
+  import { anchorBelow, type Anchor } from "./lib/floating";
+  import { starterConfig, defaultBandCount } from "./lib/starter";
+  import { addTarget } from "./lib/targets.svelte";
+  import { renamePresetView, clearPresetView } from "./lib/presetView.svelte";
+  import { parseRew, normalize, downsample } from "./lib/measurement";
+  import { getSpecialtyIcons, getBluetoothIcons } from "./lib/prefs.svelte";
 
   let status = $state<api.ApoStatus | null>(null);
   let presets = $state<string[]>([]);
@@ -29,7 +25,6 @@
   let message = $state("");
   let busy = $state(false);
   let showSettings = $state(false);
-  let accentId = $state(currentAccentId());
   let isBypassed = $state(false);
   let bandCount = $state(defaultBandCount());
   let presetsDirPath = $state("");
@@ -239,7 +234,7 @@
   // Custom device-type filter dropdown. A native <select> can't render the
   // category icons in its options, so this mirrors the right-click picker:
   // a trigger button plus a fixed-positioned themed menu anchored under it.
-  let typeMenu = $state<{ left: number; top: number; minW: number } | null>(null);
+  let typeMenu = $state<Anchor | null>(null);
   let typeTriggerEl = $state<HTMLButtonElement | null>(null);
   const typeFilterLabel = $derived(
     typeFilter === ""
@@ -253,14 +248,8 @@
       typeMenu = null;
       return;
     }
-    const el = typeTriggerEl;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    typeMenu = {
-      left: Math.max(8, Math.min(r.left, window.innerWidth - 200)),
-      top: r.bottom + 4,
-      minW: r.width,
-    };
+    if (!typeTriggerEl) return;
+    typeMenu = anchorBelow(typeTriggerEl);
   }
   function pickType(v: string) {
     typeFilter = v;
@@ -300,6 +289,26 @@
       await reload();
       showSettings = false;
       flashImport(r, "Nothing imported");
+    });
+
+  // Add a target curve from a REW/CSV text file (freq + level rows), normalised
+  // to a 0 dB midband like measurements, so the two compare directly.
+  const addTargetCurve = () =>
+    guard(async () => {
+      const picked = await openDialog({
+        multiple: false,
+        title: "Import target curve",
+        filters: [{ name: "Curve (text/CSV)", extensions: ["txt", "csv"] }],
+      });
+      if (!picked || Array.isArray(picked)) return;
+      const points = downsample(normalize(parseRew(await api.readTextFile(picked))));
+      if (!points.length) {
+        flash("No curve data found in that file");
+        return;
+      }
+      const name = (picked.split(/[\\/]/).pop() ?? "target").replace(/\.[^.]+$/, "");
+      addTarget(name, points);
+      flash(`Added target “${name}”`);
     });
 
   const openPresets = () => guard(async () => await api.openPresetsDir());
@@ -345,6 +354,7 @@
   const remove = (name: string) =>
     guard(async () => {
       await api.deletePreset(name);
+      clearPresetView(name); // drop its curve-editor view state too
       if (selected === name) selected = null;
       flash(`Deleted “${name}”`);
       await reload();
@@ -364,13 +374,14 @@
   }
 
   // Scroll the current preset — the one open in the editor, or failing that the
-  // active one — into view, once the list has settled. A no-op if it isn't in
-  // the visible (filtered) list.
+  // active one — into view, once the list has settled. Centers it so the list
+  // lands on the active preset by default rather than at the top. A no-op if it
+  // isn't in the visible (filtered) list.
   async function scrollCurrentIntoView() {
     await tick();
     const el =
       presetListEl?.querySelector("li.selected") ?? presetListEl?.querySelector("li.active");
-    el?.scrollIntoView({ block: "nearest" });
+    el?.scrollIntoView({ block: "center" });
   }
 
   // After creating a preset, make sure it's actually visible: a new preset is
@@ -395,6 +406,14 @@
     prevQuery = q;
     prevFilter = tf;
     if (searchCleared || filterChanged) scrollCurrentIntoView();
+  });
+
+  // Returning from Settings recreates the preset list (resetting its scroll to
+  // the top), so jump back to the active preset instead of leaving it at top.
+  let wasInSettings = false;
+  $effect(() => {
+    if (wasInSettings && !showSettings) scrollCurrentIntoView();
+    wasInSettings = showSettings;
   });
 
   function takeName(): string | null {
@@ -465,6 +484,7 @@
     }
     guard(async () => {
       await api.renamePreset(from, to);
+      renamePresetView(from, to); // carry its curve-editor view state across
       if (selected === from) selected = to;
       await reload();
       flash(`Renamed to “${to}”`);
@@ -523,143 +543,18 @@
   {/if}
 
   {#if showSettings}
-    <section class="panel settings-page">
-      <div class="panel-head">
-        <h2>Settings</h2>
-      </div>
-      <div class="settings-body">
-        <section class="settings-section">
-          <h3>Accent color</h3>
-          <p class="hint">Recolor the highlights throughout the app.</p>
-          <div class="swatches">
-            {#each ACCENTS as a}
-              <button
-                class="swatch"
-                class:sel={accentId === a.id}
-                style="--sw: {a.accent}"
-                onclick={() => {
-                  accentId = a.id;
-                  applyAccent(a.id);
-                }}
-                title={a.name}
-                aria-label={a.name}
-              ></button>
-            {/each}
-          </div>
-        </section>
-        <section class="settings-section">
-          <h3>New presets</h3>
-          <p class="hint">Bands a new preset starts with — 0 gain, log-spaced frequencies.</p>
-          <div class="seg">
-            {#each BAND_COUNTS as n}
-              <button
-                class="seg-btn"
-                class:sel={bandCount === n}
-                onclick={() => {
-                  bandCount = n;
-                  setDefaultBandCount(n);
-                }}>{n}</button
-              >
-            {/each}
-          </div>
-        </section>
-        <section class="settings-section">
-          <h3>Filter types</h3>
-          <p class="hint">Which filter types the editor's type dropdown offers.</p>
-          <div class="seg">
-            <button
-              class="seg-btn"
-              class:sel={getFilterSet() === "basic"}
-              onclick={() => setFilterSet("basic")}
-            >
-              Basic · PK, LSC, HSC
-            </button>
-            <button
-              class="seg-btn"
-              class:sel={getFilterSet() === "full"}
-              onclick={() => setFilterSet("full")}
-            >
-              All filters
-            </button>
-          </div>
-        </section>
-        <section class="settings-section">
-          <h3>Preset categories</h3>
-          <p class="hint">
-            Extra device types you can assign by clicking a preset's icon (beyond speaker,
-            headphone, IEM). Presets already using one always display its icon, even with its
-            group off.
-          </p>
-          <div class="cat-switches">
-            <label class="switch">
-              <input
-                type="checkbox"
-                checked={getSpecialtyIcons()}
-                onchange={(e) => setSpecialtyIcons(e.currentTarget.checked)}
-              />
-              <span class="track"><span class="thumb"></span></span>
-              <span class="sw-label">Specialty (electrostatic, earbud)</span>
-            </label>
-            <label class="switch">
-              <input
-                type="checkbox"
-                checked={getBluetoothIcons()}
-                onchange={(e) => setBluetoothIcons(e.currentTarget.checked)}
-              />
-              <span class="track"><span class="thumb"></span></span>
-              <span class="sw-label">Bluetooth (headphone, IEM, earbud)</span>
-            </label>
-          </div>
-        </section>
-        <section class="settings-section">
-          <h3>Tone generator</h3>
-          <p class="hint">Maximum volume the curve editor's sine generator can reach.</p>
-          <div class="cap-row">
-            <input
-              type="range"
-              min="0.05"
-              max="1"
-              step="0.05"
-              value={getToneVolumeCap()}
-              oninput={(e) => setToneVolumeCap(Number(e.currentTarget.value))}
-            />
-            <span class="cap-val">{Math.round(getToneVolumeCap() * 100)}%</span>
-          </div>
-        </section>
-        <section class="settings-section">
-          <h3>Import PEACE presets</h3>
-          <p class="hint">
-            PEACE saves presets as <code>.peace</code> files in the Equalizer APO config folder.
-          </p>
-          <div class="settings-actions">
-            <button class="primary" onclick={importFiles} disabled={busy || !status?.installed}>
-              Choose .peace file(s)…
-            </button>
-            <button onclick={importPeace} disabled={busy || !status?.installed}>
-              Import all from config folder
-            </button>
-          </div>
-        </section>
-        <section class="settings-section">
-          <h3>Preset storage</h3>
-          <p class="hint">Folder where your preset files (and their metadata) are kept.</p>
-          <p class="path-line"><code>{presetsDirPath}</code></p>
-          <div class="settings-actions">
-            <button onclick={openPresets} disabled={busy}>Open folder</button>
-            <button class="primary" onclick={changePresetsDir} disabled={busy}>Change folder…</button>
-            <button onclick={resetPresetsDir} disabled={busy}>Use default</button>
-          </div>
-        </section>
-        <section class="settings-section">
-          <h3>Equalizer APO</h3>
-          {#if status?.installed}
-            <p class="hint">Config file: <code>{status.config_path}</code></p>
-          {:else}
-            <p class="hint">Not detected — install Equalizer APO and restart fastpeq.</p>
-          {/if}
-        </section>
-      </div>
-    </section>
+    <Settings
+      {status}
+      {presetsDirPath}
+      {busy}
+      bind:bandCount
+      onAddTarget={addTargetCurve}
+      onImportFiles={importFiles}
+      onImportPeace={importPeace}
+      onOpenPresets={openPresets}
+      onChangePresetsDir={changePresetsDir}
+      onResetPresetsDir={resetPresetsDir}
+    />
   {:else}
   <div class="workspace">
   <section class="panel tone-panel">
@@ -677,16 +572,24 @@
         <Knob label="Treble" value={tone.treble} onInput={(v) => setKnob("treble", v)} />
       </div>
       <div class="switches">
-        <label class="switch">
-          <input type="checkbox" bind:checked={tone.invert} onchange={pushTone} disabled={!status?.installed} />
-          <span class="track"><span class="thumb"></span></span>
-          <span class="sw-label">Invert polarity</span>
-        </label>
-        <label class="switch">
-          <input type="checkbox" bind:checked={tone.swap} onchange={pushTone} disabled={!status?.installed} />
-          <span class="track"><span class="thumb"></span></span>
-          <span class="sw-label">Switch L / R</span>
-        </label>
+        <Switch
+          label="Invert polarity"
+          disabled={!status?.installed}
+          checked={tone.invert}
+          onChange={(v) => {
+            tone.invert = v;
+            pushTone();
+          }}
+        />
+        <Switch
+          label="Switch L / R"
+          disabled={!status?.installed}
+          checked={tone.swap}
+          onChange={(v) => {
+            tone.swap = v;
+            pushTone();
+          }}
+        />
       </div>
     </div>
   </section>
@@ -725,9 +628,12 @@
           type="search"
           placeholder="Search presets…"
           bind:value={query}
-          onkeydown={(e) => {
+          onkeydown={async (e) => {
             if (e.key === "Enter" && filteredPresets.length) {
-              open(filteredPresets[0]);
+              // Await the open so `selected` is set before clearing the query —
+              // otherwise the scroll effect fires while it still points at the
+              // old preset and the list never jumps to the new one.
+              await open(filteredPresets[0]);
               query = "";
             }
           }}
@@ -878,18 +784,21 @@
 
   {#if catMenu}
     {@const menu = catMenu}
-    <div
+    <FloatingMenu
       class="cat-menu"
-      style="left:{menu.x}px; top:{menu.y}px"
-      use:dismissable={{ onDismiss: () => (catMenu = null) }}
+      open={true}
+      anchor={{ left: menu.x, top: menu.y, minWidth: 184 }}
+      onDismiss={() => (catMenu = null)}
+      zIndex={81}
+      maxHeight="70vh"
     >
-      <button class="cat-menu-item" class:sel={!categories[menu.name]} onclick={() => pickCategory(menu.name, null)}>
+      <button class="menu-item cat-menu-item" class:sel={!categories[menu.name]} onclick={() => pickCategory(menu.name, null)}>
         <span class="cat-menu-icon"><CategoryIcon category={undefined} /></span>
         Uncategorized
       </button>
       {#each selectableCategories as c}
         <button
-          class="cat-menu-item"
+          class="menu-item cat-menu-item"
           class:sel={categories[menu.name] === c.value}
           onclick={() => pickCategory(menu.name, c.value)}
         >
@@ -897,35 +806,36 @@
           {c.label}
         </button>
       {/each}
-    </div>
+    </FloatingMenu>
   {/if}
 
-  {#if typeMenu}
-    {@const m = typeMenu}
-    <div
-      class="cat-menu type-menu"
-      role="listbox"
-      style="left:{m.left}px; top:{m.top}px; min-width:{m.minW}px"
-      use:dismissable={{ onDismiss: () => (typeMenu = null), ignore: typeTriggerEl }}
-    >
-      <button class="cat-menu-item" class:sel={typeFilter === ""} onclick={() => pickType("")}>
-        <span class="cat-menu-icon"><svg class="type-all-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" /></svg></span>
-        All types
+  <FloatingMenu
+    class="cat-menu type-menu"
+    role="listbox"
+    open={!!typeMenu}
+    anchor={typeMenu}
+    onDismiss={() => (typeMenu = null)}
+    ignore={typeTriggerEl}
+    zIndex={81}
+    maxHeight="70vh"
+  >
+    <button class="menu-item cat-menu-item" class:sel={typeFilter === ""} onclick={() => pickType("")}>
+      <span class="cat-menu-icon"><svg class="type-all-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" /></svg></span>
+      All types
+    </button>
+    {#each usedCategories as c}
+      <button class="menu-item cat-menu-item" class:sel={typeFilter === c.value} onclick={() => pickType(c.value)}>
+        <span class="cat-menu-icon"><CategoryIcon category={c.value} /></span>
+        {c.label}
       </button>
-      {#each usedCategories as c}
-        <button class="cat-menu-item" class:sel={typeFilter === c.value} onclick={() => pickType(c.value)}>
-          <span class="cat-menu-icon"><CategoryIcon category={c.value} /></span>
-          {c.label}
-        </button>
-      {/each}
-      {#if hasUncategorized}
-        <button class="cat-menu-item" class:sel={typeFilter === "__none"} onclick={() => pickType("__none")}>
-          <span class="cat-menu-icon"><CategoryIcon category={undefined} /></span>
-          Uncategorized
-        </button>
-      {/if}
-    </div>
-  {/if}
+    {/each}
+    {#if hasUncategorized}
+      <button class="menu-item cat-menu-item" class:sel={typeFilter === "__none"} onclick={() => pickType("__none")}>
+        <span class="cat-menu-icon"><CategoryIcon category={undefined} /></span>
+        Uncategorized
+      </button>
+    {/if}
+  </FloatingMenu>
 
   {#if message}
     <div class="toast">{message}</div>
@@ -1009,101 +919,6 @@
       transform: rotate(360deg);
     }
   }
-  .settings-page {
-    flex: 1;
-  }
-  .settings-body {
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 22px;
-    padding-top: 4px;
-  }
-  .settings-section h3 {
-    margin: 0 0 6px;
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .settings-section .hint {
-    margin: 0 0 12px;
-    color: var(--muted);
-    font-size: 13px;
-  }
-  .settings-section code {
-    background: var(--panel-2);
-    padding: 1px 6px;
-    border-radius: 5px;
-    font-size: 12px;
-  }
-  .path-line {
-    margin: 0 0 12px;
-  }
-  .path-line code {
-    word-break: break-all;
-  }
-  .settings-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .swatches {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    /* Room for the selected swatch's 4px ring so the first one isn't clipped. */
-    padding: 4px;
-  }
-  .swatch {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border-radius: 50%;
-    background: var(--sw);
-    border: 2px solid transparent;
-  }
-  .swatch:hover {
-    background: var(--sw);
-  }
-  .swatch.sel {
-    box-shadow:
-      0 0 0 2px var(--panel),
-      0 0 0 4px var(--sw);
-  }
-  .seg {
-    display: flex;
-    gap: 6px;
-  }
-  .seg-btn {
-    min-width: 46px;
-  }
-  .seg-btn.sel {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-  }
-  .seg-btn.sel:hover:not(:disabled) {
-    background: var(--accent-2);
-    border-color: var(--accent-2);
-  }
-  .cap-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    max-width: 320px;
-  }
-  .cap-row input[type="range"] {
-    flex: 1;
-  }
-  .cap-val {
-    width: 44px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .cat-switches {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
   h1 {
     margin: 0;
     font-size: 26px;
@@ -1179,59 +994,8 @@
     flex-direction: column;
     gap: 12px;
   }
-  .switch {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    cursor: pointer;
-    user-select: none;
-    font-size: 13px;
-  }
-  .switch input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-  .switch .track {
-    position: relative;
-    flex: none;
-    width: 36px;
-    height: 20px;
-    border-radius: 10px;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    transition:
-      background 0.15s ease,
-      border-color 0.15s ease;
-  }
-  .switch .thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--muted);
-    transition:
-      transform 0.15s ease,
-      background 0.15s ease;
-  }
-  .switch input:checked + .track {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .switch input:checked + .track .thumb {
-    transform: translateX(16px);
-    background: #fff;
-  }
-  .switch input:focus-visible + .track {
-    box-shadow: 0 0 0 2px var(--accent);
-  }
-  .switch input:disabled + .track {
-    opacity: 0.5;
-  }
-
+  /* Toggle look lives in Switch.svelte now; only the tone panel's narrow-layout
+     stacking stays here (targets the component via :global). */
   .grid {
     flex: 1;
     min-height: 0;
@@ -1273,7 +1037,7 @@
       align-items: center;
       gap: 16px;
     }
-    .switches .switch {
+    .switches :global(.switch) {
       flex-direction: column;
       gap: 6px;
       text-align: center;
@@ -1352,7 +1116,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px;
+    padding: 3px 4px;
     border-radius: 8px;
     border: 1px solid transparent;
   }
@@ -1391,37 +1155,13 @@
   }
 
   /* Right-click device-type picker, positioned at the cursor. */
-  .cat-menu {
-    position: fixed;
-    z-index: 81;
-    min-width: 184px;
-    max-height: 70vh;
-    overflow-y: auto;
-    padding: 4px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  }
+  /* The popup chrome and base item look come from FloatingMenu; these are the
+     category menus' specifics — the icon row and a brighter label. */
   .cat-menu-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 100%;
-    text-align: left;
-    white-space: nowrap;
-    border: none;
-    background: transparent;
-    padding: 6px 8px;
-    border-radius: 5px;
-    font-size: 13px;
     color: var(--text);
-  }
-  .cat-menu-item:hover {
-    background: var(--panel-2);
-  }
-  .cat-menu-item.sel {
-    color: var(--accent);
   }
   .cat-menu-icon {
     flex: none;
@@ -1433,7 +1173,7 @@
     text-align: left;
     background: transparent;
     border: none;
-    padding: 7px 8px;
+    padding: 5px 8px;
   }
   .name:hover {
     background: var(--panel-2);

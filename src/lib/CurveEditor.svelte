@@ -24,6 +24,7 @@
     F_MAX,
     type PlotBox,
   } from "./graph";
+  import { gapDb, targetValueAt, compensateCurve } from "./curve";
   import type { Channel, FilterKind } from "./types";
 
   type Band = {
@@ -42,7 +43,12 @@
     balance = 0,
     view = "both",
     measurement = [],
+    target = [],
+    compensate = false,
+    showMeas = true,
+    showTarget = true,
     hoveredId = null,
+    filterShapes = false,
     onChange,
     onHover,
   }: {
@@ -51,7 +57,12 @@
     balance?: number;
     view?: "both" | "left" | "right";
     measurement?: MeasPoint[];
+    target?: MeasPoint[];
+    compensate?: boolean;
+    showMeas?: boolean;
+    showTarget?: boolean;
     hoveredId?: number | null;
+    filterShapes?: boolean;
     onChange: () => void;
     onHover?: (id: number | null) => void;
   } = $props();
@@ -109,15 +120,34 @@
   const measCurve = $derived(ready && measurement.length ? sampleAt(measurement, freqs) : null);
   const withMeas = (resp: number[]): number[] =>
     measCurve ? resp.map((v, i) => v + measCurve[i]) : resp;
+
+  // The selected target, sampled onto the grid. With "compensate" on, every
+  // trace is shown as deviation from the target (flat = on target), so the
+  // target itself collapses to the centre line and isn't drawn.
+  const targetCurve = $derived(ready && target.length ? sampleAt(target, freqs) : null);
+  const compCurve = $derived(compensate && targetCurve ? targetCurve : null);
+  const compensated = (resp: number[]): number[] =>
+    compCurve ? compensateCurve(resp, compCurve) : resp;
+
+  // The target line as displayed: the target curve normally, but a flat
+  // centerline when compensating (the target collapses to flat) or when the
+  // Flat target is selected.
+  const targetLine = $derived.by<number[] | null>(() => {
+    if (!ready) return null;
+    if (!compensate && targetCurve) return targetCurve.map((v) => v + preamp);
+    return freqs.map(() => preamp);
+  });
+
   const leftPath = $derived(
-    ready ? pathFor(withMeas(responseCurve(sideFilters("left"), preamp + trim.left, freqs))) : "",
+    ready ? pathFor(compensated(withMeas(responseCurve(sideFilters("left"), preamp + trim.left, freqs)))) : "",
   );
   const rightPath = $derived(
-    ready ? pathFor(withMeas(responseCurve(sideFilters("right"), preamp + trim.right, freqs))) : "",
+    ready ? pathFor(compensated(withMeas(responseCurve(sideFilters("right"), preamp + trim.right, freqs)))) : "",
   );
   // The reference gets the preamp too, so it sits at the same baseline as the
   // result traces and the gap between them is purely the filter shaping.
-  const measPath = $derived(measCurve ? pathFor(measCurve.map((v) => v + preamp)) : "");
+  const measPath = $derived(measCurve ? pathFor(compensated(measCurve.map((v) => v + preamp))) : "");
+  const targetPath = $derived(targetLine ? pathFor(targetLine) : "");
 
   // Full 1–9-per-decade log grid; the 1-2-5 lines (labelled) draw brighter than
   // the minor lines in between, giving a denser but still readable frequency grid.
@@ -147,7 +177,27 @@
   ];
   const majorF = new Set(labF.map((l) => l.f));
 
-  const handleColor = (b: Band) => (b.channel.kind === "right" ? "#e0a458" : "var(--accent)");
+  // One band's own response shape (preamp-centred), so the trace passes through
+  // its handle. Drawn instead of the dashed stem when filter shapes are on.
+  const shapePath = (b: Band) =>
+    pathFor(
+      responseCurve(
+        [
+          {
+            enabled: true,
+            kind: b.kind,
+            freq: b.freq,
+            gain: kindHasGain(b.kind) ? b.gain : null,
+            q: kindHasQ(b.kind) ? b.q : null,
+            channel: b.channel,
+          },
+        ],
+        preamp,
+        freqs,
+      ),
+    );
+
+  const handleColor = (b: Band) => (b.channel.kind === "right" ? "var(--chan-right)" : "var(--accent)");
   // Handles sit at the filter's output level (preamp + gain), so with the
   // preamp-centred view a flat filter lands on the centre line.
   const handleY = (b: Band) => yOf(preamp + (kindHasGain(b.kind) ? clampGain(b.gain) : 0));
@@ -157,24 +207,41 @@
     if (!rect) return null;
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
+  // Drag via window-level listeners rather than setPointerCapture (a captured
+  // pointer renders the cursor pixelated at 1x on high-DPI WebView). No cursor
+  // override while dragging — the hover cursor just stays as-is.
   function onDown(e: PointerEvent, b: Band) {
     e.preventDefault();
     dragId = b.id;
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    const p = ptToData(e);
+    if (p) cursorX = p.x;
   }
-  function onMove(e: PointerEvent, b: Band) {
-    if (dragId !== b.id) return;
+  function onDragMove(e: PointerEvent) {
+    const b = dragId === null ? undefined : bands.find((x) => x.id === dragId);
+    if (!b) return;
     const p = ptToData(e);
     if (!p) return;
-    cursorX = p.x; // keep the crosshair with the drag (capture hides svg moves)
+    cursorX = p.x;
     b.freq = Math.round(clampFreq(freqAt(p.x)));
     if (kindHasGain(b.kind)) b.gain = round1(clampGain(gainAt(p.y)));
     onChange();
   }
-  function onUp(e: PointerEvent, b: Band) {
-    if (dragId === b.id) dragId = null;
-    (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+  function onDragEnd() {
+    dragId = null;
   }
+  // Attach the move/up listeners and the grab cursor only while a drag is live;
+  // the cleanup runs on drag end (dragId → null) and on unmount.
+  $effect(() => {
+    if (dragId === null) return;
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", onDragEnd);
+    window.addEventListener("pointercancel", onDragEnd);
+    return () => {
+      window.removeEventListener("pointermove", onDragMove);
+      window.removeEventListener("pointerup", onDragEnd);
+      window.removeEventListener("pointercancel", onDragEnd);
+    };
+  });
   function onWheel(e: WheelEvent, b: Band) {
     if (!kindHasQ(b.kind)) return;
     e.preventDefault();
@@ -197,13 +264,31 @@
     if (f >= 1000) return (f / 1000).toFixed(2) + " kHz";
     return Math.round(f) + " Hz";
   }
-  // Crosshair readout: a vertical line + frequency label that track the pointer.
+  // Crosshair readout: a vertical line + frequency label that track the pointer,
+  // plus the dB gap from each FR trace to the target (only when the target line
+  // is actually drawn).
   const cursor = $derived.by(() => {
     if (!ready || cursorX === null || cursorX < padL || cursorX > w - padR) return null;
-    const text = freqLabel(freqAt(cursorX));
+    const f = freqAt(cursorX);
+    const text = freqLabel(f);
     const width = text.length * 6.3 + 12;
     const lx = Math.max(padL + width / 2, Math.min(w - padR - width / 2, cursorX));
-    return { x: cursorX, text, lx, width };
+
+    // Absolute dB gap from the FR trace to the target, shown only when the
+    // target is enabled. Works in compensate mode too — the value is the same;
+    // the target line just sits flat on the centerline there.
+    let gap: string | null = null;
+    let ly = padT + 12;
+    if (showTarget) {
+      gap =
+        gapDb(sideFilters("left"), preamp + trim.left, measurement, target, preamp, f).toFixed(1) +
+        " dB";
+      // Sit at the crosshair–target intersection; compensating flattens the
+      // target onto the centerline.
+      const lineVal = compensate ? preamp : targetValueAt(target, preamp, f);
+      ly = Math.max(padT + 12, Math.min(h - padB - 4, yOf(lineVal) - 5));
+    }
+    return { x: cursorX, text, lx, width, gap, ly };
   });
 </script>
 
@@ -212,6 +297,8 @@
     <svg
       bind:this={svgEl}
       viewBox="0 0 {w} {h}"
+      width={w}
+      height={h}
       class="ce-svg"
       preserveAspectRatio="none"
       role="application"
@@ -231,7 +318,20 @@
         <text x={xOf(l.f)} y={h - 8} class="lbl" text-anchor="middle">{l.t}</text>
       {/each}
 
-      {#if measCurve}
+      <!-- Per-band shapes in one group: the group opacity flattens overlaps so
+           crossing shapes don't darken where they stack. Drawn behind the traces. -->
+      {#if filterShapes}
+        <g class="shapes">
+          {#each handleBands as band (band.id)}
+            <path d={shapePath(band)} class="shape" style:stroke={handleColor(band)} />
+          {/each}
+        </g>
+      {/if}
+
+      {#if showTarget && targetPath}
+        <path d={targetPath} class="resp target" />
+      {/if}
+      {#if measCurve && showMeas}
         <path d={measPath} class="resp reference" />
       {/if}
       {#if stereo}
@@ -250,8 +350,6 @@
           class:dragging={dragId === band.id}
           class:active={hoveredId === band.id}
           onpointerdown={(e) => onDown(e, band)}
-          onpointermove={(e) => onMove(e, band)}
-          onpointerup={(e) => onUp(e, band)}
           onpointerenter={() => onHover?.(band.id)}
           onpointerleave={() => onHover?.(null)}
           onwheel={(e) => onWheel(e, band)}
@@ -260,7 +358,7 @@
           aria-label={`Band ${i + 1}`}
           aria-valuenow={band.freq}
         >
-          {#if kindHasGain(band.kind)}
+          {#if !filterShapes && kindHasGain(band.kind)}
             <line x1={hx} y1={yOf(preamp)} x2={hx} y2={hy} class="stem" style:stroke={handleColor(band)} />
           {/if}
           <circle cx={hx} cy={hy} r="11" class="hit" />
@@ -289,6 +387,13 @@
           class="cursor-bg"
         />
         <text x={cursor.lx} y={h - 8} class="cursor-lbl" text-anchor="middle">{cursor.text}</text>
+        {#if cursor.gap}
+          <text
+            x={cursor.x + (cursor.x > w - 56 ? -8 : 8)}
+            y={cursor.ly}
+            class="delta-lbl"
+            text-anchor={cursor.x > w - 56 ? "end" : "start"}>{cursor.gap}</text>
+        {/if}
       {/if}
     </svg>
   {/if}
@@ -297,23 +402,33 @@
 <style>
   .ce-wrap {
     position: relative;
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
+    /* Largest 8:5 box that fits the size-containment parent (.graph-fit):
+       width is capped by both the parent's width (100cqw) and 1.6× its height
+       (160cqh), and aspect-ratio fixes the height. Scales with the pane, never
+       overflows → no scrollbar. */
+    width: min(100cqw, 160cqh);
+    aspect-ratio: 8 / 5;
+    max-width: 100%;
+    max-height: 100%;
+    /* Border on the wrap (an HTML element) rather than the SVG rect stroke,
+       which sat on the viewBox edge and got half-clipped — vanishing at some
+       scales. Clip the sub-pixel gap left by the integer-sized SVG. */
+    border: 1px solid var(--border);
+    overflow: hidden;
   }
+  /* Sized to the integer client box (matching the viewBox) so the SVG renders at
+     exactly 1:1 — a fractional scale otherwise pixelates the content and the
+     cursor while dragging. */
   .ce-svg {
     display: block;
-    width: 100%;
-    height: 100%;
     user-select: none;
     touch-action: none;
   }
   .bg {
-    fill: #181b21;
-    stroke: var(--border);
+    fill: var(--graph-bg);
   }
   .grid {
-    stroke: #2a2f38;
+    stroke: var(--graph-grid);
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
@@ -321,7 +436,7 @@
     stroke: #21252c;
   }
   .axis {
-    stroke: #3a4150;
+    stroke: var(--graph-axis);
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
@@ -333,7 +448,7 @@
     vector-effect: non-scaling-stroke;
   }
   .cursor-bg {
-    fill: #181b21;
+    fill: var(--graph-bg);
     opacity: 0.92;
     pointer-events: none;
   }
@@ -342,6 +457,16 @@
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     pointer-events: none;
+  }
+  /* FR-to-target gap readout, in the target line's colour. */
+  .delta-lbl {
+    fill: var(--target);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--label-outline);
+    stroke-width: 3;
   }
   .resp {
     fill: none;
@@ -352,7 +477,7 @@
     stroke: var(--accent);
   }
   .resp.right {
-    stroke: #e0a458;
+    stroke: var(--chan-right);
   }
   .resp.reference {
     stroke: var(--muted);
@@ -360,15 +485,18 @@
     stroke-dasharray: 4 3;
     opacity: 0.65;
   }
+  .resp.target {
+    stroke: var(--target);
+    stroke-width: 1.5;
+    stroke-dasharray: 6 4;
+    opacity: 0.8;
+  }
   .lbl {
     fill: var(--muted);
     font-size: 11px;
   }
   .handle {
     cursor: pointer;
-  }
-  .handle.dragging {
-    cursor: grabbing;
   }
   .handle.off {
     opacity: 0.4;
@@ -379,7 +507,7 @@
   }
   .dot {
     pointer-events: none;
-    stroke: #11141a;
+    stroke: var(--label-outline);
     stroke-width: 1.5;
   }
   /* Light up on direct hover, or when highlighted from the list (hover/edit). */
@@ -395,6 +523,17 @@
     opacity: 0.7;
     vector-effect: non-scaling-stroke;
   }
+  /* Per-band filter shapes. The group opacity (not per-path) keeps overlapping
+     shapes from compounding into darker bands; kept low so they stay subtle. */
+  .shapes {
+    opacity: 0.25;
+  }
+  .shape {
+    fill: none;
+    pointer-events: none;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
   .hnum {
     pointer-events: none;
     fill: #fff;
@@ -407,7 +546,7 @@
     font-size: 12px;
     font-variant-numeric: tabular-nums;
     paint-order: stroke;
-    stroke: #11141a;
+    stroke: var(--label-outline);
     stroke-width: 3;
   }
 </style>

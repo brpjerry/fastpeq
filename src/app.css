@@ -8,6 +8,13 @@
   --accent: #4f8cff;
   --accent-2: #3a6fd8;
   --danger: #e5534b;
+  /* Response-graph palette, shared by ResponseCurve + CurveEditor. */
+  --graph-bg: #181b21;
+  --graph-grid: #2a2f38;
+  --graph-axis: #3a4150;
+  --chan-right: #e0a458;
+  --target: #6fcf97;
+  --label-outline: #11141a;
   color-scheme: dark;
 }
 

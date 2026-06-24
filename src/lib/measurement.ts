@@ -27,6 +27,21 @@ export function parseRew(text: string): MeasPoint[] {
   return out;
 }
 
+/**
+ * Resample a (sorted) measurement onto at most `n` log-spaced points across its
+ * own frequency range. REW exports can run to thousands of points; we store the
+ * measurement per preset (localStorage) and the graphs resample onto the plot
+ * grid anyway, so keeping ~256 points keeps storage small with no visible loss.
+ */
+export function downsample(points: MeasPoint[], n = 256): MeasPoint[] {
+  if (points.length <= n) return points;
+  const f0 = points[0].freq;
+  const f1 = points[points.length - 1].freq;
+  const freqs = Array.from({ length: n }, (_, i) => f0 * Math.pow(f1 / f0, i / (n - 1)));
+  const spls = sampleAt(points, freqs);
+  return freqs.map((freq, i) => ({ freq, spl: spls[i] }));
+}
+
 /** Shift the whole curve so the 300 Hz–3 kHz average reads 0 dB. */
 export function normalize(points: MeasPoint[]): MeasPoint[] {
   if (points.length === 0) return points;

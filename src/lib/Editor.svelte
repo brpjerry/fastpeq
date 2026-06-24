@@ -6,10 +6,24 @@
   import ResponseCurve from "./ResponseCurve.svelte";
   import CurveEditor from "./CurveEditor.svelte";
   import ToneGenerator from "./ToneGenerator.svelte";
-  import TypeSelect from "./TypeSelect.svelte";
+  import Switch from "./Switch.svelte";
+  import GraphTools from "./GraphTools.svelte";
+  import BandRow from "./BandRow.svelte";
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, balanceFromTrim, toneFilters, peakGainDb, type CurveFilter } from "./eq";
-  import { parseRew, normalize, type MeasPoint } from "./measurement";
+  import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { dismissable } from "./dismiss";
+  import { getFilterShapes } from "./prefs.svelte";
+  import { getTarget } from "./targets.svelte";
+  import {
+    getTargetId,
+    getCompensate,
+    getShowMeasRef,
+    setShowMeasRef,
+    getShowTargetRef,
+    getMeasurement,
+    setMeasurement,
+    clearMeasurement as clearSavedMeasurement,
+  } from "./presetView.svelte";
 
   let {
     name,
@@ -45,8 +59,6 @@
   let expanded = $state(false); // full-window graph + handle editing
   let view = $state<"both" | "left" | "right">("both"); // which channel list is shown
   let hoveredId = $state<number | null>(null); // graph handle under the cursor → row highlight
-  let measurement = $state<MeasPoint[]>([]); // imported REW reference curve (expanded view)
-  let measName = $state("");
   const BAL_MAX = 30; // balance range, dB of cut on the quieter side at full
   let rawLines = $state<string[]>([]); // preserved verbatim (comments, Device:, etc.)
   let err = $state("");
@@ -67,6 +79,24 @@
     ),
   );
   const clipping = $derived(clipPeak > 0.05);
+
+  // The per-preset target curve (Flat by default), shown on the graph as a
+  // reference. Reactive to the selected target and the current preset.
+  const targetPoints = $derived(getTarget(getTargetId(name)).points);
+
+  // Imported FR measurement, saved per preset and auto-loaded whenever this
+  // preset is shown again. The traces become "measurement + filters".
+  const savedMeas = $derived(getMeasurement(name));
+  const measurement = $derived<MeasPoint[]>(savedMeas?.points ?? []);
+  const measName = $derived(savedMeas?.name ?? "");
+
+  // Independent per-preset visibility of the dashed reference lines.
+  const showMeas = $derived(getShowMeasRef(name));
+  const showTarget = $derived(getShowTargetRef(name));
+  // Effective compensation: only meaningful with the target shown and a
+  // non-flat target selected (otherwise there's nothing to compensate against).
+  const canCompensate = $derived(showTarget && targetPoints.length > 0);
+  const compensate = $derived(getCompensate(name) && canCompensate);
 
   // Live-apply throttle: at most one write to config.txt per THROTTLE ms while
   // dragging, with a guaranteed trailing write so the final value always lands.
@@ -256,6 +286,15 @@
     schedule();
   }
 
+  // Gain filters left at 0 dB do nothing; this clears them out across all
+  // channels in one go (a common tidy-up after dialing in a curve).
+  const isFlat = (b: Band) => kindHasGain(b.kind) && b.gain === 0;
+  const flatCount = $derived(bands.filter(isFlat).length);
+  function removeZeroGain() {
+    bands = bands.filter((b) => !isFlat(b));
+    schedule();
+  }
+
   function sortBands() {
     // Sort only the bands in the current list, leaving the other channels put.
     const sorted = [...shown].sort((a, b) => a.freq - b.freq);
@@ -293,21 +332,20 @@
         filters: [{ name: "Measurement (text)", extensions: ["txt"] }],
       });
       if (!picked || Array.isArray(picked)) return;
-      const points = normalize(parseRew(await api.readTextFile(picked)));
+      const points = downsample(normalize(parseRew(await api.readTextFile(picked))));
       if (!points.length) {
         err = "No measurement data found in that file.";
         return;
       }
-      measurement = points;
-      measName = picked.split(/[\\/]/).pop() ?? "measurement";
+      setMeasurement(name, { name: picked.split(/[\\/]/).pop() ?? "measurement", points });
+      setShowMeasRef(name, true); // a fresh import is shown by default
       err = "";
     } catch (e) {
       err = String(e);
     }
   }
   function clearMeasurement() {
-    measurement = [];
-    measName = "";
+    clearSavedMeasurement(name);
   }
 
   onDestroy(() => {
@@ -412,65 +450,35 @@
 {/snippet}
 
 {#snippet bandsBody()}
-  {#each shown as band (band.id)}
-    <div
-      class="band"
-      class:off={!band.enabled}
-      class:hover={band.id === hoveredId}
-      onmouseenter={() => (hoveredId = band.id)}
-      onmouseleave={() => (hoveredId = null)}
-      role="presentation"
-    >
-      <input type="checkbox" bind:checked={band.enabled} onchange={schedule} title="Enable / disable" />
-      <TypeSelect
-        value={band.kind}
-        onChange={(v) => {
-          band.kind = v;
-          changeKind(band);
-        }}
+  {#each bands as band, i (band.id)}
+    {#if inView(band.channel, view)}
+      <BandRow
+        bind:band={bands[i]}
+        hovered={band.id === hoveredId}
+        onChange={schedule}
+        onChangeKind={() => changeKind(band)}
+        onRemove={() => removeBand(band.id)}
+        onHover={(h) => (hoveredId = h ? band.id : null)}
       />
-      <span class="field freq">
-        <input type="number" min="10" max="24000" step="1" bind:value={band.freq} onchange={schedule} />
-        <small>Hz</small>
-      </span>
-      {#if kindHasGain(band.kind)}
-        <span class="field gain">
-          <input
-            type="range"
-            min="-30"
-            max="30"
-            step="0.1"
-            bind:value={band.gain}
-            oninput={schedule}
-            oncontextmenu={() => {
-              band.gain = 0;
-              schedule();
-            }}
-            title="Right-click to reset to 0 dB"
-          />
-          <input type="number" min="-30" max="30" step="0.1" bind:value={band.gain} onchange={schedule} />
-          <small>dB</small>
-        </span>
-      {/if}
-      {#if kindHasQ(band.kind)}
-        <span class="field q">
-          <small>Q</small>
-          <input type="number" min="0.1" max="36" step="0.1" bind:value={band.q} onchange={schedule} />
-        </span>
-      {/if}
-      <button class="danger remove" onclick={() => removeBand(band.id)} title="Remove band">
-        &#10005;
-      </button>
-    </div>
-  {:else}
-    <p class="none">{emptyMsg(view)}</p>
+    {/if}
   {/each}
+  {#if shown.length === 0}
+    <p class="none">{emptyMsg(view)}</p>
+  {/if}
 {/snippet}
 
 {#snippet bandActions()}
   <div class="band-actions">
     <button class="add" onclick={addBand}>+ Add band</button>
     <button onclick={sortBands} disabled={shown.length < 2}>Sort by Hz</button>
+    <button
+      class="clear-flat"
+      onclick={removeZeroGain}
+      disabled={flatCount === 0}
+      title="Remove every gain filter sitting at 0 dB (they have no effect)"
+    >
+      Remove 0 dB{flatCount ? ` · ${flatCount}` : ""}
+    </button>
   </div>
 {/snippet}
 
@@ -486,7 +494,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={bands} {preamp} {balance} />
+      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -541,27 +549,32 @@
         {@render bandActions()}
       </aside>
       <div class="overlay-graph">
-        <div class="graph-tools">
-          <p class="graph-hint">Drag a handle to set frequency &amp; gain · scroll over a handle to change Q</p>
-          <div class="meas-tools">
-            {#if measurement.length}
-              <span class="meas-name" title={measName}>{measName}</span>
-              <button onclick={clearMeasurement}>Clear measurement</button>
-            {:else}
-              <button onclick={importMeasurement}>Import REW measurement…</button>
-            {/if}
-          </div>
-        </div>
-        <CurveEditor
-          {bands}
-          {preamp}
-          {balance}
-          {view}
+        <GraphTools
+          {name}
+          {compensate}
+          {canCompensate}
           {measurement}
-          {hoveredId}
-          onChange={schedule}
-          onHover={(id) => (hoveredId = id)}
+          {measName}
+          onImport={importMeasurement}
+          onClear={clearMeasurement}
         />
+        <div class="graph-fit">
+          <CurveEditor
+            {bands}
+            {preamp}
+            {balance}
+            {view}
+            {measurement}
+            target={targetPoints}
+            {compensate}
+            {showMeas}
+            {showTarget}
+            {hoveredId}
+            filterShapes={getFilterShapes()}
+            onChange={schedule}
+            onHover={(id) => (hoveredId = id)}
+          />
+        </div>
         <ToneGenerator />
       </div>
     </div>
@@ -659,11 +672,12 @@
     min-height: 0;
   }
   /* The dense band row is tuned for the wider inline panel; let the gain slider
-     give up more space so it still fits the narrower side column. */
-  .overlay-side .field.gain {
+     give up more space so it still fits the narrower side column. The row lives
+     in BandRow now, so :global reaches its .field.gain through the boundary. */
+  .overlay-side :global(.field.gain) {
     min-width: 56px;
   }
-  .overlay-side .field.gain input[type="range"] {
+  .overlay-side :global(.field.gain input[type="range"]) {
     min-width: 38px;
   }
   .overlay-graph {
@@ -674,34 +688,15 @@
     flex-direction: column;
     gap: 6px;
   }
-  .graph-hint {
-    margin: 0;
-    color: var(--muted);
-    font-size: 12px;
-  }
-  .graph-tools {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .meas-tools {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: none;
-  }
-  .meas-tools button {
-    padding: 3px 10px;
-    font-size: 12px;
-  }
-  .meas-name {
-    font-size: 12px;
-    color: var(--accent);
-    max-width: 240px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  /* Holds the big graph at a fixed 8:5 aspect ratio: size containment lets the
+     graph itself scale to the largest 8:5 box that fits this area (via cqw/cqh
+     in CurveEditor), so it grows/shrinks with the pane but never overflows. */
+  .graph-fit {
+    flex: 1;
+    min-height: 0;
+    container-type: size;
+    display: grid;
+    place-items: center;
   }
 
   .preamp {
@@ -841,78 +836,6 @@
     overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: 8px;
-  }
-  .band {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 6px;
-    border-bottom: 1px solid var(--border);
-  }
-  .band:last-child {
-    border-bottom: none;
-  }
-  .band:hover {
-    background: var(--panel-2);
-  }
-  /* Highlighted from the graph: hovering a handle marks its row. */
-  .band.hover {
-    background: var(--panel-2);
-    box-shadow: inset 2px 0 0 var(--accent);
-  }
-  .band.off {
-    opacity: 0.45;
-  }
-  .band input {
-    padding: 2px 5px;
-    font-size: 12px;
-  }
-  .field {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    color: var(--muted);
-    font-size: 11px;
-  }
-  /* Widths fit each field's longest value; no spinner arrows to leave room for. */
-  .field input[type="number"] {
-    width: 46px;
-  }
-  .field.freq input[type="number"] {
-    width: 50px; /* up to 5 digits, e.g. 20000 */
-  }
-  .field.q input[type="number"] {
-    width: 40px; /* e.g. 12.5 */
-  }
-  .field.gain {
-    flex: 1;
-    min-width: 84px;
-  }
-  .field.gain input[type="range"] {
-    flex: 1;
-    min-width: 50px;
-    /* Keep the slider no taller than the other controls so hiding it (for
-       no-gain filter types) doesn't change the row height. */
-    height: 20px;
-    padding: 0;
-  }
-  .field.gain input[type="number"] {
-    width: 46px; /* e.g. -12.3 */
-    flex: none;
-  }
-  .field small {
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-  .remove {
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    font-size: 12px;
-    line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
   }
   .none {
     color: var(--muted);
