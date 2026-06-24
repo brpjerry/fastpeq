@@ -10,9 +10,9 @@ Health is good overall: no `TODO`/`FIXME`, no stray `console.log`, no `any` /
 green. The items below are improvements, not breakage — except **P1**, which is a
 real data-loss bug.
 
-**Status (worked through):** ✅ P1, P2, P3, P4, P6, P7, P8 done · 🟡 P5 partial
-(GraphTools extracted; BandRow left as a follow-up) · ⬜ P9 deferred
-("only if it bites"). Frontend tests grew 90 → 101.
+**Status (worked through):** ✅ P1, P2, P3, P4, P5, P6, P7, P8 done · ⬜ P9
+deferred ("only if it bites"). P5 extracted both `GraphTools.svelte` and
+`BandRow.svelte` from `Editor.svelte`. Frontend tests grew 90 → 110.
 
 ---
 
