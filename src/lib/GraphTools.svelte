@@ -14,8 +14,8 @@
     setShowMeasRef,
     getTargetOffset,
     setTargetOffset,
-    getTargetMatchFreq,
-    setTargetMatchFreq,
+    getTargetAlignFreq,
+    setTargetAlignFreq,
   } from "./presetView.svelte";
   import Switch from "./Switch.svelte";
   import SelectMenu from "./SelectMenu.svelte";
@@ -29,7 +29,7 @@
     measName,
     onImport,
     onClear,
-    onMatch,
+    onAlign,
   }: {
     name: string;
     compensate: boolean;
@@ -38,7 +38,7 @@
     measName: string;
     onImport: () => void;
     onClear: () => void;
-    onMatch: () => void;
+    onAlign: () => void;
   } = $props();
 
   // Offset/match only do something for a real (non-flat) target, so the trace
@@ -114,21 +114,21 @@
         <small>dB</small>
       </label>
       <span class="adj-group">
-        <label title="The frequency Match aligns the target to the response at">
-          Match at
+        <label title="The frequency Align pins the target to the response at">
+          Align at
           <input
             class="num"
             type="number"
             min="20"
             max="20000"
             step="10"
-            value={getTargetMatchFreq(name)}
-            onchange={(e) => setTargetMatchFreq(name, clampFreq(Number(e.currentTarget.value)))}
+            value={getTargetAlignFreq(name)}
+            onchange={(e) => setTargetAlignFreq(name, clampFreq(Number(e.currentTarget.value)))}
           />
           <small>Hz</small>
         </label>
-        <button onclick={onMatch} title="Shift the target so it meets the response at this frequency">
-          Match
+        <button onclick={onAlign} title="Shift the target so it meets the response at this frequency">
+          Align
         </button>
       </span>
     </div>

@@ -25,9 +25,9 @@
     clearMeasurement as clearSavedMeasurement,
     getTargetOffset,
     setTargetOffset,
-    getTargetMatchFreq,
+    getTargetAlignFreq,
   } from "./presetView.svelte";
-  import { matchOffset } from "./curve";
+  import { alignOffset } from "./curve";
 
   let {
     name,
@@ -86,7 +86,7 @@
 
   // The per-preset target curve (Flat by default), shown on the graph as a
   // reference. Reactive to the selected target and the current preset. A manual
-  // dB offset (set directly or by the "Match" action) shifts the whole trace; it
+  // dB offset (set directly or by the "Align" action) shifts the whole trace; it
   // bakes into the points so the gap readout and compensation pick it up too.
   const targetBase = $derived(getTarget(getTargetId(name)).points);
   const targetOffset = $derived(getTargetOffset(name));
@@ -96,10 +96,10 @@
       : targetBase,
   );
 
-  // Shift the target so its line meets the current response at the saved match
+  // Shift the target so its line meets the current response at the saved align
   // frequency — the standard "align at a reference frequency" for headphone EQ.
-  function matchTarget() {
-    const off = matchOffset(bands as CurveFilter[], preamp, measurement, targetBase, getTargetMatchFreq(name));
+  function alignTarget() {
+    const off = alignOffset(bands as CurveFilter[], preamp, measurement, targetBase, getTargetAlignFreq(name));
     setTargetOffset(name, Math.round(off * 10) / 10);
   }
 
@@ -168,6 +168,7 @@
       rawLines = [];
     } finally {
       loading = false;
+      resetHistory(); // start a fresh undo history at the loaded state
     }
   }
 
@@ -177,6 +178,84 @@
   $effect(() => {
     void reloadToken;
     load(name);
+  });
+
+  // ── Undo / redo ────────────────────────────────────────────────────────────
+  // History of the editable state (bands + preamp + balance). A burst of edits —
+  // e.g. a slider drag — coalesces into one entry once it settles, so a single
+  // undo steps back a whole gesture rather than one pixel of movement.
+  type Snapshot = { key: string; bands: Band[]; preamp: number; balance: number };
+  let history = $state<Snapshot[]>([]);
+  let histIndex = $state(-1);
+  const HIST_MAX = 100;
+  const HIST_COALESCE = 400;
+
+  const canUndo = $derived(histIndex > 0);
+  const canRedo = $derived(histIndex < history.length - 1);
+
+  function snapState(): Snapshot {
+    return {
+      key: JSON.stringify({ bands, preamp, balance }),
+      bands: $state.snapshot(bands) as Band[],
+      preamp,
+      balance,
+    };
+  }
+  function resetHistory() {
+    history = [snapState()];
+    histIndex = 0;
+  }
+  function restoreSnap(s: Snapshot) {
+    bands = s.bands.map((b) => ({ ...b })); // fresh copies so later edits don't touch history
+    preamp = s.preamp;
+    balance = s.balance;
+    schedule();
+  }
+  function undo() {
+    if (histIndex <= 0) return;
+    restoreSnap(history[--histIndex]);
+  }
+  function redo() {
+    if (histIndex >= history.length - 1) return;
+    restoreSnap(history[++histIndex]);
+  }
+
+  // Record settled edits. JSON.stringify reads every field, so it both registers
+  // the effect's dependencies and is the cheap change key. Restoring from history
+  // sets the state back to an existing entry, whose key then matches — so undo /
+  // redo never records itself.
+  $effect(() => {
+    const key = JSON.stringify({ bands, preamp, balance });
+    if (loading) return;
+    const t = setTimeout(() => {
+      if (history[histIndex]?.key === key) return;
+      history = [...history.slice(0, histIndex + 1), snapState()];
+      if (history.length > HIST_MAX) history = history.slice(history.length - HIST_MAX);
+      histIndex = history.length - 1;
+    }, HIST_COALESCE);
+    return () => clearTimeout(t);
+  });
+
+  // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z), except while a field is focused so native
+  // text undo still works there.
+  $effect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) {
+        return;
+      }
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (k === "y" || (k === "z" && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   function buildConfig(): Config {
@@ -397,6 +476,18 @@
       ▲ clip
     </span>
   {/if}
+  <button class="icon-btn undo-btn" onclick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h11a5 5 0 0 1 0 10h-1" />
+    </svg>
+  </button>
+  <button class="icon-btn redo-btn" onclick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)" aria-label="Redo">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M15 14l5-5-5-5" />
+      <path d="M20 9H9a5 5 0 0 0 0 10h1" />
+    </svg>
+  </button>
   <button class="primary" onclick={save} disabled={!dirty || busy} title="Write changes to the preset file">
     {dirty ? "Save" : "Saved"}
   </button>
@@ -576,7 +667,7 @@
           {measName}
           onImport={importMeasurement}
           onClear={clearMeasurement}
-          onMatch={matchTarget}
+          onAlign={alignTarget}
         />
         <div class="graph-fit">
           <CurveEditor

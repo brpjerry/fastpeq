@@ -19,7 +19,7 @@ interface PresetView {
   showTargetRef?: boolean;
   measurement?: PresetMeasurement;
   targetOffset?: number; // dB the target trace is shifted by
-  targetMatchFreq?: number; // Hz the "Match" action aligns the target to the FR at
+  targetAlignFreq?: number; // Hz the "Align" action aligns the target to the FR at
 }
 
 const KEY = "fastpeq.presetView";
@@ -77,7 +77,7 @@ export function setShowTargetRef(name: string, on: boolean): void {
   patch(name, { showTargetRef: on });
 }
 
-// Target trace adjustments: a manual dB offset and the frequency the "Match"
+// Target trace adjustments: a manual dB offset and the frequency the "Align"
 // action pins the target to the response at. Both per preset.
 export function getTargetOffset(name: string): number {
   return store[name]?.targetOffset ?? 0;
@@ -85,11 +85,11 @@ export function getTargetOffset(name: string): number {
 export function setTargetOffset(name: string, db: number): void {
   patch(name, { targetOffset: db });
 }
-export function getTargetMatchFreq(name: string): number {
-  return store[name]?.targetMatchFreq ?? 1000;
+export function getTargetAlignFreq(name: string): number {
+  return store[name]?.targetAlignFreq ?? 1000;
 }
-export function setTargetMatchFreq(name: string, hz: number): void {
-  patch(name, { targetMatchFreq: hz });
+export function setTargetAlignFreq(name: string, hz: number): void {
+  patch(name, { targetAlignFreq: hz });
 }
 
 export function getMeasurement(name: string): PresetMeasurement | null {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { valueAt, frValueAt, targetValueAt, gapDb, compensateCurve, matchOffset } from "./curve";
+import { valueAt, frValueAt, targetValueAt, gapDb, compensateCurve, alignOffset } from "./curve";
 import type { CurveFilter } from "./eq";
 import type { MeasPoint } from "./measurement";
 
@@ -52,9 +52,9 @@ describe("curve helpers", () => {
     expect(compensateCurve([5, 3, -2], [1, 3, -2])).toEqual([4, 0, 0]);
   });
 
-  it("matchOffset shifts a target onto the FR at a frequency (preamp cancels)", () => {
+  it("alignOffset shifts a target onto the FR at a frequency (preamp cancels)", () => {
     // Flat FR (no filters/meas) at preamp -10; target reads 6 at 1 kHz → -6 to meet it.
-    expect(matchOffset([], -10, [], pts, 1000)).toBeCloseTo(-6, 5);
+    expect(alignOffset([], -10, [], pts, 1000)).toBeCloseTo(-6, 5);
     // A +4 dB peak over a flat target → lift the flat target by +4 at the center.
     const peak: CurveFilter = {
       enabled: true,
@@ -64,8 +64,8 @@ describe("curve helpers", () => {
       q: 1,
       channel: { kind: "both" },
     };
-    expect(matchOffset([peak], 0, [], [], 1000)).toBeCloseTo(4, 0);
+    expect(alignOffset([peak], 0, [], [], 1000)).toBeCloseTo(4, 0);
     // A measurement raises the FR; the offset follows it (meas=2 at 100 Hz).
-    expect(matchOffset([], 0, pts, [], 100)).toBeCloseTo(2, 5);
+    expect(alignOffset([], 0, pts, [], 100)).toBeCloseTo(2, 5);
   });
 });

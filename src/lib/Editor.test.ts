@@ -262,24 +262,24 @@ describe("Editor", () => {
     expect(container.querySelector(".target-adjust")).toBeNull();
   });
 
-  it("matches the target offset to the response at the match frequency", async () => {
+  it("aligns the target offset to the response at the align frequency", async () => {
     const id = addTarget("Tm", [{ freq: 100, spl: 2 }, { freq: 1000, spl: 6 }]);
-    setTargetId("MatchPreset", id);
-    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "MatchPreset" });
+    setTargetId("AlignPreset", id);
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "AlignPreset" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
     await fireEvent.click(container.querySelector(".expand-btn")!);
 
-    const matchBtn = await waitFor(() => {
+    const alignBtn = await waitFor(() => {
       const b = [...container.querySelectorAll(".target-adjust button")].find((x) =>
-        x.textContent!.includes("Match"),
+        x.textContent!.includes("Align"),
       );
-      if (!b) throw new Error("match button not rendered");
+      if (!b) throw new Error("align button not rendered");
       return b;
     });
-    // Default match freq 1 kHz, target=6 there, flat 0 dB bands → offset -6.
-    expect(getTargetOffset("MatchPreset")).toBe(0);
-    await fireEvent.click(matchBtn);
-    expect(getTargetOffset("MatchPreset")).toBeCloseTo(-6, 1);
+    // Default align freq 1 kHz, target=6 there, flat 0 dB bands → offset -6.
+    expect(getTargetOffset("AlignPreset")).toBe(0);
+    await fireEvent.click(alignBtn);
+    expect(getTargetOffset("AlignPreset")).toBeCloseTo(-6, 1);
     removeTarget(id);
   });
 
@@ -323,4 +323,22 @@ describe("Editor", () => {
     removeTarget(id);
   });
 
+  it("undoes and redoes a band edit", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    await fireEvent.click(container.querySelector(".band-actions .add")!);
+    expect(bandCount(container)).toBe(2);
+
+    // The edit records into history once the coalesce window passes, enabling undo.
+    const undoBtn = container.querySelector<HTMLButtonElement>(".undo-btn")!;
+    await waitFor(() => expect(undoBtn.disabled).toBe(false), { timeout: 1500 });
+    await fireEvent.click(undoBtn);
+    expect(bandCount(container)).toBe(1);
+
+    const redoBtn = container.querySelector<HTMLButtonElement>(".redo-btn")!;
+    expect(redoBtn.disabled).toBe(false);
+    await fireEvent.click(redoBtn);
+    expect(bandCount(container)).toBe(2);
+  });
 });

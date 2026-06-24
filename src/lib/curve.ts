@@ -45,11 +45,11 @@ export function compensateCurve(resp: number[], target: number[]): number[] {
 }
 
 /**
- * The dB offset that shifts `target` so its displayed line meets the FR at
- * `freq`. Both the FR and the target line carry the preamp, so it cancels and
+ * The dB offset that shifts `target` so its displayed line aligns with the FR
+ * at `freq`. Both the FR and the target line carry the preamp, so it cancels and
  * the offset is just (filters + measurement) − target at that frequency.
  */
-export function matchOffset(
+export function alignOffset(
   filters: CurveFilter[],
   preamp: number,
   measurement: MeasPoint[],
