@@ -141,14 +141,19 @@ describe("Editor", () => {
     expect(container.querySelector(".bal-pop")).toBeNull();
   });
 
-  it("imports a REW measurement and saves it for the preset", async () => {
+  it("imports a REW measurement: disabled switch beforehand, then shows, persists, and enables it", async () => {
     vi.mocked(openDialog).mockResolvedValue("C:/curves/harman.txt");
     vi.mocked(api.readTextFile).mockResolvedValue("20 -3\n500 0\n1000 0.5\n10000 -2");
 
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "ImportMeas" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
-
     await fireEvent.click(container.querySelector(".expand-btn")!);
+
+    // With no measurement yet, the reference switch is disabled and off.
+    const before = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
+    expect(before.disabled).toBe(true);
+    expect(before.checked).toBe(false);
+
     const importBtn = await waitFor(() => {
       const b = [...container.querySelectorAll("button")].find((x) =>
         x.textContent!.includes("Import REW"),
@@ -156,10 +161,17 @@ describe("Editor", () => {
       if (!b) throw new Error("import button not rendered yet");
       return b;
     });
-
     await fireEvent.click(importBtn);
+
+    // After import: the name shows, it's persisted per preset, and the switch auto-enables.
     await waitFor(() => expect(container.querySelector(".meas-name")?.textContent).toContain("harman.txt"));
-    expect(getMeasurement("ImportMeas")?.name).toBe("harman.txt"); // persisted per preset
+    expect(getMeasurement("ImportMeas")?.name).toBe("harman.txt");
+    await waitFor(() => {
+      const sw = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
+      expect(sw.disabled).toBe(false);
+      expect(sw.checked).toBe(true);
+    });
+    expect(getShowMeasRef("ImportMeas")).toBe(true);
   });
 
   it("auto-loads a saved measurement for the preset", async () => {
@@ -287,31 +299,4 @@ describe("Editor", () => {
     removeTarget(id);
   });
 
-  it("disables the measurement switch until a measurement is imported", async () => {
-    vi.mocked(openDialog).mockResolvedValue("C:/m.txt");
-    vi.mocked(api.readTextFile).mockResolvedValue("100 1\n1000 0\n10000 -1");
-    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "AutoEnable" });
-    await waitFor(() => expect(bandCount(container)).toBe(1));
-    await fireEvent.click(container.querySelector(".expand-btn")!);
-
-    const sw = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
-    expect(sw.disabled).toBe(true);
-    expect(sw.checked).toBe(false);
-
-    const importBtn = await waitFor(() => {
-      const b = [...container.querySelectorAll("button")].find((x) =>
-        x.textContent!.includes("Import REW"),
-      );
-      if (!b) throw new Error("import button not rendered");
-      return b;
-    });
-    await fireEvent.click(importBtn);
-
-    await waitFor(() => {
-      const t = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
-      expect(t.disabled).toBe(false);
-      expect(t.checked).toBe(true);
-    });
-    expect(getShowMeasRef("AutoEnable")).toBe(true);
-  });
 });
