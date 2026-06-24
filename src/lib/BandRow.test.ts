@@ -68,6 +68,15 @@ describe("BandRow", () => {
     expect(c.onChange).toHaveBeenCalled();
   });
 
+  it("keeps the gain slider out of the tab order", () => {
+    const { container } = render(BandRow, { props: { band: band(), hovered: false, ...cbs() } });
+    const slider = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
+    expect(slider.getAttribute("tabindex")).toBe("-1");
+    // The number boxes stay tabbable so Tab from Hz lands on the gain value.
+    const numbers = container.querySelectorAll(".field input[type='number']");
+    numbers.forEach((n) => expect(n.getAttribute("tabindex")).toBeNull());
+  });
+
   it("resets gain to 0 on right-click of the slider", async () => {
     const b = band({ gain: 6 });
     const c = cbs();

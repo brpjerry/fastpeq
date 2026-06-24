@@ -63,6 +63,7 @@
         min="-30"
         max="30"
         step="0.1"
+        tabindex="-1"
         bind:value={band.gain}
         oninput={onChange}
         oncontextmenu={() => {
