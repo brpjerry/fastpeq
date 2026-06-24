@@ -212,39 +212,52 @@
     schedule();
   }
   function undo() {
+    flushHistory(); // capture an in-flight edit so it's undoable right away
     if (histIndex <= 0) return;
     restoreSnap(history[--histIndex]);
   }
   function redo() {
+    flushHistory();
     if (histIndex >= history.length - 1) return;
     restoreSnap(history[++histIndex]);
   }
 
-  // Record settled edits. JSON.stringify reads every field, so it both registers
-  // the effect's dependencies and is the cheap change key. Restoring from history
-  // sets the state back to an existing entry, whose key then matches — so undo /
-  // redo never records itself.
+  // Append the current state as a new history entry if it differs from the top —
+  // used both by the debounced recorder and eagerly before an undo/redo, so the
+  // latest edit is always captured even if its coalesce window hasn't elapsed.
+  // Restoring sets state back to an existing entry whose key then matches, so
+  // undo/redo never record themselves.
+  function flushHistory() {
+    const snap = snapState();
+    if (history[histIndex]?.key === snap.key) return;
+    history = [...history.slice(0, histIndex + 1), snap];
+    if (history.length > HIST_MAX) history = history.slice(history.length - HIST_MAX);
+    histIndex = history.length - 1;
+  }
+
+  // A burst of edits coalesces into one entry once it settles. JSON.stringify
+  // reads every field, registering the effect's dependencies.
   $effect(() => {
-    const key = JSON.stringify({ bands, preamp, balance });
+    JSON.stringify({ bands, preamp, balance });
     if (loading) return;
-    const t = setTimeout(() => {
-      if (history[histIndex]?.key === key) return;
-      history = [...history.slice(0, histIndex + 1), snapState()];
-      if (history.length > HIST_MAX) history = history.slice(history.length - HIST_MAX);
-      histIndex = history.length - 1;
-    }, HIST_COALESCE);
+    const t = setTimeout(flushHistory, HIST_COALESCE);
     return () => clearTimeout(t);
   });
 
-  // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z), except while a field is focused so native
-  // text undo still works there.
+  // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z). Skipped only while a real text field is
+  // focused (the preset search / rename boxes) so their native text undo still
+  // works; the editor's own number/range controls fall through to editor undo.
+  function isTextEntry(el: Element | null): boolean {
+    if (el instanceof HTMLTextAreaElement) return true;
+    if (el instanceof HTMLInputElement) {
+      return ["text", "search", "email", "url", "tel", "password"].includes(el.type);
+    }
+    return false;
+  }
   $effect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.ctrlKey || e.metaKey)) return;
-      const el = document.activeElement;
-      if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) {
-        return;
-      }
+      if (isTextEntry(document.activeElement)) return;
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) {
         e.preventDefault();

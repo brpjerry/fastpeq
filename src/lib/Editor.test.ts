@@ -341,4 +341,19 @@ describe("Editor", () => {
     await fireEvent.click(redoBtn);
     expect(bandCount(container)).toBe(2);
   });
+
+  it("undoes with Ctrl+Z immediately, without waiting for the coalesce window", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    await fireEvent.click(container.querySelector(".band-actions .add")!);
+    expect(bandCount(container)).toBe(2);
+
+    // No wait: Ctrl+Z flushes the pending edit and undoes it right away.
+    await fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(bandCount(container)).toBe(1);
+    // Ctrl+Y redoes.
+    await fireEvent.keyDown(window, { key: "y", ctrlKey: true });
+    expect(bandCount(container)).toBe(2);
+  });
 });
