@@ -120,11 +120,7 @@ pub fn strip(config: &Config) -> Config {
     let mut kept = lines[..begin].to_vec();
     kept.extend_from_slice(&lines[(end + 1).min(lines.len())..]);
     let base = Config { lines: kept };
-    if had_swap {
-        flip_channels(&base)
-    } else {
-        base
-    }
+    if had_swap { flip_channels(&base) } else { base }
 }
 
 /// Lay the tone overlay over a base config. The base is first stripped of any
@@ -321,7 +317,13 @@ mod tests {
         assert!(
             !composed.lines.iter().any(|l| matches!(
                 l,
-                Line::Preamp { channel: Channel::Left, .. } | Line::Filter(Filter { channel: Channel::Left, .. })
+                Line::Preamp {
+                    channel: Channel::Left,
+                    ..
+                } | Line::Filter(Filter {
+                    channel: Channel::Left,
+                    ..
+                })
             )),
             "{composed:?}"
         );
@@ -331,7 +333,13 @@ mod tests {
                 .iter()
                 .filter(|l| matches!(
                     l,
-                    Line::Preamp { channel: Channel::Right, .. } | Line::Filter(Filter { channel: Channel::Right, .. })
+                    Line::Preamp {
+                        channel: Channel::Right,
+                        ..
+                    } | Line::Filter(Filter {
+                        channel: Channel::Right,
+                        ..
+                    })
                 ))
                 .count(),
             2
