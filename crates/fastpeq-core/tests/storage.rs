@@ -149,6 +149,18 @@ fn store_rename_moves_and_guards() {
 }
 
 #[test]
+fn store_rename_allows_case_only_change() {
+    let tmp = TempDir::new("rename-case");
+    let store = PresetStore::new(tmp.path());
+    store.save("HD600", &sample_config()).unwrap();
+
+    // Fixing only the capitalisation is the same preset, not a clobber — allowed.
+    store.rename("HD600", "hd600").unwrap();
+    assert!(store.load("hd600").is_ok());
+    assert_eq!(store.list().unwrap().len(), 1); // still one preset, not a duplicate
+}
+
+#[test]
 fn manager_active_preset_tracks_live_config() {
     let apo_dir = TempDir::new("active-apo");
     let presets_dir = TempDir::new("active-presets");

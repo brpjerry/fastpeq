@@ -11,6 +11,7 @@
     target = [],
     compensate = false,
     showMeas = true,
+    reference = null,
   }: {
     filters: CurveFilter[];
     preamp?: number;
@@ -19,6 +20,9 @@
     target?: MeasPoint[];
     compensate?: boolean;
     showMeas?: boolean;
+    // A second response (e.g. the saved version during A/B compare) drawn as a
+    // faded ghost; centred on the main preamp so the difference is to scale.
+    reference?: { filters: CurveFilter[]; preamp: number; balance: number } | null;
   } = $props();
 
   const W = 600;
@@ -76,6 +80,21 @@
     ),
   );
 
+  const refPath = $derived.by(() => {
+    if (!reference) return "";
+    const rt = balanceTrim(reference.balance);
+    return pathFor(
+      compensated(
+        withMeas(
+          responseCurve(
+            reference.filters.filter((f) => inChannel(f.channel, "left")),
+            reference.preamp + rt.left,
+          ),
+        ),
+      ),
+    );
+  });
+
   const gridF = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
   const gridDb = $derived(dbGridLines(preamp, dbMax, 12));
   const labF = [
@@ -98,6 +117,9 @@
     <text x={xOf(l.f)} y={H - 6} class="lbl" text-anchor="middle">{l.t}</text>
   {/each}
 
+  {#if refPath}
+    <path d={refPath} class="resp compare" />
+  {/if}
   {#if measCurve && showMeas}
     <path d={measPath} class="resp reference" />
   {/if}
@@ -147,6 +169,13 @@
     stroke-width: 1.25;
     stroke-dasharray: 4 3;
     opacity: 0.6;
+  }
+  /* The A/B compare ghost (the saved version). */
+  .resp.compare {
+    stroke: var(--text);
+    stroke-width: 1.5;
+    stroke-dasharray: 6 4;
+    opacity: 0.4;
   }
   .lbl {
     fill: var(--muted);

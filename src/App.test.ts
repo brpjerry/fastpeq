@@ -11,10 +11,22 @@ import {
   setBluetoothIcons,
   getFilterShapes,
   setFilterShapes,
+  getToneStep,
+  setToneStep,
 } from "./lib/prefs.svelte";
+import { addHotkey, updateHotkey, removeHotkey } from "./lib/hotkeys.svelte";
 import App from "./App.svelte";
 
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+// Capture event listeners so tests can fire a "hotkey-pressed" event.
+const { listeners } = vi.hoisted(() => ({
+  listeners: {} as Record<string, (e: { payload: unknown }) => void>,
+}));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn((event: string, cb: (e: { payload: unknown }) => void) => {
+    listeners[event] = cb;
+    return Promise.resolve(() => {});
+  }),
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("./lib/api", () => {
   const ok = () => vi.fn(() => Promise.resolve());
@@ -39,6 +51,7 @@ vi.mock("./lib/api", () => {
     savePreset: ok(),
     applyLive: ok(),
     setTone: ok(),
+    setHotkeys: vi.fn(() => Promise.resolve([])),
     readTextFile: vi.fn(() => Promise.resolve("")),
     setPresetsDir: ok(),
     resetPresetsDir: ok(),
@@ -162,6 +175,7 @@ describe("App settings", () => {
     setSpecialtyIcons(false);
     setBluetoothIcons(false);
     setFilterShapes(true);
+    setToneStep(0.5);
   });
 
   it("applies an accent color to the document", async () => {
@@ -172,6 +186,16 @@ describe("App settings", () => {
     await fireEvent.click(swatches[1]);
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe(ACCENTS[1].accent);
     expect(swatches[1].classList.contains("sel")).toBe(true);
+  });
+
+  it("sets the tone control step", async () => {
+    const { container } = render(App);
+    await fireEvent.click(container.querySelector(".gear")!);
+    const oneDb = [...container.querySelectorAll(".seg-btn")].find((b) =>
+      b.textContent!.includes("1 dB"),
+    )!;
+    await fireEvent.click(oneDb);
+    expect(getToneStep()).toBe(1);
   });
 
   it("switches the editor's filter set", async () => {
@@ -210,6 +234,79 @@ describe("App settings", () => {
     cb.checked = !before;
     await fireEvent.change(cb);
     expect(getFilterShapes()).toBe(!before);
+  });
+});
+
+describe("App global hotkeys", () => {
+  it("switches to the bound preset when a hotkey fires", async () => {
+    withLibrary(); // includes "Sennheiser HD600"
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    const id = addHotkey();
+    updateHotkey(id, { key: "1", action: "preset", preset: "Sennheiser HD600" });
+    listeners["hotkey-pressed"]({ payload: id });
+
+    await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD600"));
+    removeHotkey(id);
+  });
+
+  it("nudges the tone by the configured step on a tone hotkey", async () => {
+    withLibrary();
+    setToneStep(0.5);
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    const id = addHotkey();
+    updateHotkey(id, { key: "2", action: "tone-up", tone: "bass" });
+    vi.mocked(api.setTone).mockClear();
+    listeners["hotkey-pressed"]({ payload: id });
+
+    await waitFor(() => expect(api.setTone).toHaveBeenCalled());
+    const last = vi.mocked(api.setTone).mock.calls.at(-1)![0];
+    expect(last.bass).toBeCloseTo(0.5);
+    removeHotkey(id);
+  });
+
+  it("resets the tone on a reset-tone hotkey", async () => {
+    withLibrary();
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    const id = addHotkey();
+    updateHotkey(id, { key: "0", action: "tone-reset" });
+    vi.mocked(api.setTone).mockClear();
+    listeners["hotkey-pressed"]({ payload: id });
+
+    await waitFor(() => expect(api.setTone).toHaveBeenCalled());
+    expect(vi.mocked(api.setTone).mock.calls.at(-1)![0]).toEqual({
+      bass: 0,
+      mid: 0,
+      treble: 0,
+      invert: false,
+      swap: false,
+    });
+    removeHotkey(id);
+  });
+});
+
+describe("App name-conflict guards", () => {
+  it("rejects a new preset whose name collides case-insensitively", async () => {
+    withLibrary(); // includes "Sennheiser HD600"
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await fireEvent.click(container.querySelector(".new-btn")!);
+    await fireEvent.input(container.querySelector(".create input")!, {
+      target: { value: "sennheiser hd600" },
+    });
+    const fromScratch = [...container.querySelectorAll(".create-actions button")].find((b) =>
+      b.textContent!.includes("From scratch"),
+    )!;
+    await fireEvent.click(fromScratch);
+
+    expect(api.savePreset).not.toHaveBeenCalled();
+    await waitFor(() => expect(container.textContent).toContain("already exists"));
   });
 });
 

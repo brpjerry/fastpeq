@@ -191,3 +191,10 @@ pub fn reset_presets_dir(app: AppHandle, state: State<'_, AppState>) -> Result<(
 pub fn open_presets_dir(state: State<'_, AppState>) -> Result<(), String> {
     state.open_presets_dir()
 }
+
+/// (Re)register the global hotkeys from the frontend's binding list. Returns the
+/// ids that couldn't be registered (bad accelerator or combo already in use).
+#[tauri::command]
+pub fn set_hotkeys(app: AppHandle, bindings: Vec<crate::hotkeys::Binding>) -> Vec<String> {
+    crate::hotkeys::set_hotkeys(&app, bindings)
+}

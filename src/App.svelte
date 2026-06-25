@@ -8,13 +8,15 @@
   import Knob from "./lib/Knob.svelte";
   import Switch from "./lib/Switch.svelte";
   import Settings from "./lib/Settings.svelte";
+  import HotkeysPage from "./lib/HotkeysPage.svelte";
   import FloatingMenu from "./lib/FloatingMenu.svelte";
   import { anchorBelow, type Anchor } from "./lib/floating";
   import { starterConfig, defaultBandCount } from "./lib/starter";
   import { addTarget } from "./lib/targets.svelte";
   import { renamePresetView, clearPresetView } from "./lib/presetView.svelte";
   import { parseRew, normalize, downsample } from "./lib/measurement";
-  import { getSpecialtyIcons, getBluetoothIcons } from "./lib/prefs.svelte";
+  import { getSpecialtyIcons, getBluetoothIcons, getToneStep } from "./lib/prefs.svelte";
+  import { getHotkeys, accelerators } from "./lib/hotkeys.svelte";
 
   let status = $state<api.ApoStatus | null>(null);
   let presets = $state<string[]>([]);
@@ -25,6 +27,8 @@
   let message = $state("");
   let busy = $state(false);
   let showSettings = $state(false);
+  let showHotkeys = $state(false);
+  let failedHotkeys = $state<string[]>([]); // binding ids that couldn't register
   let isBypassed = $state(false);
   let bandCount = $state(defaultBandCount());
   let presetsDirPath = $state("");
@@ -74,6 +78,40 @@
       api.setTone(tone).catch((e) => flash(String(e)));
     }
   }
+  const clampTone = (v: number) => Math.max(-12, Math.min(12, v)); // matches the tone Knob range
+
+  // A global hotkey fired (emitted from the backend): run its bound action. Stale
+  // preset references (deleted/renamed) just no-op.
+  function dispatchHotkey(id: string) {
+    const h = getHotkeys().find((x) => x.id === id);
+    if (!h) return;
+    if (h.action === "bypass") {
+      toggleBypass();
+    } else if (h.action === "preset") {
+      if (h.preset && presets.includes(h.preset)) open(h.preset);
+    } else if (h.action === "tone-up" || h.action === "tone-down") {
+      const which = h.tone ?? "bass";
+      const delta = getToneStep() * (h.action === "tone-up" ? 1 : -1);
+      setKnob(which, clampTone(tone[which] + delta));
+    } else if (h.action === "tone-reset") {
+      resetTone();
+    }
+  }
+
+  // (Re)register the global hotkeys whenever the list changes, debounced so a
+  // burst of edits (typing a key) doesn't thrash OS registration. `accelerators()`
+  // reads the store, so this re-runs on every add/edit/remove/reorder.
+  let hkTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const accs = accelerators();
+    if (hkTimer) clearTimeout(hkTimer);
+    hkTimer = setTimeout(() => {
+      api.setHotkeys(accs).then((f) => (failedHotkeys = f)).catch(() => {});
+    }, 300);
+    return () => {
+      if (hkTimer) clearTimeout(hkTimer);
+    };
+  });
 
   async function reload() {
     status = await api.apoStatus();
@@ -410,10 +448,11 @@
 
   // Returning from Settings recreates the preset list (resetting its scroll to
   // the top), so jump back to the active preset instead of leaving it at top.
-  let wasInSettings = false;
+  let wasOnSubPage = false;
   $effect(() => {
-    if (wasInSettings && !showSettings) scrollCurrentIntoView();
-    wasInSettings = showSettings;
+    const onSubPage = showSettings || showHotkeys;
+    if (wasOnSubPage && !onSubPage) scrollCurrentIntoView();
+    wasOnSubPage = onSubPage;
   });
 
   function takeName(): string | null {
@@ -422,7 +461,10 @@
       flash("Type a name first");
       return null;
     }
-    if (presets.includes(name)) {
+    // Case-insensitive: the preset store is a folder of .txt files and Windows
+    // treats "HD600" and "hd600" as the same file, so allowing both would
+    // silently overwrite one.
+    if (presets.some((p) => p.toLowerCase() === name.toLowerCase())) {
       flash(`“${name}” already exists`);
       return null;
     }
@@ -451,9 +493,9 @@
       await api.captureCurrent(name);
       cancelCreate();
       await reload();
-      active = name; // the capture matches the live config, so it's active
+      active = name; // the saved config matches the live config, so it's active
       selected = name;
-      flash(`Captured “${name}”`);
+      flash(`Saved current config as “${name}”`);
       await revealSelected();
     });
 
@@ -478,7 +520,9 @@
     renaming = null; // leave edit mode regardless of outcome
     const to = renameValue.trim();
     if (!to || to === from) return;
-    if (presets.includes(to)) {
+    // Collide case-insensitively (Windows filesystem), but ignore `from` itself
+    // so fixing only the capitalisation of a name is still allowed.
+    if (presets.some((p) => p !== from && p.toLowerCase() === to.toLowerCase())) {
       flash(`“${to}” already exists`);
       return;
     }
@@ -494,11 +538,13 @@
   onMount(() => {
     reload().then(scrollCurrentIntoView); // on open, jump to the active preset
     const unlisten = listen("fastpeq:changed", () => reload());
+    const unlistenHotkey = listen<string>("hotkey-pressed", (e) => dispatchHotkey(e.payload));
     // Pick up external changes to the presets folder when the window is focused.
     const onFocus = () => reload();
     window.addEventListener("focus", onFocus);
     return () => {
       unlisten.then((f) => f());
+      unlistenHotkey.then((f) => f());
       window.removeEventListener("focus", onFocus);
     };
   });
@@ -512,9 +558,34 @@
     </div>
     <div class="settings">
       <button
+        class="kbd-btn"
+        class:on={showHotkeys}
+        onclick={() => {
+          showHotkeys = !showHotkeys;
+          showSettings = false;
+        }}
+        aria-label={showHotkeys ? "Back to presets" : "Hotkeys"}
+        title={showHotkeys ? "Back to presets" : "Hotkeys"}
+      >
+        {#if showHotkeys}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2" y="6" width="20" height="12" rx="2" />
+            <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
+          </svg>
+        {/if}
+      </button>
+      <button
         class="gear"
         class:on={showSettings}
-        onclick={() => (showSettings = !showSettings)}
+        onclick={() => {
+          showSettings = !showSettings;
+          showHotkeys = false;
+        }}
         aria-label={showSettings ? "Back to presets" : "Settings"}
         title={showSettings ? "Back to presets" : "Settings"}
       >
@@ -533,7 +604,7 @@
     </div>
   </header>
 
-  {#if !showSettings}
+  {#if !showSettings && !showHotkeys}
     {#if status && !status.installed}
       <div class="banner error">
         <strong>Equalizer APO not detected.</strong>
@@ -555,6 +626,8 @@
       onChangePresetsDir={changePresetsDir}
       onResetPresetsDir={resetPresetsDir}
     />
+  {:else if showHotkeys}
+    <HotkeysPage {presets} {categories} failedIds={failedHotkeys} />
   {:else}
   <div class="workspace">
   <section class="panel tone-panel">
@@ -567,9 +640,9 @@
     </div>
     <div class="tone-body">
       <div class="knobs">
-        <Knob label="Bass" value={tone.bass} onInput={(v) => setKnob("bass", v)} />
-        <Knob label="Mids" value={tone.mid} onInput={(v) => setKnob("mid", v)} />
-        <Knob label="Treble" value={tone.treble} onInput={(v) => setKnob("treble", v)} />
+        <Knob label="Bass" value={tone.bass} step={getToneStep()} onInput={(v) => setKnob("bass", v)} />
+        <Knob label="Mids" value={tone.mid} step={getToneStep()} onInput={(v) => setKnob("mid", v)} />
+        <Knob label="Treble" value={tone.treble} step={getToneStep()} onInput={(v) => setKnob("treble", v)} />
       </div>
       <div class="switches">
         <Switch
@@ -714,7 +787,7 @@
           <li class="empty">
             {query.trim() || typeFilter
               ? "No presets match your filters."
-              : "No presets yet — create or capture one below."}
+              : "No presets yet — create or save one below."}
           </li>
         {/each}
       </ul>
@@ -744,9 +817,9 @@
               class="capture-btn"
               onclick={capture}
               disabled={busy || !status?.installed}
-              title="Build the preset from the current live Equalizer APO config"
+              title="Save the current live Equalizer APO config as this preset"
             >
-              Capture current
+              Save current
             </button>
             <button class="ghost create-cancel" onclick={cancelCreate} title="Cancel">Cancel</button>
           </div>
@@ -775,7 +848,7 @@
       />
     {:else}
       <section class="panel">
-        <div class="placeholder">Select a preset to edit its filters, or capture your current config.</div>
+        <div class="placeholder">Select a preset to edit its filters, or save your current config.</div>
       </section>
     {/if}
   </div>
@@ -866,8 +939,12 @@
   }
   .settings {
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
-  .gear {
+  .gear,
+  .kbd-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -875,12 +952,14 @@
     border-radius: 8px;
     color: var(--text);
   }
-  .gear svg {
+  .gear svg,
+  .kbd-btn svg {
     width: 18px;
     height: 18px;
     display: block;
   }
-  .gear.on {
+  .gear.on,
+  .kbd-btn.on {
     background: var(--panel-2);
   }
   .ghost.on {

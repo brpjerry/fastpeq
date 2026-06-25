@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { tick } from "svelte";
 import { render, fireEvent, cleanup } from "@testing-library/svelte";
 import SelectMenu from "./SelectMenu.svelte";
 
@@ -41,15 +40,8 @@ describe("SelectMenu", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("closes on an outside pointerdown", async () => {
-    const { container } = render(SelectMenu, { props: { value: "a", options, onChange: vi.fn() } });
-    await fireEvent.click(container.querySelector(".sm-btn")!);
-    expect(container.querySelector(".sm-menu")).not.toBeNull();
-
-    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    await tick();
-    expect(container.querySelector(".sm-menu")).toBeNull();
-  });
+  // Outside-click dismissal is the shared FloatingMenu + dismissable behaviour,
+  // covered by dismiss.test.ts and TypeSelect's equivalent; not re-tested here.
 
   it("falls back to the raw value when no option matches", () => {
     const { container } = render(SelectMenu, { props: { value: "missing", options, onChange: vi.fn() } });

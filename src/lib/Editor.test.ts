@@ -14,6 +14,7 @@ import {
   getCompensate,
   setCompensate,
   getShowMeasRef,
+  getTargetOffset,
 } from "./presetView.svelte";
 import Editor from "./Editor.svelte";
 
@@ -141,14 +142,19 @@ describe("Editor", () => {
     expect(container.querySelector(".bal-pop")).toBeNull();
   });
 
-  it("imports a REW measurement and saves it for the preset", async () => {
+  it("imports a REW measurement: disabled switch beforehand, then shows, persists, and enables it", async () => {
     vi.mocked(openDialog).mockResolvedValue("C:/curves/harman.txt");
     vi.mocked(api.readTextFile).mockResolvedValue("20 -3\n500 0\n1000 0.5\n10000 -2");
 
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "ImportMeas" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
-
     await fireEvent.click(container.querySelector(".expand-btn")!);
+
+    // With no measurement yet, the reference switch is disabled and off.
+    const before = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
+    expect(before.disabled).toBe(true);
+    expect(before.checked).toBe(false);
+
     const importBtn = await waitFor(() => {
       const b = [...container.querySelectorAll("button")].find((x) =>
         x.textContent!.includes("Import REW"),
@@ -156,10 +162,17 @@ describe("Editor", () => {
       if (!b) throw new Error("import button not rendered yet");
       return b;
     });
-
     await fireEvent.click(importBtn);
+
+    // After import: the name shows, it's persisted per preset, and the switch auto-enables.
     await waitFor(() => expect(container.querySelector(".meas-name")?.textContent).toContain("harman.txt"));
-    expect(getMeasurement("ImportMeas")?.name).toBe("harman.txt"); // persisted per preset
+    expect(getMeasurement("ImportMeas")?.name).toBe("harman.txt");
+    await waitFor(() => {
+      const sw = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
+      expect(sw.disabled).toBe(false);
+      expect(sw.checked).toBe(true);
+    });
+    expect(getShowMeasRef("ImportMeas")).toBe(true);
   });
 
   it("auto-loads a saved measurement for the preset", async () => {
@@ -245,6 +258,29 @@ describe("Editor", () => {
       return t;
     });
     expect(toggle.disabled).toBe(true); // nothing to compensate against
+    // The target trace controls are hidden for the Flat target.
+    expect(container.querySelector(".target-adjust")).toBeNull();
+  });
+
+  it("aligns the target offset to the response at the align frequency", async () => {
+    const id = addTarget("Tm", [{ freq: 100, spl: 2 }, { freq: 1000, spl: 6 }]);
+    setTargetId("AlignPreset", id);
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "AlignPreset" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".expand-btn")!);
+
+    const alignBtn = await waitFor(() => {
+      const b = [...container.querySelectorAll(".target-adjust button")].find((x) =>
+        x.textContent!.includes("Align"),
+      );
+      if (!b) throw new Error("align button not rendered");
+      return b;
+    });
+    // Default align freq 1 kHz, target=6 there, flat 0 dB bands → offset -6.
+    expect(getTargetOffset("AlignPreset")).toBe(0);
+    await fireEvent.click(alignBtn);
+    expect(getTargetOffset("AlignPreset")).toBeCloseTo(-6, 1);
+    removeTarget(id);
   });
 
   it("toggles the measurement reference per preset", async () => {
@@ -287,31 +323,102 @@ describe("Editor", () => {
     removeTarget(id);
   });
 
-  it("disables the measurement switch until a measurement is imported", async () => {
-    vi.mocked(openDialog).mockResolvedValue("C:/m.txt");
-    vi.mocked(api.readTextFile).mockResolvedValue("100 1\n1000 0\n10000 -1");
-    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "AutoEnable" });
+  it("undoes and redoes a band edit", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));
-    await fireEvent.click(container.querySelector(".expand-btn")!);
 
-    const sw = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
-    expect(sw.disabled).toBe(true);
-    expect(sw.checked).toBe(false);
+    await fireEvent.click(container.querySelector(".band-actions .add")!);
+    expect(bandCount(container)).toBe(2);
 
-    const importBtn = await waitFor(() => {
-      const b = [...container.querySelectorAll("button")].find((x) =>
-        x.textContent!.includes("Import REW"),
-      );
-      if (!b) throw new Error("import button not rendered");
-      return b;
+    // The edit records into history once the coalesce window passes, enabling undo.
+    const undoBtn = container.querySelector<HTMLButtonElement>(".undo-btn")!;
+    await waitFor(() => expect(undoBtn.disabled).toBe(false), { timeout: 1500 });
+    await fireEvent.click(undoBtn);
+    expect(bandCount(container)).toBe(1);
+
+    const redoBtn = container.querySelector<HTMLButtonElement>(".redo-btn")!;
+    expect(redoBtn.disabled).toBe(false);
+    await fireEvent.click(redoBtn);
+    expect(bandCount(container)).toBe(2);
+  });
+
+  it("undoes with Ctrl+Z immediately, without waiting for the coalesce window", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    await fireEvent.click(container.querySelector(".band-actions .add")!);
+    expect(bandCount(container)).toBe(2);
+
+    // No wait: Ctrl+Z flushes the pending edit and undoes it right away.
+    await fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(bandCount(container)).toBe(1);
+    // Ctrl+Y redoes.
+    await fireEvent.keyDown(window, { key: "y", ctrlKey: true });
+    expect(bandCount(container)).toBe(2);
+  });
+
+  it("auto-preamp drops the preamp to stop clipping", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 10, 1]])); // +10 dB at preamp 0 → clips
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    expect(container.querySelector(".clip")).toBeTruthy();
+
+    const auto = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("Auto"),
+    )!;
+    const cb = auto.querySelector<HTMLInputElement>("input[type='checkbox']")!;
+    cb.checked = true;
+    await fireEvent.change(cb);
+
+    // Preamp pulled to ~-10 dB, the clip warning clears, and the slider locks.
+    await waitFor(() => expect(container.querySelector(".clip")).toBeNull());
+    expect(container.querySelector(".pval")!.textContent).toContain("-10");
+    expect(container.querySelector<HTMLInputElement>(".preamp input[type='range']")!.disabled).toBe(true);
+  });
+
+  it("auto-preamp accounts for the global tone overlay", async () => {
+    // Flat bands, but a +6 dB bass tone overlay → auto-preamp must still pull down.
+    const { container } = renderEditor(cfg(0, [[1000, 0, 1]]), {
+      tone: { bass: 6, mid: 0, treble: 0, invert: false, swap: false },
     });
-    await fireEvent.click(importBtn);
+    await waitFor(() => expect(bandCount(container)).toBe(1));
 
-    await waitFor(() => {
-      const t = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
-      expect(t.disabled).toBe(false);
-      expect(t.checked).toBe(true);
-    });
-    expect(getShowMeasRef("AutoEnable")).toBe(true);
+    const auto = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("Auto"),
+    )!;
+    const cb = auto.querySelector<HTMLInputElement>("input[type='checkbox']")!;
+    cb.checked = true;
+    await fireEvent.change(cb);
+
+    // Bands-only would leave preamp at 0; counting the tone pulls it negative.
+    await waitFor(() => expect(parseFloat(container.querySelector(".pval")!.textContent!)).toBeLessThan(0));
+  });
+
+  it("A/B compares the working edit against the saved version", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    const compareBtn = container.querySelector<HTMLButtonElement>(".compare-btn")!;
+    expect(compareBtn.disabled).toBe(true); // nothing unsaved to compare yet
+
+    await fireEvent.click(container.querySelector(".band-actions .add")!);
+    await waitFor(() => expect(compareBtn.disabled).toBe(false));
+
+    // Compare → hear the saved version (1 band), editing locked.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(compareBtn);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const onB = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(onB.lines.filter((l) => l.kind === "Filter").length).toBe(1);
+    expect(container.querySelector(".comparing")).toBeTruthy();
+    expect(container.querySelector<HTMLButtonElement>(".undo-btn")!.disabled).toBe(true);
+    expect(container.querySelector(".live")!.textContent).toContain("saved");
+
+    // Toggle off → the working edit (2 bands) is restored live.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(compareBtn);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const onA = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(onA.lines.filter((l) => l.kind === "Filter").length).toBe(2);
+    expect(container.querySelector(".comparing")).toBeNull();
   });
 });

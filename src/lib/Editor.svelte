@@ -23,7 +23,11 @@
     getMeasurement,
     setMeasurement,
     clearMeasurement as clearSavedMeasurement,
+    getTargetOffset,
+    setTargetOffset,
+    getTargetAlignFreq,
   } from "./presetView.svelte";
+  import { alignOffset } from "./curve";
 
   let {
     name,
@@ -80,9 +84,43 @@
   );
   const clipping = $derived(clipPeak > 0.05);
 
+  // Auto-preamp: when on, hold the preamp at the lowest value that keeps the
+  // peak boost from clipping (the preamp slider is disabled, the EQ math drives
+  // it). Uses the same bands + tone-overlay set as the clip warning, so with it
+  // on the warning never fires.
+  let autoPreamp = $state(false);
+  function computeAutoPreamp(): number {
+    const peak = peakGainDb(
+      [...bands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
+      0,
+      balance,
+    );
+    return Math.round(Math.min(0, -peak) * 10) / 10;
+  }
+  $effect(() => {
+    if (!autoPreamp || loading) return;
+    preamp = computeAutoPreamp(); // tracks bands/balance; $state no-op if unchanged
+    schedule();
+  });
+
   // The per-preset target curve (Flat by default), shown on the graph as a
-  // reference. Reactive to the selected target and the current preset.
-  const targetPoints = $derived(getTarget(getTargetId(name)).points);
+  // reference. Reactive to the selected target and the current preset. A manual
+  // dB offset (set directly or by the "Align" action) shifts the whole trace; it
+  // bakes into the points so the gap readout and compensation pick it up too.
+  const targetBase = $derived(getTarget(getTargetId(name)).points);
+  const targetOffset = $derived(getTargetOffset(name));
+  const targetPoints = $derived(
+    targetOffset && targetBase.length
+      ? targetBase.map((p) => ({ freq: p.freq, spl: p.spl + targetOffset }))
+      : targetBase,
+  );
+
+  // Shift the target so its line meets the current response at the saved align
+  // frequency — the standard "align at a reference frequency" for headphone EQ.
+  function alignTarget() {
+    const off = alignOffset(bands as CurveFilter[], preamp, measurement, targetBase, getTargetAlignFreq(name));
+    setTargetOffset(name, Math.round(off * 10) / 10);
+  }
 
   // Imported FR measurement, saved per preset and auto-loaded whenever this
   // preset is shown again. The traces become "measurement + filters".
@@ -108,6 +146,8 @@
     err = "";
     loading = true;
     dirty = false;
+    comparing = false; // a fresh preset is live; nothing to compare against yet
+    autoPreamp = false; // start each preset with its saved preamp, auto off
     preamp = 0;
     balance = 0;
     hadPreamp = false;
@@ -143,12 +183,15 @@
       }
       bands = nextBands;
       rawLines = raw;
+      savedConfig = cfg; // the loaded file is the "saved" baseline (B) to compare against
     } catch (e) {
       err = String(e);
       bands = [];
       rawLines = [];
+      savedConfig = null;
     } finally {
       loading = false;
+      resetHistory(); // start a fresh undo history at the loaded state
     }
   }
 
@@ -158,6 +201,153 @@
   $effect(() => {
     void reloadToken;
     load(name);
+  });
+
+  // ── Undo / redo ────────────────────────────────────────────────────────────
+  // History of the editable state (bands + preamp + balance). A burst of edits —
+  // e.g. a slider drag — coalesces into one entry once it settles, so a single
+  // undo steps back a whole gesture rather than one pixel of movement.
+  type Snapshot = { key: string; bands: Band[]; preamp: number; balance: number };
+  let history = $state<Snapshot[]>([]);
+  let histIndex = $state(-1);
+  const HIST_MAX = 100;
+  const HIST_COALESCE = 400;
+
+  const canUndo = $derived(histIndex > 0);
+  const canRedo = $derived(histIndex < history.length - 1);
+
+  function snapState(): Snapshot {
+    return {
+      key: JSON.stringify({ bands, preamp, balance }),
+      bands: $state.snapshot(bands) as Band[],
+      preamp,
+      balance,
+    };
+  }
+  function resetHistory() {
+    history = [snapState()];
+    histIndex = 0;
+  }
+  function restoreSnap(s: Snapshot) {
+    bands = s.bands.map((b) => ({ ...b })); // fresh copies so later edits don't touch history
+    preamp = s.preamp;
+    balance = s.balance;
+    schedule();
+  }
+  function undo() {
+    if (comparing) return; // editing is locked while comparing
+    flushHistory(); // capture an in-flight edit so it's undoable right away
+    if (histIndex <= 0) return;
+    restoreSnap(history[--histIndex]);
+  }
+  function redo() {
+    if (comparing) return;
+    flushHistory();
+    if (histIndex >= history.length - 1) return;
+    restoreSnap(history[++histIndex]);
+  }
+
+  // Append the current state as a new history entry if it differs from the top —
+  // used both by the debounced recorder and eagerly before an undo/redo, so the
+  // latest edit is always captured even if its coalesce window hasn't elapsed.
+  // Restoring sets state back to an existing entry whose key then matches, so
+  // undo/redo never record themselves.
+  function flushHistory() {
+    const snap = snapState();
+    if (history[histIndex]?.key === snap.key) return;
+    history = [...history.slice(0, histIndex + 1), snap];
+    if (history.length > HIST_MAX) history = history.slice(history.length - HIST_MAX);
+    histIndex = history.length - 1;
+  }
+
+  // A burst of edits coalesces into one entry once it settles. JSON.stringify
+  // reads every field, registering the effect's dependencies.
+  $effect(() => {
+    JSON.stringify({ bands, preamp, balance });
+    if (loading) return;
+    const t = setTimeout(flushHistory, HIST_COALESCE);
+    return () => clearTimeout(t);
+  });
+
+  // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z). Skipped only while a real text field is
+  // focused (the preset search / rename boxes) so their native text undo still
+  // works; the editor's own number/range controls fall through to editor undo.
+  function isTextEntry(el: Element | null): boolean {
+    if (el instanceof HTMLTextAreaElement) return true;
+    if (el instanceof HTMLInputElement) {
+      return ["text", "search", "email", "url", "tel", "password"].includes(el.type);
+    }
+    return false;
+  }
+  // ── A/B compare ────────────────────────────────────────────────────────────
+  // Hold the last-saved version (B) so the live output can flip between it and
+  // the working edit (A) to hear the difference; editing is locked while on B.
+  let savedConfig = $state<Config | null>(null);
+  let comparing = $state(false);
+
+  const canCompare = $derived(dirty && savedConfig !== null);
+  const savedCurve = $derived(savedConfig ? configToCurve(savedConfig) : null);
+  // The faded ghost trace passed to the graphs — only while actually comparing.
+  const compareRef = $derived(comparing ? savedCurve : null);
+
+  // A Config as graph-ready filters/preamp/balance (mirrors the parse in load()).
+  function configToCurve(cfg: Config): { filters: CurveFilter[]; preamp: number; balance: number } {
+    let p = 0;
+    let bal = 0;
+    const filters: CurveFilter[] = [];
+    for (const line of cfg.lines) {
+      if (line.kind === "Preamp") {
+        const ch = line.value.channel;
+        if (ch.kind === "left" || ch.kind === "right") bal = balanceFromTrim(ch.kind, line.value.gain);
+        else p = line.value.gain;
+      } else if (line.kind === "Filter") {
+        const f = line.value;
+        filters.push({
+          enabled: f.enabled,
+          kind: f.kind,
+          freq: f.freq,
+          gain: f.gain ?? 0,
+          q: f.q ?? defaultQ(f.kind),
+          channel: f.channel,
+        });
+      }
+    }
+    return { filters, preamp: p, balance: bal };
+  }
+
+  function setCompare(on: boolean) {
+    if (on === comparing || (on && !canCompare)) return;
+    comparing = on;
+    if (comparing && savedConfig) {
+      api.applyLive(savedConfig).catch((e) => (err = String(e))); // hear the saved version
+    } else {
+      schedule(); // back to the working edit
+    }
+  }
+  const toggleCompare = () => setCompare(!comparing);
+  const exitCompare = () => setCompare(false);
+
+  // Ctrl+Z / Ctrl+Y undo-redo and Ctrl+` to toggle compare, skipped while a real
+  // text field is focused so their native behaviour still works. (Esc is handled
+  // on <svelte:window> alongside collapse.)
+  $effect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (isTextEntry(document.activeElement)) return;
+      const k = e.key.toLowerCase();
+      if (k === "`") {
+        e.preventDefault();
+        toggleCompare();
+      } else if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (k === "y" || (k === "z" && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   function buildConfig(): Config {
@@ -209,7 +399,7 @@
 
   // Throttle with a trailing call so the final position always gets written.
   function schedule() {
-    if (loading) return;
+    if (loading || comparing) return; // no live edits while auditioning the saved version
     dirty = true;
     const elapsed = Date.now() - lastApply;
     if (timer !== null) clearTimeout(timer);
@@ -307,7 +497,9 @@
   async function save() {
     busy = true;
     try {
-      await api.savePreset(name, buildConfig());
+      const config = buildConfig();
+      await api.savePreset(name, config);
+      savedConfig = config; // the new baseline for A/B compare
       dirty = false;
       err = "";
     } catch (e) {
@@ -355,7 +547,9 @@
 
 <svelte:window
   onkeydown={(e) => {
-    if (e.key === "Escape" && expanded) collapse();
+    if (e.key !== "Escape") return;
+    if (comparing) exitCompare();
+    else if (expanded) collapse();
   }}
 />
 
@@ -363,12 +557,15 @@
   <span
     class="live"
     class:error={!!err}
-    class:bypassed={bypassed && !err}
-    title={bypassed
-      ? "Filters are bypassed — preamp kept, EQ off"
-      : "Changes apply to Equalizer APO instantly"}
+    class:comparing={comparing && !err}
+    class:bypassed={bypassed && !err && !comparing}
+    title={comparing
+      ? "Hearing the saved version — toggle Compare off to return to your edit"
+      : bypassed
+        ? "Filters are bypassed — preamp kept, EQ off"
+        : "Changes apply to Equalizer APO instantly"}
   >
-    {err ? "● error" : bypassed ? "● bypassed" : "● live"}
+    {err ? "● error" : comparing ? "● saved" : bypassed ? "● bypassed" : "● live"}
   </span>
   {#if clipping}
     <span
@@ -378,7 +575,30 @@
       ▲ clip
     </span>
   {/if}
-  <button class="primary" onclick={save} disabled={!dirty || busy} title="Write changes to the preset file">
+  <button class="icon-btn undo-btn" onclick={undo} disabled={!canUndo || comparing} title="Undo (Ctrl+Z)" aria-label="Undo">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h11a5 5 0 0 1 0 10h-1" />
+    </svg>
+  </button>
+  <button class="icon-btn redo-btn" onclick={redo} disabled={!canRedo || comparing} title="Redo (Ctrl+Y)" aria-label="Redo">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M15 14l5-5-5-5" />
+      <path d="M20 9H9a5 5 0 0 0 0 10h1" />
+    </svg>
+  </button>
+  <button
+    class="compare-btn"
+    class:on={comparing}
+    onclick={toggleCompare}
+    disabled={!canCompare}
+    title={canCompare
+      ? "Compare with the saved version (Ctrl+`)"
+      : "No unsaved changes to compare against"}
+  >
+    {comparing ? "Comparing saved" : "Compare"}
+  </button>
+  <button class="primary" onclick={save} disabled={!dirty || busy || comparing} title="Write changes to the preset file">
     {dirty ? "Save" : "Saved"}
   </button>
 {/snippet}
@@ -386,8 +606,23 @@
 {#snippet preampRow()}
   <div class="preamp">
     <span class="plabel">Preamp</span>
-    <input type="range" min="-30" max="6" step="0.1" bind:value={preamp} oninput={schedule} />
+    <input
+      type="range"
+      min="-30"
+      max="6"
+      step="0.1"
+      bind:value={preamp}
+      oninput={schedule}
+      disabled={autoPreamp}
+    />
     <span class="pval">{preamp.toFixed(1)} dB</span>
+    <Switch
+      compact
+      label="Auto"
+      checked={autoPreamp}
+      onChange={(v) => (autoPreamp = v)}
+      title="Automatically set the preamp so the EQ never clips"
+    />
     <div class="balance-wrap">
       <button
         bind:this={chanBtn}
@@ -483,7 +718,7 @@
 {/snippet}
 
 {#if !expanded}
-  <section class="panel">
+  <section class="panel" class:comparing>
     <div class="panel-head">
       <h2 title={name}>{name}</h2>
       <div class="actions">
@@ -494,7 +729,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} />
+      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -519,7 +754,7 @@
 {/if}
 
 {#if expanded}
-  <div class="overlay">
+  <div class="overlay" class:comparing>
     <div class="overlay-head">
       <h2 title={name}>{name}</h2>
       <div class="actions">
@@ -557,6 +792,7 @@
           {measName}
           onImport={importMeasurement}
           onClear={clearMeasurement}
+          onAlign={alignTarget}
         />
         <div class="graph-fit">
           <CurveEditor
@@ -571,6 +807,7 @@
             {showTarget}
             {hoveredId}
             filterShapes={getFilterShapes()}
+            reference={compareRef}
             onChange={schedule}
             onHover={(id) => (hoveredId = id)}
           />
@@ -597,6 +834,36 @@
   }
   .live.bypassed {
     color: var(--muted);
+  }
+  .live.comparing {
+    color: var(--accent);
+  }
+  /* A/B compare toggle; reads as "armed" (accent fill) while comparing. */
+  .compare-btn {
+    font-size: 12px;
+    padding: 3px 10px;
+    white-space: nowrap;
+  }
+  .compare-btn.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .compare-btn.on:hover:not(:disabled) {
+    background: var(--accent-2);
+    border-color: var(--accent-2);
+  }
+  /* While comparing, the EQ controls are locked (dimmed, non-interactive) and
+     the graph handles can't be dragged — only the live output is swapped. */
+  .panel.comparing .preamp,
+  .panel.comparing .bands,
+  .panel.comparing .band-actions,
+  .overlay.comparing .overlay-side {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .overlay.comparing .graph-fit {
+    pointer-events: none;
   }
   .clip {
     font-size: 12px;

@@ -28,6 +28,10 @@ export const applyLive = (config: Config) => invoke<void>("apply_live", { config
 export const getTone = () => invoke<Tone>("get_tone");
 export const setTone = (tone: Tone) => invoke<void>("set_tone", { tone });
 
+/** (Re)register global hotkeys; resolves to the ids that failed to register. */
+export const setHotkeys = (bindings: { id: string; accelerator: string }[]) =>
+  invoke<string[]>("set_hotkeys", { bindings });
+
 export const readTextFile = (path: string) => invoke<string>("read_text_file", { path });
 
 export const presetsDir = () => invoke<string>("presets_dir");

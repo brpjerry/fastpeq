@@ -49,6 +49,7 @@
     showTarget = true,
     hoveredId = null,
     filterShapes = false,
+    reference = null,
     onChange,
     onHover,
   }: {
@@ -63,6 +64,9 @@
     showTarget?: boolean;
     hoveredId?: number | null;
     filterShapes?: boolean;
+    // A second response (the saved version during A/B compare) drawn as a faded
+    // ghost so the difference from the working edit is visible, not just audible.
+    reference?: { filters: CurveFilter[]; preamp: number; balance: number } | null;
     onChange: () => void;
     onHover?: (id: number | null) => void;
   } = $props();
@@ -148,6 +152,23 @@
   // result traces and the gap between them is purely the filter shaping.
   const measPath = $derived(measCurve ? pathFor(compensated(measCurve.map((v) => v + preamp))) : "");
   const targetPath = $derived(targetLine ? pathFor(targetLine) : "");
+  // The saved-version ghost during A/B compare, through the same meas/compensate
+  // transforms so it lines up with the working trace.
+  const refPath = $derived.by(() => {
+    if (!ready || !reference) return "";
+    const rt = balanceTrim(reference.balance);
+    return pathFor(
+      compensated(
+        withMeas(
+          responseCurve(
+            reference.filters.filter((f) => inChannel(f.channel, "left")),
+            reference.preamp + rt.left,
+            freqs,
+          ),
+        ),
+      ),
+    );
+  });
 
   // Full 1–9-per-decade log grid; the 1-2-5 lines (labelled) draw brighter than
   // the minor lines in between, giving a denser but still readable frequency grid.
@@ -328,6 +349,9 @@
         </g>
       {/if}
 
+      {#if refPath}
+        <path d={refPath} class="resp compare" />
+      {/if}
       {#if showTarget && targetPath}
         <path d={targetPath} class="resp target" />
       {/if}
@@ -490,6 +514,13 @@
     stroke-width: 1.5;
     stroke-dasharray: 6 4;
     opacity: 0.8;
+  }
+  /* The A/B compare ghost (the saved version). */
+  .resp.compare {
+    stroke: var(--text);
+    stroke-width: 1.5;
+    stroke-dasharray: 6 4;
+    opacity: 0.4;
   }
   .lbl {
     fill: var(--muted);

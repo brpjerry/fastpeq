@@ -39,6 +39,26 @@ export function setToneVolumeCap(v: number): void {
   save(CAP_KEY, toneVolumeCap);
 }
 
+// Step size (dB) for adjusting a tone control — by keyboard (arrow keys / scroll
+// on a tone knob) and by a tone-bound global hotkey. Default 0.5 dB.
+const TONE_STEP_KEY = "fastpeq.toneStep";
+
+function loadStep(): number {
+  const v = loadNumber(TONE_STEP_KEY, 0.5);
+  return v >= 0.1 && v <= 5 ? v : 0.5;
+}
+
+let toneStep = $state<number>(loadStep());
+
+export function getToneStep(): number {
+  return toneStep;
+}
+
+export function setToneStep(v: number): void {
+  toneStep = v >= 0.1 && v <= 5 ? v : 0.5;
+  save(TONE_STEP_KEY, toneStep);
+}
+
 // Which optional preset-category groups can be assigned. Off by default; their
 // icons still *display* on presets that use them, regardless of these.
 let specialtyIcons = $state<boolean>(loadBool("fastpeq.specialtyIcons"));

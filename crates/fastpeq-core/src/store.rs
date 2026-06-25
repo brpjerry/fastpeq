@@ -89,11 +89,20 @@ impl PresetStore {
                 format!("preset not found: {from}"),
             ));
         }
+        // `to` already existing is a clobber — unless it resolves to the *same*
+        // file as `from` (a case-only rename on a case-insensitive filesystem,
+        // e.g. "HD600" -> "hd600" on Windows), which is a legitimate fix.
         if to_path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("preset already exists: {to}"),
-            ));
+            let same = matches!(
+                (fs::canonicalize(&from_path), fs::canonicalize(&to_path)),
+                (Ok(a), Ok(b)) if a == b
+            );
+            if !same {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("preset already exists: {to}"),
+                ));
+            }
         }
         fs::rename(from_path, to_path)
     }

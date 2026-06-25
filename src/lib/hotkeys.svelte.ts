@@ -1,0 +1,103 @@
+// User-configurable global hotkeys, persisted to localStorage. Each binding is a
+// modifier (Ctrl+Alt or Ctrl+Shift) plus a single key, mapped to an action. The
+// list is ordered (the Hotkeys page lets the user reorder it). The backend just
+// registers the accelerators and emits an event on press; App.svelte dispatches
+// the action, so all the semantics live here on the frontend.
+
+import { loadJson, saveJson } from "./storage";
+
+export type HotkeyMod = "ctrl-alt" | "ctrl-shift";
+// "device" (switch audio output) is a planned stage-2 action; kept out of the
+// action union until the backend can enumerate/switch devices.
+export type HotkeyAction = "preset" | "bypass" | "tone-up" | "tone-down" | "tone-reset";
+export type ToneControl = "bass" | "mid" | "treble";
+
+export interface Hotkey {
+  id: string;
+  mod: HotkeyMod;
+  key: string; // a single A–Z / 0–9, normalized uppercase
+  action: HotkeyAction;
+  preset?: string; // principal for "preset"
+  tone?: ToneControl; // principal for "tone-up" / "tone-down"
+}
+
+const KEY = "fastpeq.hotkeys";
+
+function freshId(): string {
+  return `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// Seed a single Ctrl+Alt+B → Bypass binding on first run only. Once the list has
+// been written (even emptied), it's respected — a deleted default stays deleted.
+function initial(): Hotkey[] {
+  const stored = loadJson<Hotkey[] | null>(KEY, null);
+  if (stored !== null) return stored;
+  const seed: Hotkey[] = [{ id: freshId(), mod: "ctrl-alt", key: "B", action: "bypass" }];
+  saveJson(KEY, seed);
+  return seed;
+}
+
+let list = $state<Hotkey[]>(initial());
+
+export function getHotkeys(): Hotkey[] {
+  return list;
+}
+
+/** Append a blank binding (user fills in the key + principal); returns its id. */
+export function addHotkey(): string {
+  const h: Hotkey = { id: freshId(), mod: "ctrl-alt", key: "", action: "preset" };
+  list = [...list, h];
+  saveJson(KEY, list);
+  return h.id;
+}
+
+export function updateHotkey(id: string, patch: Partial<Hotkey>): void {
+  list = list.map((h) => (h.id === id ? { ...h, ...patch } : h));
+  saveJson(KEY, list);
+}
+
+export function removeHotkey(id: string): void {
+  list = list.filter((h) => h.id !== id);
+  saveJson(KEY, list);
+}
+
+/** Reorder: move the entry at `from` to index `to`. No-op for out-of-range. */
+export function moveHotkey(from: number, to: number): void {
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return;
+  const next = [...list];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  list = next;
+  saveJson(KEY, list);
+}
+
+/** A valid hotkey key is exactly one uppercase letter or digit. */
+export function validKey(key: string): boolean {
+  return /^[A-Z0-9]$/.test(key);
+}
+
+const MOD_PREFIX: Record<HotkeyMod, string> = {
+  "ctrl-alt": "Ctrl+Alt+",
+  "ctrl-shift": "Ctrl+Shift+",
+};
+
+/** The Tauri accelerator string for a binding, or null if its key is invalid. */
+export function accelerator(h: Hotkey): string | null {
+  return validKey(h.key) ? MOD_PREFIX[h.mod] + h.key : null;
+}
+
+/**
+ * `{id, accelerator}` for every binding with a valid, unique combo — what gets
+ * handed to the backend to register. Duplicate combos keep the first occurrence.
+ */
+export function accelerators(): { id: string; accelerator: string }[] {
+  const seen = new Set<string>();
+  const out: { id: string; accelerator: string }[] = [];
+  for (const h of list) {
+    const acc = accelerator(h);
+    if (!acc || seen.has(acc)) continue;
+    seen.add(acc);
+    out.push({ id: h.id, accelerator: acc });
+  }
+  return out;
+}
