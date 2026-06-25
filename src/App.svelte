@@ -8,13 +8,15 @@
   import Knob from "./lib/Knob.svelte";
   import Switch from "./lib/Switch.svelte";
   import Settings from "./lib/Settings.svelte";
+  import HotkeysPage from "./lib/HotkeysPage.svelte";
   import FloatingMenu from "./lib/FloatingMenu.svelte";
   import { anchorBelow, type Anchor } from "./lib/floating";
   import { starterConfig, defaultBandCount } from "./lib/starter";
   import { addTarget } from "./lib/targets.svelte";
   import { renamePresetView, clearPresetView } from "./lib/presetView.svelte";
   import { parseRew, normalize, downsample } from "./lib/measurement";
-  import { getSpecialtyIcons, getBluetoothIcons } from "./lib/prefs.svelte";
+  import { getSpecialtyIcons, getBluetoothIcons, getToneStep } from "./lib/prefs.svelte";
+  import { getHotkeys, accelerators } from "./lib/hotkeys.svelte";
 
   let status = $state<api.ApoStatus | null>(null);
   let presets = $state<string[]>([]);
@@ -25,6 +27,8 @@
   let message = $state("");
   let busy = $state(false);
   let showSettings = $state(false);
+  let showHotkeys = $state(false);
+  let failedHotkeys = $state<string[]>([]); // binding ids that couldn't register
   let isBypassed = $state(false);
   let bandCount = $state(defaultBandCount());
   let presetsDirPath = $state("");
@@ -74,6 +78,38 @@
       api.setTone(tone).catch((e) => flash(String(e)));
     }
   }
+  const clampTone = (v: number) => Math.max(-12, Math.min(12, v)); // matches the tone Knob range
+
+  // A global hotkey fired (emitted from the backend): run its bound action. Stale
+  // preset references (deleted/renamed) just no-op.
+  function dispatchHotkey(id: string) {
+    const h = getHotkeys().find((x) => x.id === id);
+    if (!h) return;
+    if (h.action === "bypass") {
+      toggleBypass();
+    } else if (h.action === "preset") {
+      if (h.preset && presets.includes(h.preset)) open(h.preset);
+    } else if (h.action === "tone-up" || h.action === "tone-down") {
+      const which = h.tone ?? "bass";
+      const delta = getToneStep() * (h.action === "tone-up" ? 1 : -1);
+      setKnob(which, clampTone(tone[which] + delta));
+    }
+  }
+
+  // (Re)register the global hotkeys whenever the list changes, debounced so a
+  // burst of edits (typing a key) doesn't thrash OS registration. `accelerators()`
+  // reads the store, so this re-runs on every add/edit/remove/reorder.
+  let hkTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const accs = accelerators();
+    if (hkTimer) clearTimeout(hkTimer);
+    hkTimer = setTimeout(() => {
+      api.setHotkeys(accs).then((f) => (failedHotkeys = f)).catch(() => {});
+    }, 300);
+    return () => {
+      if (hkTimer) clearTimeout(hkTimer);
+    };
+  });
 
   async function reload() {
     status = await api.apoStatus();
@@ -410,10 +446,11 @@
 
   // Returning from Settings recreates the preset list (resetting its scroll to
   // the top), so jump back to the active preset instead of leaving it at top.
-  let wasInSettings = false;
+  let wasOnSubPage = false;
   $effect(() => {
-    if (wasInSettings && !showSettings) scrollCurrentIntoView();
-    wasInSettings = showSettings;
+    const onSubPage = showSettings || showHotkeys;
+    if (wasOnSubPage && !onSubPage) scrollCurrentIntoView();
+    wasOnSubPage = onSubPage;
   });
 
   function takeName(): string | null {
@@ -499,11 +536,13 @@
   onMount(() => {
     reload().then(scrollCurrentIntoView); // on open, jump to the active preset
     const unlisten = listen("fastpeq:changed", () => reload());
+    const unlistenHotkey = listen<string>("hotkey-pressed", (e) => dispatchHotkey(e.payload));
     // Pick up external changes to the presets folder when the window is focused.
     const onFocus = () => reload();
     window.addEventListener("focus", onFocus);
     return () => {
       unlisten.then((f) => f());
+      unlistenHotkey.then((f) => f());
       window.removeEventListener("focus", onFocus);
     };
   });
@@ -517,9 +556,27 @@
     </div>
     <div class="settings">
       <button
+        class="kbd-btn"
+        class:on={showHotkeys}
+        onclick={() => {
+          showHotkeys = !showHotkeys;
+          showSettings = false;
+        }}
+        aria-label={showHotkeys ? "Back to presets" : "Hotkeys"}
+        title={showHotkeys ? "Back to presets" : "Hotkeys"}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="6" width="20" height="12" rx="2" />
+          <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
+        </svg>
+      </button>
+      <button
         class="gear"
         class:on={showSettings}
-        onclick={() => (showSettings = !showSettings)}
+        onclick={() => {
+          showSettings = !showSettings;
+          showHotkeys = false;
+        }}
         aria-label={showSettings ? "Back to presets" : "Settings"}
         title={showSettings ? "Back to presets" : "Settings"}
       >
@@ -538,7 +595,7 @@
     </div>
   </header>
 
-  {#if !showSettings}
+  {#if !showSettings && !showHotkeys}
     {#if status && !status.installed}
       <div class="banner error">
         <strong>Equalizer APO not detected.</strong>
@@ -560,6 +617,8 @@
       onChangePresetsDir={changePresetsDir}
       onResetPresetsDir={resetPresetsDir}
     />
+  {:else if showHotkeys}
+    <HotkeysPage {presets} failedIds={failedHotkeys} />
   {:else}
   <div class="workspace">
   <section class="panel tone-panel">
@@ -572,9 +631,9 @@
     </div>
     <div class="tone-body">
       <div class="knobs">
-        <Knob label="Bass" value={tone.bass} onInput={(v) => setKnob("bass", v)} />
-        <Knob label="Mids" value={tone.mid} onInput={(v) => setKnob("mid", v)} />
-        <Knob label="Treble" value={tone.treble} onInput={(v) => setKnob("treble", v)} />
+        <Knob label="Bass" value={tone.bass} step={getToneStep()} onInput={(v) => setKnob("bass", v)} />
+        <Knob label="Mids" value={tone.mid} step={getToneStep()} onInput={(v) => setKnob("mid", v)} />
+        <Knob label="Treble" value={tone.treble} step={getToneStep()} onInput={(v) => setKnob("treble", v)} />
       </div>
       <div class="switches">
         <Switch
@@ -871,8 +930,12 @@
   }
   .settings {
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
-  .gear {
+  .gear,
+  .kbd-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -880,12 +943,14 @@
     border-radius: 8px;
     color: var(--text);
   }
-  .gear svg {
+  .gear svg,
+  .kbd-btn svg {
     width: 18px;
     height: 18px;
     display: block;
   }
-  .gear.on {
+  .gear.on,
+  .kbd-btn.on {
     background: var(--panel-2);
   }
   .ghost.on {

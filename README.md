@@ -29,7 +29,9 @@ no restart, no process churn.
 - **Measurement overlay** — import a REW measurement per preset to see the corrected response.
 - **Preamp, balance & a tone generator** for quick checks.
 - **Preset organisation** — search, device-type filter, and per-preset category icons.
-- **System tray + `Ctrl+Alt+B` bypass hotkey**, single-instance, first-run backup of your config.
+- **Configurable global hotkeys** — bind any number of `Ctrl+Alt` / `Ctrl+Shift` keys
+  to switch presets, toggle bypass, or nudge the tone controls, working anywhere in Windows.
+- **System tray**, single-instance, first-run backup of your config.
 - **PEACE import** — bring your existing `.peace` presets across.
 
 ![fastpeq curve editor](assets/curve-editor.png)
@@ -97,4 +99,4 @@ raw lines rather than coerced.
 3. **Editor** ✅ — parametric band CRUD, preamp/balance, live response curve.
 4. **Curve editor & presets** ✅ — expanded graph with draggable handles, target curves &
    compensation, REW measurement overlay, tone generator, PEACE import.
-5. **Polish** *(next)* — autostart, per-preset hotkeys, richer target tooling.
+5. **Polish** *(next)* — autostart, audio-output-device hotkeys, richer target tooling.

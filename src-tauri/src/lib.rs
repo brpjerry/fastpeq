@@ -4,12 +4,12 @@
 //! window, a system tray, a global hotkey, and the IPC commands the UI calls.
 
 mod commands;
+mod hotkeys;
 mod state;
 mod tray;
 
 use state::AppState;
 use tauri::Manager;
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 /// Recolor the native Windows title bar/border to match the app's dark theme,
 /// so the window frame doesn't stick out as a light strip above a dark UI.
@@ -94,23 +94,17 @@ pub fn run() {
             // System tray with live preset switching.
             tray::build_tray(&handle)?;
 
-            // Global hotkey: Ctrl+Alt+B toggles bypass (drops the filters, or
-            // restores the preset that was active when bypass began). Best-effort
-            // — a failure to grab the hotkey shouldn't stop the app from starting.
-            let bypass_shortcut =
-                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyB);
+            // Configurable global hotkeys: the frontend owns the bindings and
+            // registers them via `set_hotkeys` once it mounts. The plugin handler
+            // just emits `hotkey-pressed` with the binding id for the UI to act on.
+            app.manage(hotkeys::HotkeyMap::default());
             let _ = handle.plugin(
                 tauri_plugin_global_shortcut::Builder::new()
-                    .with_handler(move |app, shortcut, event| {
-                        if shortcut == &bypass_shortcut && event.state() == ShortcutState::Pressed {
-                            let _ = app.state::<AppState>().toggle_bypass();
-                            let _ = tray::refresh(app);
-                            tray::notify_changed(app); // hotkey-initiated, sync the window
-                        }
+                    .with_handler(|app, shortcut, event| {
+                        hotkeys::on_event(app, shortcut, event.state());
                     })
                     .build(),
             );
-            let _ = handle.global_shortcut().register(bypass_shortcut);
 
             Ok(())
         })
@@ -138,6 +132,7 @@ pub fn run() {
             commands::set_presets_dir,
             commands::reset_presets_dir,
             commands::open_presets_dir,
+            commands::set_hotkeys,
         ])
         .run(tauri::generate_context!())
         .expect("error while running fastpeq");

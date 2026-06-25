@@ -16,7 +16,11 @@
     setBluetoothIcons,
     getToneVolumeCap,
     setToneVolumeCap,
+    getToneStep,
+    setToneStep,
   } from "./prefs.svelte";
+
+  const TONE_STEPS = [0.25, 0.5, 1];
   import { getTargets, removeTarget, FLAT_TARGET } from "./targets.svelte";
   import Switch from "./Switch.svelte";
 
@@ -147,6 +151,20 @@
           checked={getBluetoothIcons()}
           onChange={(v) => setBluetoothIcons(v)}
         />
+      </div>
+    </section>
+    <section class="settings-section">
+      <h3>Tone control step</h3>
+      <p class="hint">
+        How much each bass / mid / treble adjustment moves — by keyboard (arrow keys or
+        scroll on a knob) and by a tone-bound global hotkey.
+      </p>
+      <div class="seg">
+        {#each TONE_STEPS as s}
+          <button class="seg-btn" class:sel={getToneStep() === s} onclick={() => setToneStep(s)}>
+            {s} dB
+          </button>
+        {/each}
       </div>
     </section>
     <section class="settings-section">

@@ -32,8 +32,13 @@ Guiding principles, to keep the bar high:
 
 ## Preset workflow
 
-- **Per-preset global hotkeys** *(M)* — already on the roadmap. Bind a hotkey to
-  jump straight to a preset (extends the existing `Ctrl+Alt+B` infrastructure).
+- ✅ **Configurable global hotkeys** — done. A **Hotkeys** page lets you add any
+  number of bindings (Ctrl+Alt / Ctrl+Shift + a key) for **switch preset / bypass /
+  tone up / tone down**, with a per-hotkey action + principal and drag reorder. The
+  old hardcoded `Ctrl+Alt+B → Bypass` is now a seeded default in this list. A tone
+  step size lives in Settings. **Follow-up:** the **switch audio output device**
+  action (device enumeration + default-device switching via Core Audio /
+  `IPolicyConfig`, remembering unplugged devices) — the action enum is ready for it.
 - **Recently used / favorites** *(S)* — pin favorites to the top and/or show a
   "recent" group; useful once a library grows past a screen.
 - **Export / import a single preset** *(S)* — write a preset (plus its category)
