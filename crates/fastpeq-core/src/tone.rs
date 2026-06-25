@@ -111,9 +111,9 @@ pub fn strip(config: &Config) -> Config {
         .position(|l| is_marker(l, TONE_END))
         .map(|rel| begin + rel)
         .unwrap_or(lines.len() - 1);
-    // A swap overlay flips the per-channel preamps at compose (see `compose`), so
-    // undo that here — keeping `strip(compose(base, tone)) == base` and the
-    // active-preset match intact even while swap is on.
+    // A swap overlay flips the per-channel preamps/filters at compose (see
+    // `compose`), so undo that here — keeping `strip(compose(base, tone)) == base`
+    // and the active-preset match intact even while swap is on.
     let had_swap = lines[begin..=end.min(lines.len() - 1)]
         .iter()
         .any(|l| matches!(l, Line::Raw(s) if copy_is_swap(s)));
@@ -121,7 +121,7 @@ pub fn strip(config: &Config) -> Config {
     kept.extend_from_slice(&lines[(end + 1).min(lines.len())..]);
     let base = Config { lines: kept };
     if had_swap {
-        flip_preamp_channels(&base)
+        flip_channels(&base)
     } else {
         base
     }
@@ -131,39 +131,43 @@ pub fn strip(config: &Config) -> Config {
 /// existing block, so recomposing repeatedly never stacks duplicate overlays.
 ///
 /// When the overlay swaps L/R, the final `Copy:` line swaps the *output*
-/// channels — which would flip the preset's balance (a one-sided preamp) to the
-/// wrong side. EQ filters should follow the swap, but a balance is physical, so
-/// flip the per-channel preamps first to cancel the swap for them only.
+/// channels — i.e. the raw audio content. The user's per-channel adjustments
+/// (the balance preamp and per-channel EQ filters) are physical, though: a
+/// "left" filter is for the left ear regardless of routing. So flip every
+/// per-channel preamp/filter first, cancelling the swap for them — only the
+/// content ends up swapped.
 pub fn compose(base: &Config, tone: &Tone) -> Config {
     let mut out = strip(base);
     if tone.swap {
-        out = flip_preamp_channels(&out);
+        out = flip_channels(&out);
     }
     out.lines.extend(tone.lines());
     out
 }
 
-/// Swap `Left`/`Right` on every `Preamp:` line, leaving filters and `Both`/other
-/// channels untouched. Its own inverse, so compose/strip round-trip cleanly.
-fn flip_preamp_channels(config: &Config) -> Config {
+/// Swap `Left`/`Right` on every per-channel `Preamp:`/`Filter:` line, leaving
+/// `Both`/other channels untouched. Its own inverse, so compose/strip round-trip
+/// cleanly.
+fn flip_channels(config: &Config) -> Config {
+    fn flip(c: &Channel) -> Channel {
+        match c {
+            Channel::Left => Channel::Right,
+            Channel::Right => Channel::Left,
+            other => other.clone(),
+        }
+    }
     let lines = config
         .lines
         .iter()
         .map(|l| match l {
-            Line::Preamp {
-                gain,
-                channel: Channel::Left,
-            } => Line::Preamp {
+            Line::Preamp { gain, channel } => Line::Preamp {
                 gain: *gain,
-                channel: Channel::Right,
+                channel: flip(channel),
             },
-            Line::Preamp {
-                gain,
-                channel: Channel::Right,
-            } => Line::Preamp {
-                gain: *gain,
-                channel: Channel::Left,
-            },
+            Line::Filter(f) => Line::Filter(Filter {
+                channel: flip(&f.channel),
+                ..f.clone()
+            }),
             other => other.clone(),
         })
         .collect();
@@ -283,15 +287,25 @@ mod tests {
     }
 
     #[test]
-    fn swap_flips_balance_preamp_but_round_trips() {
-        // A preset with a balance trim (cut the left channel) under a Swap L/R overlay.
+    fn swap_flips_per_channel_lines_but_round_trips() {
+        // A preset with a balance trim (cut left) and a left-only EQ filter, under
+        // a Swap L/R overlay.
+        let left_filter = Filter {
+            enabled: true,
+            kind: FilterKind::Peak,
+            freq: 2000.0,
+            gain: Some(3.0),
+            q: Some(1.0),
+            index: None,
+            channel: Channel::Left,
+        };
         let base = Config {
             lines: vec![
                 Line::Preamp {
                     gain: -6.0,
                     channel: Channel::Left,
                 },
-                Line::Filter(Filter::peak(1000.0, 2.0, 1.0)),
+                Line::Filter(left_filter),
             ],
         };
         let composed = compose(
@@ -302,21 +316,25 @@ mod tests {
             },
         );
 
-        // The balance preamp is flipped to the right so the final Copy swap lands
-        // it back on the intended (left) output; the EQ filter is left to be
-        // swapped by the Copy line.
+        // Both the balance preamp and the EQ filter flip to the right, so the
+        // final Copy swap lands them back on their physical (left) output.
         assert!(
-            composed.lines.iter().any(|l| matches!(
+            !composed.lines.iter().any(|l| matches!(
                 l,
-                Line::Preamp { gain, channel: Channel::Right } if *gain == -6.0
+                Line::Preamp { channel: Channel::Left, .. } | Line::Filter(Filter { channel: Channel::Left, .. })
             )),
             "{composed:?}"
         );
-        assert!(
-            !composed
+        assert_eq!(
+            composed
                 .lines
                 .iter()
-                .any(|l| matches!(l, Line::Preamp { channel: Channel::Left, .. }))
+                .filter(|l| matches!(
+                    l,
+                    Line::Preamp { channel: Channel::Right, .. } | Line::Filter(Filter { channel: Channel::Right, .. })
+                ))
+                .count(),
+            2
         );
 
         // Round-trip identity holds, so the active-preset match survives swap.
