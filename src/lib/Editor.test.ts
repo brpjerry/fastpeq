@@ -356,4 +356,33 @@ describe("Editor", () => {
     await fireEvent.keyDown(window, { key: "y", ctrlKey: true });
     expect(bandCount(container)).toBe(2);
   });
+
+  it("A/B compares the working edit against the saved version", async () => {
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    const compareBtn = container.querySelector<HTMLButtonElement>(".compare-btn")!;
+    expect(compareBtn.disabled).toBe(true); // nothing unsaved to compare yet
+
+    await fireEvent.click(container.querySelector(".band-actions .add")!);
+    await waitFor(() => expect(compareBtn.disabled).toBe(false));
+
+    // Compare → hear the saved version (1 band), editing locked.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(compareBtn);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const onB = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(onB.lines.filter((l) => l.kind === "Filter").length).toBe(1);
+    expect(container.querySelector(".comparing")).toBeTruthy();
+    expect(container.querySelector<HTMLButtonElement>(".undo-btn")!.disabled).toBe(true);
+    expect(container.querySelector(".live")!.textContent).toContain("saved");
+
+    // Toggle off → the working edit (2 bands) is restored live.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(compareBtn);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const onA = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(onA.lines.filter((l) => l.kind === "Filter").length).toBe(2);
+    expect(container.querySelector(".comparing")).toBeNull();
+  });
 });

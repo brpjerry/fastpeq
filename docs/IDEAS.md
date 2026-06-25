@@ -25,8 +25,10 @@ Guiding principles, to keep the bar high:
 - ✅ **Conflict rename / duplicate-name guard** — done. Create/rename now collide
   **case-insensitively** (Windows filesystem) with a clear error, while a
   case-only rename of the same preset is still allowed (core `rename` fix).
-- **A/B compare** *(S–M)* — flip between the working tuning and the last-saved
-  version to hear the difference instantly. **Detailed proposal below.**
+- ✅ **A/B compare** — done. A **Compare** toggle (enabled when there are unsaved
+  changes, `Ctrl+\``) flips the live output to the saved version with the editing
+  controls locked, a "● saved" badge, and a faded ghost of the saved curve on the
+  graph. Design notes kept below.
 
 ## Preset workflow
 
