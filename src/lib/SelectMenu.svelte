@@ -11,12 +11,16 @@
     onChange,
     title = "",
     minWidth = 150,
+    width,
   }: {
     value: string;
     options: { value: string; label: string }[];
     onChange: (v: string) => void;
     title?: string;
     minWidth?: number;
+    // Fixed trigger width (px) — for rows where the control must not resize as
+    // the selected value changes. The popup still uses `minWidth`.
+    width?: number;
   } = $props();
 
   let open = $state(false);
@@ -40,7 +44,14 @@
   }
 </script>
 
-<button bind:this={btn} class="sm-btn" type="button" onclick={toggle} {title}>
+<button
+  bind:this={btn}
+  class="sm-btn"
+  type="button"
+  onclick={toggle}
+  {title}
+  style={width ? `width:${width}px` : undefined}
+>
   <span class="sm-label">{current?.label ?? value}</span>
   <svg class="chev" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M6 9l6 6 6-6" />

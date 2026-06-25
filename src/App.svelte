@@ -565,10 +565,17 @@
         aria-label={showHotkeys ? "Back to presets" : "Hotkeys"}
         title={showHotkeys ? "Back to presets" : "Hotkeys"}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="2" y="6" width="20" height="12" rx="2" />
-          <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
-        </svg>
+        {#if showHotkeys}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2" y="6" width="20" height="12" rx="2" />
+            <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
+          </svg>
+        {/if}
       </button>
       <button
         class="gear"
@@ -618,7 +625,7 @@
       onResetPresetsDir={resetPresetsDir}
     />
   {:else if showHotkeys}
-    <HotkeysPage {presets} failedIds={failedHotkeys} />
+    <HotkeysPage {presets} {categories} failedIds={failedHotkeys} />
   {:else}
   <div class="workspace">
   <section class="panel tone-panel">

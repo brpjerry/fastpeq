@@ -2,20 +2,48 @@
   // The Hotkeys page (peer of Settings): the editable list of global hotkeys plus
   // a "New" button. Reads/writes the hotkeys store directly; App passes the preset
   // names (for the "switch preset" principal) and the ids that failed to register.
+  import { onDestroy } from "svelte";
   import { getHotkeys, addHotkey, updateHotkey, removeHotkey, moveHotkey } from "./hotkeys.svelte";
   import HotkeyRow from "./HotkeyRow.svelte";
 
-  let { presets, failedIds = [] }: { presets: string[]; failedIds?: string[] } = $props();
+  let {
+    presets,
+    categories,
+    failedIds = [],
+  }: { presets: string[]; categories: Record<string, string>; failedIds?: string[] } = $props();
 
-  // HTML5 drag reorder: the dragged row's index is held here until a drop.
-  let dragFrom = $state<number | null>(null);
-  function onDragStart(i: number) {
-    dragFrom = i;
+  // Pointer-driven reorder: drag the handle and rows reflow live as the pointer
+  // crosses each row's midpoint. (Native HTML5 DnD is unreliable inside WebView2.)
+  let listEl = $state<HTMLUListElement | null>(null);
+  let dragId = $state<string | null>(null);
+
+  function onDragStart(index: number, e: PointerEvent) {
+    e.preventDefault();
+    dragId = getHotkeys()[index]?.id ?? null;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   }
-  function onDrop(i: number) {
-    if (dragFrom !== null) moveHotkey(dragFrom, i);
-    dragFrom = null;
+  function onMove(e: PointerEvent) {
+    if (dragId === null || !listEl) return;
+    const rows = [...listEl.querySelectorAll<HTMLElement>(".hk-row")];
+    const from = getHotkeys().findIndex((h) => h.id === dragId);
+    if (from < 0) return;
+    let to = rows.length - 1;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (e.clientY < r.top + r.height / 2) {
+        to = i;
+        break;
+      }
+    }
+    if (to !== from) moveHotkey(from, to);
   }
+  function onUp() {
+    dragId = null;
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  }
+  onDestroy(onUp);
 </script>
 
 <section class="panel hotkeys-page">
@@ -30,17 +58,18 @@
     </p>
 
     {#if getHotkeys().length}
-      <ul class="hk-list">
+      <ul class="hk-list" bind:this={listEl}>
         {#each getHotkeys() as h, i (h.id)}
           <HotkeyRow
             hotkey={h}
             index={i}
             {presets}
+            {categories}
             failed={failedIds.includes(h.id)}
+            dragging={h.id === dragId}
             onUpdate={(patch) => updateHotkey(h.id, patch)}
             onRemove={() => removeHotkey(h.id)}
             {onDragStart}
-            {onDrop}
           />
         {/each}
       </ul>
