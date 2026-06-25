@@ -267,6 +267,27 @@ describe("App global hotkeys", () => {
     expect(last.bass).toBeCloseTo(0.5);
     removeHotkey(id);
   });
+
+  it("resets the tone on a reset-tone hotkey", async () => {
+    withLibrary();
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    const id = addHotkey();
+    updateHotkey(id, { key: "0", action: "tone-reset" });
+    vi.mocked(api.setTone).mockClear();
+    listeners["hotkey-pressed"]({ payload: id });
+
+    await waitFor(() => expect(api.setTone).toHaveBeenCalled());
+    expect(vi.mocked(api.setTone).mock.calls.at(-1)![0]).toEqual({
+      bass: 0,
+      mid: 0,
+      treble: 0,
+      invert: false,
+      swap: false,
+    });
+    removeHotkey(id);
+  });
 });
 
 describe("App name-conflict guards", () => {

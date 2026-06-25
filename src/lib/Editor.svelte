@@ -84,6 +84,20 @@
   );
   const clipping = $derived(clipPeak > 0.05);
 
+  // Auto-preamp: when on, hold the preamp at the lowest value that keeps the
+  // bands' peak boost from clipping (the preamp slider is disabled, the EQ math
+  // drives it). Bands only — the global tone overlay is the clip warning's job.
+  let autoPreamp = $state(false);
+  function computeAutoPreamp(): number {
+    const peak = peakGainDb(bands as CurveFilter[], 0, balance);
+    return Math.round(Math.min(0, -peak) * 10) / 10;
+  }
+  $effect(() => {
+    if (!autoPreamp || loading) return;
+    preamp = computeAutoPreamp(); // tracks bands/balance; $state no-op if unchanged
+    schedule();
+  });
+
   // The per-preset target curve (Flat by default), shown on the graph as a
   // reference. Reactive to the selected target and the current preset. A manual
   // dB offset (set directly or by the "Align" action) shifts the whole trace; it
@@ -128,6 +142,7 @@
     loading = true;
     dirty = false;
     comparing = false; // a fresh preset is live; nothing to compare against yet
+    autoPreamp = false; // start each preset with its saved preamp, auto off
     preamp = 0;
     balance = 0;
     hadPreamp = false;
@@ -586,8 +601,23 @@
 {#snippet preampRow()}
   <div class="preamp">
     <span class="plabel">Preamp</span>
-    <input type="range" min="-30" max="6" step="0.1" bind:value={preamp} oninput={schedule} />
+    <input
+      type="range"
+      min="-30"
+      max="6"
+      step="0.1"
+      bind:value={preamp}
+      oninput={schedule}
+      disabled={autoPreamp}
+    />
     <span class="pval">{preamp.toFixed(1)} dB</span>
+    <Switch
+      compact
+      label="Auto"
+      checked={autoPreamp}
+      onChange={(v) => (autoPreamp = v)}
+      title="Automatically set the preamp so the EQ never clips"
+    />
     <div class="balance-wrap">
       <button
         bind:this={chanBtn}

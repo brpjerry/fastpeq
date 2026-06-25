@@ -93,6 +93,8 @@
       const which = h.tone ?? "bass";
       const delta = getToneStep() * (h.action === "tone-up" ? 1 : -1);
       setKnob(which, clampTone(tone[which] + delta));
+    } else if (h.action === "tone-reset") {
+      resetTone();
     }
   }
 

@@ -357,6 +357,24 @@ describe("Editor", () => {
     expect(bandCount(container)).toBe(2);
   });
 
+  it("auto-preamp drops the preamp to stop clipping", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 10, 1]])); // +10 dB at preamp 0 → clips
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    expect(container.querySelector(".clip")).toBeTruthy();
+
+    const auto = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("Auto"),
+    )!;
+    const cb = auto.querySelector<HTMLInputElement>("input[type='checkbox']")!;
+    cb.checked = true;
+    await fireEvent.change(cb);
+
+    // Preamp pulled to ~-10 dB, the clip warning clears, and the slider locks.
+    await waitFor(() => expect(container.querySelector(".clip")).toBeNull());
+    expect(container.querySelector(".pval")!.textContent).toContain("-10");
+    expect(container.querySelector<HTMLInputElement>(".preamp input[type='range']")!.disabled).toBe(true);
+  });
+
   it("A/B compares the working edit against the saved version", async () => {
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));

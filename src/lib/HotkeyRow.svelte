@@ -38,6 +38,7 @@
     { value: "bypass", label: "Bypass" },
     { value: "tone-up", label: "Tone up" },
     { value: "tone-down", label: "Tone down" },
+    { value: "tone-reset", label: "Reset tone" },
   ];
   const TONES = [
     { value: "bass", label: "Bass" },
@@ -103,7 +104,7 @@
         {presets}
         {categories}
         onChange={(v) => onUpdate({ preset: v })}
-        width={188}
+        width={282}
       />
     {:else if hotkey.action === "tone-up" || hotkey.action === "tone-down"}
       <SelectMenu
@@ -172,7 +173,7 @@
   }
   .principal {
     flex: none;
-    width: 200px;
+    width: 290px;
     display: inline-flex;
     align-items: center;
   }

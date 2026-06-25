@@ -9,7 +9,7 @@ import { loadJson, saveJson } from "./storage";
 export type HotkeyMod = "ctrl-alt" | "ctrl-shift";
 // "device" (switch audio output) is a planned stage-2 action; kept out of the
 // action union until the backend can enumerate/switch devices.
-export type HotkeyAction = "preset" | "bypass" | "tone-up" | "tone-down";
+export type HotkeyAction = "preset" | "bypass" | "tone-up" | "tone-down" | "tone-reset";
 export type ToneControl = "bass" | "mid" | "treble";
 
 export interface Hotkey {
