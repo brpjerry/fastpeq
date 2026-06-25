@@ -76,12 +76,12 @@ pub fn on_event(app: &AppHandle, shortcut: &Shortcut, state: ShortcutState) {
     if state != ShortcutState::Pressed {
         return;
     }
-    let id = app
-        .state::<HotkeyMap>()
-        .0
-        .lock()
-        .ok()
-        .and_then(|guard| guard.iter().find(|(sc, _)| sc == shortcut).map(|(_, id)| id.clone()));
+    let id = app.state::<HotkeyMap>().0.lock().ok().and_then(|guard| {
+        guard
+            .iter()
+            .find(|(sc, _)| sc == shortcut)
+            .map(|(_, id)| id.clone())
+    });
     if let Some(id) = id {
         let _ = app.emit("hotkey-pressed", id);
     }
