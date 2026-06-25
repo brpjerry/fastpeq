@@ -375,6 +375,24 @@ describe("Editor", () => {
     expect(container.querySelector<HTMLInputElement>(".preamp input[type='range']")!.disabled).toBe(true);
   });
 
+  it("auto-preamp accounts for the global tone overlay", async () => {
+    // Flat bands, but a +6 dB bass tone overlay → auto-preamp must still pull down.
+    const { container } = renderEditor(cfg(0, [[1000, 0, 1]]), {
+      tone: { bass: 6, mid: 0, treble: 0, invert: false, swap: false },
+    });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    const auto = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("Auto"),
+    )!;
+    const cb = auto.querySelector<HTMLInputElement>("input[type='checkbox']")!;
+    cb.checked = true;
+    await fireEvent.change(cb);
+
+    // Bands-only would leave preamp at 0; counting the tone pulls it negative.
+    await waitFor(() => expect(parseFloat(container.querySelector(".pval")!.textContent!)).toBeLessThan(0));
+  });
+
   it("A/B compares the working edit against the saved version", async () => {
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));

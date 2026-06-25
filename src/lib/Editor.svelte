@@ -85,11 +85,16 @@
   const clipping = $derived(clipPeak > 0.05);
 
   // Auto-preamp: when on, hold the preamp at the lowest value that keeps the
-  // bands' peak boost from clipping (the preamp slider is disabled, the EQ math
-  // drives it). Bands only — the global tone overlay is the clip warning's job.
+  // peak boost from clipping (the preamp slider is disabled, the EQ math drives
+  // it). Uses the same bands + tone-overlay set as the clip warning, so with it
+  // on the warning never fires.
   let autoPreamp = $state(false);
   function computeAutoPreamp(): number {
-    const peak = peakGainDb(bands as CurveFilter[], 0, balance);
+    const peak = peakGainDb(
+      [...bands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
+      0,
+      balance,
+    );
     return Math.round(Math.min(0, -peak) * 10) / 10;
   }
   $effect(() => {
