@@ -5,12 +5,19 @@
   import { onDestroy } from "svelte";
   import { getHotkeys, addHotkey, updateHotkey, removeHotkey, moveHotkey } from "./hotkeys.svelte";
   import HotkeyRow from "./HotkeyRow.svelte";
+  import type { AudioDevice } from "./api";
 
   let {
     presets,
     categories,
+    devices = [],
     failedIds = [],
-  }: { presets: string[]; categories: Record<string, string>; failedIds?: string[] } = $props();
+  }: {
+    presets: string[];
+    categories: Record<string, string>;
+    devices?: AudioDevice[];
+    failedIds?: string[];
+  } = $props();
 
   // Pointer-driven reorder: drag the handle and rows reflow live as the pointer
   // crosses each row's midpoint. (Native HTML5 DnD is unreliable inside WebView2.)
@@ -65,6 +72,7 @@
             index={i}
             {presets}
             {categories}
+            {devices}
             failed={failedIds.includes(h.id)}
             dragging={h.id === dragId}
             onUpdate={(patch) => updateHotkey(h.id, patch)}

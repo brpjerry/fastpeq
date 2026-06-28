@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { listen } from "@tauri-apps/api/event";
+  import { listen, emit } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import * as api from "./lib/api";
   import Editor from "./lib/Editor.svelte";
@@ -17,6 +18,7 @@
   import { parseRew, normalize, downsample } from "./lib/measurement";
   import { getSpecialtyIcons, getBluetoothIcons, getToneStep } from "./lib/prefs.svelte";
   import { getHotkeys, accelerators } from "./lib/hotkeys.svelte";
+  import { OSD_EVENT, payloadForHotkey } from "./lib/osd";
 
   let status = $state<api.ApoStatus | null>(null);
   let presets = $state<string[]>([]);
@@ -29,6 +31,8 @@
   let showSettings = $state(false);
   let showHotkeys = $state(false);
   let failedHotkeys = $state<string[]>([]); // binding ids that couldn't register
+  let devices = $state<api.AudioDevice[]>([]); // audio outputs for the "switch device" hotkey
+  let windowFocused = $state(true); // gates the OSD overlay: only show feedback when unfocused
   let isBypassed = $state(false);
   let bandCount = $state(defaultBandCount());
   let presetsDirPath = $state("");
@@ -93,9 +97,34 @@
       const which = h.tone ?? "bass";
       const delta = getToneStep() * (h.action === "tone-up" ? 1 : -1);
       setKnob(which, clampTone(tone[which] + delta));
+    } else if (h.action === "device") {
+      // Stable endpoint id: works again automatically once an unplugged device
+      // returns; a currently-absent device just surfaces the backend error. Show
+      // the OSD only once the switch actually succeeds.
+      if (h.device) api.setDefaultAudioDevice(h.device).then(() => maybeOsd(h)).catch((e) => flash(String(e)));
+      return;
     } else if (h.action === "tone-reset") {
       resetTone();
     }
+    maybeOsd(h);
+  }
+
+  // When the main window is unfocused (the only time the user can't see the
+  // in-window feedback), surface the hotkey's result in the OSD overlay window.
+  function maybeOsd(h: ReturnType<typeof getHotkeys>[number]) {
+    if (windowFocused) return;
+    const payload = payloadForHotkey(h, {
+      tone, // setKnob already updated this synchronously
+      bypassed: !isBypassed, // toggleBypass flips it; this is the state it becomes
+      presetName: h.preset && presets.includes(h.preset) ? h.preset : undefined,
+    });
+    if (payload) emit(OSD_EVENT, payload).catch(() => {});
+  }
+
+  // Audio outputs can change as hardware is plugged/unplugged, so refresh on
+  // mount and window focus (the picker only matters on the Hotkeys page).
+  function loadDevices() {
+    api.listAudioDevices().then((d) => (devices = d)).catch(() => {});
   }
 
   // (Re)register the global hotkeys whenever the list changes, debounced so a
@@ -537,14 +566,24 @@
 
   onMount(() => {
     reload().then(scrollCurrentIntoView); // on open, jump to the active preset
+    loadDevices();
     const unlisten = listen("fastpeq:changed", () => reload());
     const unlistenHotkey = listen<string>("hotkey-pressed", (e) => dispatchHotkey(e.payload));
+    // Track window focus so the OSD overlay only fires when the user can't see
+    // the in-window feedback (minimized to tray, or another app in front).
+    const win = getCurrentWindow();
+    win.isFocused().then((f) => (windowFocused = f)).catch(() => {});
+    const unlistenFocus = win.onFocusChanged(({ payload }) => (windowFocused = payload));
     // Pick up external changes to the presets folder when the window is focused.
-    const onFocus = () => reload();
+    const onFocus = () => {
+      reload();
+      loadDevices();
+    };
     window.addEventListener("focus", onFocus);
     return () => {
       unlisten.then((f) => f());
       unlistenHotkey.then((f) => f());
+      unlistenFocus.then((f) => f());
       window.removeEventListener("focus", onFocus);
     };
   });
@@ -627,7 +666,7 @@
       onResetPresetsDir={resetPresetsDir}
     />
   {:else if showHotkeys}
-    <HotkeysPage {presets} {categories} failedIds={failedHotkeys} />
+    <HotkeysPage {presets} {categories} {devices} failedIds={failedHotkeys} />
   {:else}
   <div class="workspace">
   <section class="panel tone-panel">

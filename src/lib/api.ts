@@ -32,6 +32,16 @@ export const setTone = (tone: Tone) => invoke<void>("set_tone", { tone });
 export const setHotkeys = (bindings: { id: string; accelerator: string }[]) =>
   invoke<string[]>("set_hotkeys", { bindings });
 
+/** An audio output device, for the "switch output device" hotkey principal. */
+export interface AudioDevice {
+  id: string;
+  name: string;
+  is_default: boolean;
+}
+export const listAudioDevices = () => invoke<AudioDevice[]>("list_audio_devices");
+export const setDefaultAudioDevice = (id: string) =>
+  invoke<void>("set_default_audio_device", { id });
+
 export const readTextFile = (path: string) => invoke<string>("read_text_file", { path });
 
 export const presetsDir = () => invoke<string>("presets_dir");

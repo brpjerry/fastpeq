@@ -7,9 +7,9 @@
 import { loadJson, saveJson } from "./storage";
 
 export type HotkeyMod = "ctrl-alt" | "ctrl-shift";
-// "device" (switch audio output) is a planned stage-2 action; kept out of the
-// action union until the backend can enumerate/switch devices.
-export type HotkeyAction = "preset" | "bypass" | "tone-up" | "tone-down" | "tone-reset";
+// "device" switches the default Windows audio output (backed by the
+// list_audio_devices / set_default_audio_device commands).
+export type HotkeyAction = "preset" | "bypass" | "tone-up" | "tone-down" | "tone-reset" | "device";
 export type ToneControl = "bass" | "mid" | "treble";
 
 export interface Hotkey {
@@ -19,6 +19,8 @@ export interface Hotkey {
   action: HotkeyAction;
   preset?: string; // principal for "preset"
   tone?: ToneControl; // principal for "tone-up" / "tone-down"
+  device?: string; // principal for "device": the audio endpoint id
+  deviceName?: string; // label cached at pick time, so an unplugged device still reads clearly
 }
 
 const KEY = "fastpeq.hotkeys";

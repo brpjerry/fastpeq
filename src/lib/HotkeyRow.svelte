@@ -5,6 +5,7 @@
   // values change. Reorder is pointer-driven by the parent via onDragStart.
   import SelectMenu from "./SelectMenu.svelte";
   import PresetPicker from "./PresetPicker.svelte";
+  import type { AudioDevice } from "./api";
   import { validKey, type Hotkey, type HotkeyAction, type HotkeyMod, type ToneControl } from "./hotkeys.svelte";
 
   let {
@@ -12,6 +13,7 @@
     index,
     presets,
     categories,
+    devices = [],
     failed = false,
     dragging = false,
     onUpdate,
@@ -22,6 +24,7 @@
     index: number;
     presets: string[];
     categories: Record<string, string>;
+    devices?: AudioDevice[];
     failed?: boolean;
     dragging?: boolean;
     onUpdate: (patch: Partial<Hotkey>) => void;
@@ -39,6 +42,7 @@
     { value: "tone-up", label: "Tone up" },
     { value: "tone-down", label: "Tone down" },
     { value: "tone-reset", label: "Reset tone" },
+    { value: "device", label: "Switch output device" },
   ];
   const TONES = [
     { value: "bass", label: "Bass" },
@@ -46,12 +50,31 @@
     { value: "treble", label: "Treble" },
   ];
 
+  // The device dropdown's options: the live devices, plus — if the bound device
+  // is currently absent (unplugged/disabled) — a trailing entry that preserves
+  // the selection and shows it's unavailable.
+  const deviceOptions = $derived.by(() => {
+    const opts = devices.map((d) => ({ value: d.id, label: d.name }));
+    if (hotkey.device && !devices.some((d) => d.id === hotkey.device)) {
+      opts.push({ value: hotkey.device, label: `${hotkey.deviceName ?? "Unknown device"} (unavailable)` });
+    }
+    return opts;
+  });
+
   // Switching action seeds a sensible default principal for the new action.
   function changeAction(action: string) {
     const patch: Partial<Hotkey> = { action: action as HotkeyAction };
     if (action === "preset" && !hotkey.preset) patch.preset = presets[0];
     if ((action === "tone-up" || action === "tone-down") && !hotkey.tone) patch.tone = "bass";
+    if (action === "device" && !hotkey.device && devices[0]) {
+      patch.device = devices[0].id;
+      patch.deviceName = devices[0].name;
+    }
     onUpdate(patch);
+  }
+
+  function pickDevice(id: string) {
+    onUpdate({ device: id, deviceName: devices.find((d) => d.id === id)?.name });
   }
 </script>
 
@@ -113,6 +136,15 @@
         onChange={(v) => onUpdate({ tone: v as ToneControl })}
         width={110}
         minWidth={110}
+      />
+    {:else if hotkey.action === "device"}
+      <SelectMenu
+        value={hotkey.device ?? ""}
+        options={deviceOptions}
+        onChange={pickDevice}
+        title="Audio output device to switch to"
+        width={282}
+        minWidth={282}
       />
     {:else}
       <span class="none">—</span>

@@ -62,6 +62,38 @@ describe("HotkeyRow", () => {
     expect(onUpdate).toHaveBeenCalledWith({ action: "preset", preset: "First" });
   });
 
+  it("shows the output-device picker for the device action", () => {
+    const devices = [{ id: "d1", name: "Speakers", is_default: true }];
+    const { container } = renderRow(base({ action: "device", device: "d1" }), [], {}, { devices });
+    expect(container.querySelector(".principal .sm-label")?.textContent).toBe("Speakers");
+  });
+
+  it("seeds the first device when switching to the device action", async () => {
+    const onUpdate = vi.fn();
+    const devices = [
+      { id: "d1", name: "Speakers", is_default: true },
+      { id: "d2", name: "USB DAC", is_default: false },
+    ];
+    const { container } = renderRow(base({ action: "bypass" }), [], {}, { onUpdate, devices });
+    await fireEvent.click(container.querySelectorAll(".sm-btn")[1]); // action menu
+    const item = [...container.querySelectorAll(".sm-menu .sm-item")].find(
+      (i) => i.textContent!.trim() === "Switch output device",
+    )!;
+    await fireEvent.click(item);
+    expect(onUpdate).toHaveBeenCalledWith({ action: "device", device: "d1", deviceName: "Speakers" });
+  });
+
+  it("marks a bound device that is no longer present as unavailable", () => {
+    const devices = [{ id: "d1", name: "Speakers", is_default: true }];
+    const { container } = renderRow(
+      base({ action: "device", device: "gone", deviceName: "Old DAC" }),
+      [],
+      {},
+      { devices },
+    );
+    expect(container.querySelector(".principal .sm-label")?.textContent).toBe("Old DAC (unavailable)");
+  });
+
   it("fires onRemove from the delete button", async () => {
     const onRemove = vi.fn();
     const { container } = renderRow(base(), [], {}, { onRemove });
