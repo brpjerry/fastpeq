@@ -34,17 +34,17 @@ mod imp {
 
     use super::AudioDevice;
     use core::ffi::c_void;
-    use windows::core::{interface, IUnknown, IUnknown_Vtbl, GUID, HRESULT, PCWSTR, PWSTR};
     use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::Media::Audio::{
-        eCommunications, eConsole, eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
-        DEVICE_STATE_ACTIVE,
+        DEVICE_STATE_ACTIVE, IMMDeviceEnumerator, MMDeviceEnumerator, eCommunications, eConsole,
+        eMultimedia, eRender,
     };
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
-        COINIT_MULTITHREADED, STGM_READ,
+        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+        CoUninitialize, STGM_READ,
     };
     use windows::Win32::System::Variant::VT_LPWSTR;
+    use windows::core::{GUID, HRESULT, IUnknown, IUnknown_Vtbl, PCWSTR, PWSTR, interface};
 
     /// CLSID of the policy-config class object that implements `IPolicyConfig`.
     const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
@@ -56,7 +56,8 @@ mod imp {
     #[interface("f8679f50-850a-41cf-9c72-430f290290c8")]
     unsafe trait IPolicyConfig: IUnknown {
         unsafe fn GetMixFormat(&self, _id: PCWSTR, _fmt: *mut *mut c_void) -> HRESULT;
-        unsafe fn GetDeviceFormat(&self, _id: PCWSTR, _def: i32, _fmt: *mut *mut c_void) -> HRESULT;
+        unsafe fn GetDeviceFormat(&self, _id: PCWSTR, _def: i32, _fmt: *mut *mut c_void)
+        -> HRESULT;
         unsafe fn ResetDeviceFormat(&self, _id: PCWSTR) -> HRESULT;
         unsafe fn SetDeviceFormat(
             &self,
@@ -147,7 +148,8 @@ mod imp {
         // interfaces we own; raw pointers come straight from Core Audio.
         unsafe {
             let enumerator: IMMDeviceEnumerator =
-                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                    .map_err(|e| e.to_string())?;
 
             // The current default; used only to flag the active row. A missing
             // default (no output at all) is not an error.
@@ -200,8 +202,8 @@ mod imp {
         // SAFETY: COM is initialized; `id_w` outlives every call below; the
         // policy-config object is created and used on this thread only.
         unsafe {
-            let policy: IPolicyConfig =
-                CoCreateInstance(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
+            let policy: IPolicyConfig = CoCreateInstance(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL)
+                .map_err(|e| e.to_string())?;
             // Set all three roles so both the default and default-communication
             // device follow, matching what users expect from device switchers.
             for role in [eConsole, eMultimedia, eCommunications] {
