@@ -74,47 +74,17 @@ jobs:
           $reportPath = '${{ github.workspace }}/test-report.md'
           $feLog    = '${{ github.workspace }}/test-results/frontend.log'
           $rustLog  = '${{ github.workspace }}/test-results/rust.log'
-          function Get-TestStatus {
-            param([string]$path)
-            if (-not (Test-Path $path)) { return 'No output captured' }
-            $content = Get-Content $path -Raw
-            if ($content -match '\bfailed\b|FAIL') { return 'FAILED' }
-            if ($content -match '\bpassed\b|PASS') { return 'PASSED' }
-            return 'UNKNOWN'
-          }
-          $feStatus = Get-TestStatus -path $feLog
-          $rustStatus = Get-TestStatus -path $rustLog
+          function Get-TestStatus { param([string]$path); if (-not (Test-Path $path)) { return 'No output captured' }; $content = Get-Content $path -Raw; if ($content -match '\bfailed\b|FAIL') { return 'FAILED' }; if ($content -match '\bpassed\b|PASS') { return 'PASSED' }; return 'UNKNOWN' }
+          function Add-SuiteSection { param([string]$title, [string]$logPath, [string]$pattern); $status = Get-TestStatus -path $logPath; Add-Content -Path $reportPath -Value "## $title" -Encoding UTF8; Add-Content -Path $reportPath -Value "**Status:** `$status`" -Encoding UTF8; if (Test-Path $logPath) { $content = Get-Content $logPath -Raw; $summaryLine = ($content -split "`r?`n" | Select-String -Pattern $pattern -CaseSensitive:$false | Select-Object -Last 1); if ($summaryLine) { Add-Content -Path $reportPath -Value "**Summary:** `$(($summaryLine).Trim())`" -Encoding UTF8 }; Add-Content -Path $reportPath -Value "`n<details><summary>Raw output</summary>`n`n```" -Encoding UTF8; Get-Content $logPath -Raw | Add-Content -Path $reportPath -Encoding UTF8; Add-Content -Path $reportPath -Value "````n</details>" -Encoding UTF8 } }
           Set-Content -Path $reportPath -Value "# Test Report — CI`n" -Encoding UTF8
           Add-Content -Path $reportPath -Value "**Commit:** `${{ github.sha }}`" -Encoding UTF8
           Add-Content -Path $reportPath -Value "**Branch/Ref:** `${{ github.ref_name }}`" -Encoding UTF8
           Add-Content -Path $reportPath -Value "**Triggered by:** `${{ github.event_name }}`" -Encoding UTF8
           Add-Content -Path $reportPath -Value "**Date:** `$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`" -Encoding UTF8
           Add-Content -Path $reportPath -Value "`n---`n" -Encoding UTF8
-          Add-Content -Path $reportPath -Value "## Frontend Unit Tests (vitest)" -Encoding UTF8
-          Add-Content -Path $reportPath -Value "**Status:** `$feStatus`" -Encoding UTF8
-          if (Test-Path $feLog) {
-            $content = Get-Content $feLog -Raw
-            $summaryLine = ($content -split "`r?`n" | Select-String -Pattern 'Tests|passed|failed' -CaseSensitive:$false | Select-Object -Last 1)
-            if ($summaryLine) {
-              Add-Content -Path $reportPath -Value "**Summary:** `$(($summaryLine).Trim())`" -Encoding UTF8
-            }
-          }
-          Add-Content -Path $reportPath -Value "`n<details><summary>Raw output</summary>`n`n```" -Encoding UTF8
-          if (Test-Path $feLog) { Get-Content $feLog -Raw | Add-Content -Path $reportPath -Encoding UTF8 }
-          Add-Content -Path $reportPath -Value "````n</details>" -Encoding UTF8
+          Add-SuiteSection -title "Frontend Unit Tests (vitest)" -logPath $feLog -pattern 'Tests|passed|failed'
           Add-Content -Path $reportPath -Value "`n---`n" -Encoding UTF8
-          Add-Content -Path $reportPath -Value "## Rust Tests (cargo test)" -Encoding UTF8
-          Add-Content -Path $reportPath -Value "**Status:** `$rustStatus`" -Encoding UTF8
-          if (Test-Path $rustLog) {
-            $content = Get-Content $rustLog -Raw
-            $summaryLine = ($content -split "`r?`n" | Select-String -Pattern 'test result|passed|failed' -CaseSensitive:$false | Select-Object -Last 1)
-            if ($summaryLine) {
-              Add-Content -Path $reportPath -Value "**Summary:** `$(($summaryLine).Trim())`" -Encoding UTF8
-            }
-          }
-          Add-Content -Path $reportPath -Value "`n<details><summary>Raw output</summary>`n`n```" -Encoding UTF8
-          if (Test-Path $rustLog) { Get-Content $rustLog -Raw | Add-Content -Path $reportPath -Encoding UTF8 }
-          Add-Content -Path $reportPath -Value "````n</details>" -Encoding UTF8
+          Add-SuiteSection -title "Rust Tests (cargo test)" -logPath $rustLog -pattern 'test result|passed|failed'
 
       # Re-fail the job if any test suite actually failed.
       - name: Fail on test errors

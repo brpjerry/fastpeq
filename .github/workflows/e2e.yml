@@ -85,33 +85,15 @@ jobs:
         run: |
           $reportPath = '${{ github.workspace }}/test-report.md'
           $e2eLog     = '${{ github.workspace }}/test-results/e2e.log'
-          function Get-TestStatus {
-            param([string]$path)
-            if (-not (Test-Path $path)) { return 'No output captured' }
-            $content = Get-Content $path -Raw
-            if ($content -match '\bfailed\b|FAIL') { return 'FAILED' }
-            if ($content -match '\bpassed\b|PASS') { return 'PASSED' }
-            return 'UNKNOWN'
-          }
-          $e2eStatus = Get-TestStatus -path $e2eLog
+          function Get-TestStatus { param([string]$path); if (-not (Test-Path $path)) { return 'No output captured' }; $content = Get-Content $path -Raw; if ($content -match '\bfailed\b|FAIL') { return 'FAILED' }; if ($content -match '\bpassed\b|PASS') { return 'PASSED' }; return 'UNKNOWN' }
+          function Add-SuiteSection { param([string]$title, [string]$logPath, [string]$pattern); $status = Get-TestStatus -path $logPath; Add-Content -Path $reportPath -Value "## $title" -Encoding UTF8; Add-Content -Path $reportPath -Value "**Status:** `$status`" -Encoding UTF8; if (Test-Path $logPath) { $content = Get-Content $logPath -Raw; $summaryLine = ($content -split "`r?`n" | Select-String -Pattern $pattern -CaseSensitive:$false | Select-Object -Last 1); if ($summaryLine) { Add-Content -Path $reportPath -Value "**Summary:** `$(($summaryLine).Trim())`" -Encoding UTF8 }; Add-Content -Path $reportPath -Value "`n<details><summary>Raw output</summary>`n`n```" -Encoding UTF8; Get-Content $logPath -Raw | Add-Content -Path $reportPath -Encoding UTF8; Add-Content -Path $reportPath -Value "````n</details>" -Encoding UTF8 } }
           Set-Content -Path $reportPath -Value "# Test Report — E2E`n" -Encoding UTF8
           Add-Content -Path $reportPath -Value "**Commit:** `${{ github.sha }}`" -Encoding UTF8
           Add-Content -Path $reportPath -Value "**Branch/Ref:** `${{ github.ref_name }}`" -Encoding UTF8
           Add-Content -Path $reportPath -Value "**Triggered by:** `${{ github.event_name }}`" -Encoding UTF8
           Add-Content -Path $reportPath -Value "**Date:** `$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`" -Encoding UTF8
           Add-Content -Path $reportPath -Value "`n---`n" -Encoding UTF8
-          Add-Content -Path $reportPath -Value "## E2E Smokes (WebdriverIO)" -Encoding UTF8
-          Add-Content -Path $reportPath -Value "**Status:** `$e2eStatus`" -Encoding UTF8
-          if (Test-Path $e2eLog) {
-            $content = Get-Content $e2eLog -Raw
-            $summaryLine = ($content -split "`r?`n" | Select-String -Pattern 'passed|failed|spec' -CaseSensitive:$false | Select-Object -Last 1)
-            if ($summaryLine) {
-              Add-Content -Path $reportPath -Value "**Summary:** `$(($summaryLine).Trim())`" -Encoding UTF8
-            }
-          }
-          Add-Content -Path $reportPath -Value "`n<details><summary>Raw output</summary>`n`n```" -Encoding UTF8
-          if (Test-Path $e2eLog) { Get-Content $e2eLog -Raw | Add-Content -Path $reportPath -Encoding UTF8 }
-          Add-Content -Path $reportPath -Value "````n</details>" -Encoding UTF8
+          Add-SuiteSection -title "E2E Smokes (WebdriverIO)" -logPath $e2eLog -pattern 'passed|failed|spec'
 
       # Re-fail the job if E2E tests actually failed.
       - name: Fail on test errors
