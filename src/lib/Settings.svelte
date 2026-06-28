@@ -18,6 +18,8 @@
     setToneVolumeCap,
     getToneStep,
     setToneStep,
+    getToneHeadroom,
+    setToneHeadroom,
   } from "./prefs.svelte";
 
   const TONE_STEPS = [0.25, 0.5, 1];
@@ -108,6 +110,23 @@
       <p class="hint">How band handles are drawn on the expanded graph.</p>
       <div class="cat-switches">
         <Switch label="Show filter shape" checked={getFilterShapes()} onChange={(v) => setFilterShapes(v)} />
+      </div>
+    </section>
+    <section class="settings-section">
+      <h3>Auto Preamp Headroom</h3>
+      <p class="hint">Extra space reserved for dynamic tone controls so they can be boosted without the Auto Preamp dynamically plunging to avoid clipping.</p>
+      <div class="settings-actions">
+        <label class="num-input">
+          <input
+            type="number"
+            min="0"
+            max="30"
+            step="0.5"
+            value={getToneHeadroom()}
+            onchange={(e) => setToneHeadroom(Number(e.currentTarget.value))}
+          />
+          <small>dB</small>
+        </label>
       </div>
     </section>
     <section class="settings-section">
