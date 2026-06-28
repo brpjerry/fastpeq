@@ -23,14 +23,18 @@ no restart, no process churn.
   Supports `PK`, `LS`, `HS`, `LSC`, `HSC`, `LP`, `HP`, `LPQ`, `HPQ`, `BP`, `NO`, `AP`.
 - **Live response curve** — a client-side RBJ-biquad magnitude plot that updates as you type.
 - **Expanded curve editor** — a full-window graph with draggable band handles (drag to set
-  frequency & gain, scroll to change Q), a filter-shape overlay, and per-channel (L / R) editing.
+  frequency & gain, scroll to change Q), a filter-shape overlay, per-channel (L / R) editing,
+  **undo / redo** (`Ctrl+Z` / `Ctrl+Y`), and **A/B compare** against the last-saved version.
 - **Target curves & compensation** — import a reference target (REW/CSV text), overlay it, and
-  view the response as deviation from it. A live FR-to-target dB gap follows the cursor.
+  view the response as deviation from it, with a live FR-to-target dB gap at the cursor and
+  per-preset **offset / align-at-frequency** controls.
 - **Measurement overlay** — import a REW measurement per preset to see the corrected response.
-- **Preamp, balance & a tone generator** for quick checks.
+- **Preamp, balance & tone** — a preamp with an optional **Auto** mode that keeps the EQ from
+  clipping, channel balance, global bass / mid / treble tone controls (with polarity invert and
+  L / R swap), and a sine tone generator.
 - **Preset organisation** — search, device-type filter, and per-preset category icons.
-- **Configurable global hotkeys** — bind any number of `Ctrl+Alt` / `Ctrl+Shift` keys
-  to switch presets, toggle bypass, or nudge the tone controls, working anywhere in Windows.
+- **Configurable global hotkeys** — bind any number of `Ctrl+Alt` / `Ctrl+Shift` keys to switch
+  presets, toggle bypass, or nudge / reset the tone controls, working anywhere in Windows.
 - **System tray**, single-instance, first-run backup of your config.
 - **PEACE import** — bring your existing `.peace` presets across.
 
@@ -76,7 +80,7 @@ A hard split between a UI-agnostic Rust core and a thin Tauri + Svelte shell.
 | Component | Role |
 |-----------|------|
 | `crates/fastpeq-core` | Detect APO, parse/edit/serialize configs, preset store, atomic writes |
-| `src-tauri` | Tauri 2 commands, system tray, `Ctrl+Alt+B` bypass hotkey, single-instance |
+| `src-tauri` | Tauri 2 commands, system tray, configurable global hotkeys, single-instance |
 | `src/` | Svelte + TS UI: preset list, band editor, response curve, curve editor |
 
 The core models an APO configuration as an ordered list of lines. It only understands `Preamp:`
@@ -99,4 +103,6 @@ raw lines rather than coerced.
 3. **Editor** ✅ — parametric band CRUD, preamp/balance, live response curve.
 4. **Curve editor & presets** ✅ — expanded graph with draggable handles, target curves &
    compensation, REW measurement overlay, tone generator, PEACE import.
-5. **Polish** *(next)* — autostart, audio-output-device hotkeys, richer target tooling.
+5. **Tooling & hotkeys** ✅ — editor undo/redo, A/B compare, auto-preamp, target offset/align,
+   and a configurable global-hotkeys page.
+6. **Polish** *(next)* — autostart, an audio-output-device hotkey action, richer target tooling.

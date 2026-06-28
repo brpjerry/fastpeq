@@ -89,3 +89,24 @@ export function setFilterShapes(v: boolean): void {
   filterShapes = v;
   save("fastpeq.filterShapes", v);
 }
+
+// Tone headroom (dB) reserved when Auto Preamp is active. This allows tone
+// controls to be boosted up to this limit before the auto preamp pulls down
+// to compensate. Default 0 dB.
+const TONE_HEADROOM_KEY = "fastpeq.toneHeadroom";
+
+function loadHeadroom(): number {
+  const v = loadNumber(TONE_HEADROOM_KEY, 0);
+  return v >= 0 && v <= 30 ? v : 0;
+}
+
+let toneHeadroom = $state<number>(loadHeadroom());
+
+export function getToneHeadroom(): number {
+  return toneHeadroom;
+}
+
+export function setToneHeadroom(v: number): void {
+  toneHeadroom = Math.max(0, Math.min(30, v));
+  save(TONE_HEADROOM_KEY, toneHeadroom);
+}

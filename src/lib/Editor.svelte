@@ -28,6 +28,7 @@
     getTargetAlignFreq,
   } from "./presetView.svelte";
   import { alignOffset } from "./curve";
+  import { getToneHeadroom } from "./prefs.svelte";
 
   let {
     name,
@@ -55,7 +56,7 @@
   };
 
   let bands = $state<Band[]>([]);
-  let preamp = $state(0);
+  let manualPreamp = $state(0);
   let balance = $state(0); // dB: <0 left louder, 0 centered, >0 right louder
   let hadPreamp = $state(false);
   let showBalance = $state(false);
@@ -71,6 +72,32 @@
   let busy = $state(false);
   let nextId = 0;
 
+  // Auto-preamp: when on, hold the preamp at the lowest value that keeps the
+  // peak boost from clipping (the preamp slider is disabled, the EQ math drives
+  // it). Uses the same bands + tone-overlay set as the clip warning, so with it
+  // on the warning never fires.
+  let autoPreamp = $state(
+    typeof localStorage !== "undefined" ? localStorage.getItem("fastpeq:autoPreamp") === "true" : false,
+  );
+  $effect(() => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("fastpeq:autoPreamp", String(autoPreamp));
+    }
+  });
+
+  function computeAutoPreamp(): number {
+    const bandsPeak = peakGainDb(bands as CurveFilter[], 0, balance);
+    const combinedPeak = peakGainDb(
+      [...bands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
+      0,
+      balance,
+    );
+    const requiredPeak = Math.max(bandsPeak + getToneHeadroom(), combinedPeak);
+    return Math.round(Math.min(0, -requiredPeak) * 10) / 10;
+  }
+
+  const livePreamp = $derived(autoPreamp ? computeAutoPreamp() : manualPreamp);
+
   // Possible clipping when the summed boost — the active bands plus the global
   // tone overlay, on whichever channel ends up louder — tops 0 dB. Past that the
   // signal can exceed full scale and Equalizer APO clips unless the preamp pulls
@@ -78,30 +105,11 @@
   const clipPeak = $derived(
     peakGainDb(
       [...bands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
-      preamp,
+      livePreamp,
       balance,
     ),
   );
   const clipping = $derived(clipPeak > 0.05);
-
-  // Auto-preamp: when on, hold the preamp at the lowest value that keeps the
-  // peak boost from clipping (the preamp slider is disabled, the EQ math drives
-  // it). Uses the same bands + tone-overlay set as the clip warning, so with it
-  // on the warning never fires.
-  let autoPreamp = $state(false);
-  function computeAutoPreamp(): number {
-    const peak = peakGainDb(
-      [...bands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
-      0,
-      balance,
-    );
-    return Math.round(Math.min(0, -peak) * 10) / 10;
-  }
-  $effect(() => {
-    if (!autoPreamp || loading) return;
-    preamp = computeAutoPreamp(); // tracks bands/balance; $state no-op if unchanged
-    schedule();
-  });
 
   // The per-preset target curve (Flat by default), shown on the graph as a
   // reference. Reactive to the selected target and the current preset. A manual
@@ -118,7 +126,7 @@
   // Shift the target so its line meets the current response at the saved align
   // frequency — the standard "align at a reference frequency" for headphone EQ.
   function alignTarget() {
-    const off = alignOffset(bands as CurveFilter[], preamp, measurement, targetBase, getTargetAlignFreq(name));
+    const off = alignOffset(bands as CurveFilter[], livePreamp, measurement, targetBase, getTargetAlignFreq(name));
     setTargetOffset(name, Math.round(off * 10) / 10);
   }
 
@@ -147,8 +155,7 @@
     loading = true;
     dirty = false;
     comparing = false; // a fresh preset is live; nothing to compare against yet
-    autoPreamp = false; // start each preset with its saved preamp, auto off
-    preamp = 0;
+    manualPreamp = 0;
     balance = 0;
     hadPreamp = false;
     const nextBands: Band[] = [];
@@ -163,7 +170,7 @@
           if (ch.kind === "left" || ch.kind === "right") {
             balance = balanceFromTrim(ch.kind, line.value.gain);
           } else {
-            preamp = line.value.gain;
+            manualPreamp = line.value.gain;
             hadPreamp = true;
           }
         } else if (line.kind === "Filter") {
@@ -192,6 +199,11 @@
     } finally {
       loading = false;
       resetHistory(); // start a fresh undo history at the loaded state
+      
+      // If Auto Preamp is globally enabled, pushing it to the live config doesn't dirty the preset
+      if (autoPreamp && !comparing) {
+        api.applyLive(buildConfig(false)).catch((e) => (err = String(e)));
+      }
     }
   }
 
@@ -204,10 +216,10 @@
   });
 
   // ── Undo / redo ────────────────────────────────────────────────────────────
-  // History of the editable state (bands + preamp + balance). A burst of edits —
+  // History of the editable state (bands + manualPreamp + balance). A burst of edits —
   // e.g. a slider drag — coalesces into one entry once it settles, so a single
   // undo steps back a whole gesture rather than one pixel of movement.
-  type Snapshot = { key: string; bands: Band[]; preamp: number; balance: number };
+  type Snapshot = { key: string; bands: Band[]; manualPreamp: number; balance: number };
   let history = $state<Snapshot[]>([]);
   let histIndex = $state(-1);
   const HIST_MAX = 100;
@@ -218,9 +230,9 @@
 
   function snapState(): Snapshot {
     return {
-      key: JSON.stringify({ bands, preamp, balance }),
+      key: JSON.stringify({ bands, manualPreamp, balance }),
       bands: $state.snapshot(bands) as Band[],
-      preamp,
+      manualPreamp,
       balance,
     };
   }
@@ -230,7 +242,7 @@
   }
   function restoreSnap(s: Snapshot) {
     bands = s.bands.map((b) => ({ ...b })); // fresh copies so later edits don't touch history
-    preamp = s.preamp;
+    manualPreamp = s.manualPreamp;
     balance = s.balance;
     schedule();
   }
@@ -263,7 +275,7 @@
   // A burst of edits coalesces into one entry once it settles. JSON.stringify
   // reads every field, registering the effect's dependencies.
   $effect(() => {
-    JSON.stringify({ bands, preamp, balance });
+    JSON.stringify({ bands, manualPreamp, balance });
     if (loading) return;
     const t = setTimeout(flushHistory, HIST_COALESCE);
     return () => clearTimeout(t);
@@ -350,11 +362,12 @@
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  function buildConfig(): Config {
+  function buildConfig(forSave = false): Config {
     const lines: Line[] = [];
     for (const r of rawLines) lines.push({ kind: "Raw", value: r });
-    if (hadPreamp || preamp !== 0) {
-      lines.push({ kind: "Preamp", value: { gain: preamp, channel: { kind: "both" } } });
+    const p = (forSave && autoPreamp) ? manualPreamp : livePreamp;
+    if (hadPreamp || p !== 0) {
+      lines.push({ kind: "Preamp", value: { gain: p, channel: { kind: "both" } } });
     }
     // Balance is a one-sided preamp trim on the attenuated channel.
     if (balance !== 0) {
@@ -389,7 +402,7 @@
     }
     lastApply = Date.now();
     try {
-      await api.applyLive(buildConfig()); // live preview -> config.txt only
+      await api.applyLive(buildConfig(false)); // live preview -> config.txt only
       err = "";
       onApplied(name); // keep the active highlight on the preset being edited
     } catch (e) {
@@ -497,7 +510,7 @@
   async function save() {
     busy = true;
     try {
-      const config = buildConfig();
+      const config = buildConfig(true);
       await api.savePreset(name, config);
       savedConfig = config; // the new baseline for A/B compare
       dirty = false;
@@ -611,16 +624,22 @@
       min="-30"
       max="6"
       step="0.1"
-      bind:value={preamp}
-      oninput={schedule}
+      value={livePreamp}
+      oninput={(e) => {
+        manualPreamp = Number(e.currentTarget.value);
+        schedule();
+      }}
       disabled={autoPreamp}
     />
-    <span class="pval">{preamp.toFixed(1)} dB</span>
+    <span class="pval">{livePreamp.toFixed(1)} dB</span>
     <Switch
       compact
       label="Auto"
       checked={autoPreamp}
-      onChange={(v) => (autoPreamp = v)}
+      onChange={(v) => {
+        autoPreamp = v;
+        if (!comparing) api.applyLive(buildConfig(false)).catch((e) => (err = String(e)));
+      }}
       title="Automatically set the preamp so the EQ never clips"
     />
     <div class="balance-wrap">
@@ -729,7 +748,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={bands} {preamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
+      <ResponseCurve filters={bands} preamp={livePreamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -797,7 +816,7 @@
         <div class="graph-fit">
           <CurveEditor
             {bands}
-            {preamp}
+            preamp={livePreamp}
             {balance}
             {view}
             {measurement}
