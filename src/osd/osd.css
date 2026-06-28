@@ -1,0 +1,40 @@
+/* Standalone styles for the OSD overlay window. It does NOT import the main
+   app.css (which paints an opaque dark background) — the overlay page must stay
+   transparent so only the card is visible. The palette mirrors app.css; --accent
+   / --accent-2 are overridden at runtime by applyAccent() to match the app. */
+:root {
+  --panel: #1d2026;
+  --panel-2: #23272f;
+  --border: #2d323c;
+  --text: #e6e9ef;
+  --muted: #9aa3b2;
+  --accent: #4f8cff;
+  --accent-2: #3a6fd8;
+  color-scheme: dark;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Center the card in the (larger) transparent window so its rounded corners and
+   drop shadow have room to render on every side instead of being clipped. */
+#osd {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

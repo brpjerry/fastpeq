@@ -198,3 +198,16 @@ pub fn open_presets_dir(state: State<'_, AppState>) -> Result<(), String> {
 pub fn set_hotkeys(app: AppHandle, bindings: Vec<crate::hotkeys::Binding>) -> Vec<String> {
     crate::hotkeys::set_hotkeys(&app, bindings)
 }
+
+/// List the system's audio output devices (for the "switch output device" hotkey
+/// principal picker). Stateless OS query; doesn't touch [`AppState`].
+#[tauri::command]
+pub fn list_audio_devices() -> Result<Vec<crate::audio::AudioDevice>, String> {
+    crate::audio::list_devices()
+}
+
+/// Make the given audio endpoint the default output device.
+#[tauri::command]
+pub fn set_default_audio_device(id: String) -> Result<(), String> {
+    crate::audio::set_default(&id)
+}

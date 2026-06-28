@@ -7,6 +7,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
+  // Two entry points: the main app and the small always-on-top OSD overlay window.
+  build: {
+    rollupOptions: {
+      input: { main: "index.html", osd: "osd.html" },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

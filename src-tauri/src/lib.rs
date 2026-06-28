@@ -3,6 +3,7 @@
 //! All audio/config logic lives in the core; this crate only wires it to a
 //! window, a system tray, a global hotkey, and the IPC commands the UI calls.
 
+mod audio;
 mod commands;
 mod hotkeys;
 mod state;
@@ -57,6 +58,40 @@ mod titlebar {
     }
 }
 
+/// Make the OSD overlay a non-activating tool window: showing it never steals
+/// focus from whatever app is in the foreground, and it stays out of Alt-Tab.
+/// The `focus: false` window config alone doesn't guarantee this across repeated
+/// `show()` calls — the extended window styles do.
+#[cfg(windows)]
+mod overlay {
+    use tauri::WebviewWindow;
+
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_NOACTIVATE: isize = 0x0800_0000;
+    const WS_EX_TOOLWINDOW: isize = 0x0000_0080;
+
+    // GetWindowLongPtrW/SetWindowLongPtrW are the 64-bit-correct accessors; the
+    // app builds for x64 MSVC, where user32 exports them directly.
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: isize, index: i32, new: isize) -> isize;
+    }
+
+    pub fn make_noactivate(window: &WebviewWindow) {
+        let Ok(hwnd) = window.hwnd() else {
+            return;
+        };
+        let hwnd = hwnd.0 as isize;
+        // SAFETY: `hwnd` is a live top-level window handle; we read the current
+        // extended style and OR in the no-activate / tool-window bits.
+        unsafe {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -86,6 +121,12 @@ pub fn run() {
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
                 titlebar::apply(&window);
+            }
+
+            // The OSD overlay must never grab focus when it pops up.
+            #[cfg(windows)]
+            if let Some(osd) = app.get_webview_window("osd") {
+                overlay::make_noactivate(&osd);
             }
 
             // Detect Equalizer APO and prepare the preset library.
@@ -133,6 +174,8 @@ pub fn run() {
             commands::reset_presets_dir,
             commands::open_presets_dir,
             commands::set_hotkeys,
+            commands::list_audio_devices,
+            commands::set_default_audio_device,
         ])
         .run(tauri::generate_context!())
         .expect("error while running fastpeq");

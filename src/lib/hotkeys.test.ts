@@ -57,6 +57,14 @@ describe("hotkeys store", () => {
     expect(accelerator(bad)).toBeNull();
   });
 
+  it("treats a device binding like any other for accelerator generation", () => {
+    clearAll();
+    const id = addHotkey();
+    updateHotkey(id, { mod: "ctrl-alt", key: "D", action: "device", device: "{0.0.0}.{dac}" });
+    expect(accelerators()).toEqual([{ id, accelerator: "Ctrl+Alt+D" }]);
+    clearAll();
+  });
+
   it("emits accelerators, skipping invalid keys and duplicate combos", () => {
     clearAll();
     const a = addHotkey();

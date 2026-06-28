@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
+import { emit } from "@tauri-apps/api/event";
 import * as api from "./lib/api";
 import { ACCENTS } from "./lib/theme";
 import {
@@ -17,14 +18,26 @@ import {
 import { addHotkey, updateHotkey, removeHotkey } from "./lib/hotkeys.svelte";
 import App from "./App.svelte";
 
-// Capture event listeners so tests can fire a "hotkey-pressed" event.
-const { listeners } = vi.hoisted(() => ({
+// Capture event listeners (to fire "hotkey-pressed") and the window focus
+// callback (to simulate the window losing focus for the OSD gate).
+const { listeners, focus } = vi.hoisted(() => ({
   listeners: {} as Record<string, (e: { payload: unknown }) => void>,
+  focus: { cb: null as null | ((e: { payload: boolean }) => void) },
 }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn((event: string, cb: (e: { payload: unknown }) => void) => {
     listeners[event] = cb;
     return Promise.resolve(() => {});
+  }),
+  emit: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    isFocused: () => Promise.resolve(true),
+    onFocusChanged: (cb: (e: { payload: boolean }) => void) => {
+      focus.cb = cb;
+      return Promise.resolve(() => {});
+    },
   }),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -41,6 +54,7 @@ vi.mock("./lib/api", () => {
     bypassed: vi.fn(),
     getTone: vi.fn(),
     getPreset: vi.fn(() => Promise.resolve({ lines: [] })),
+    listAudioDevices: vi.fn(() => Promise.resolve([])),
     // Mutations — resolve to void / a report.
     applyPreset: ok(),
     toggleBypass: ok(),
@@ -51,6 +65,7 @@ vi.mock("./lib/api", () => {
     savePreset: ok(),
     applyLive: ok(),
     setTone: ok(),
+    setDefaultAudioDevice: ok(),
     setHotkeys: vi.fn(() => Promise.resolve([])),
     readTextFile: vi.fn(() => Promise.resolve("")),
     setPresetsDir: ok(),
@@ -286,6 +301,52 @@ describe("App global hotkeys", () => {
       invert: false,
       swap: false,
     });
+    removeHotkey(id);
+  });
+
+  it("switches the default output device on a device hotkey", async () => {
+    withLibrary();
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    const id = addHotkey();
+    updateHotkey(id, { key: "D", action: "device", device: "{0.0.0}.{dac}" });
+    listeners["hotkey-pressed"]({ payload: id });
+
+    await waitFor(() => expect(api.setDefaultAudioDevice).toHaveBeenCalledWith("{0.0.0}.{dac}"));
+    removeHotkey(id);
+  });
+
+  it("emits an OSD payload for a hotkey fired while the window is unfocused", async () => {
+    withLibrary();
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    focus.cb?.({ payload: false }); // window lost focus
+    vi.mocked(emit).mockClear();
+    const id = addHotkey();
+    updateHotkey(id, { key: "1", action: "preset", preset: "Sennheiser HD600" });
+    listeners["hotkey-pressed"]({ payload: id });
+
+    await waitFor(() =>
+      expect(emit).toHaveBeenCalledWith("osd:show", { title: "Preset", detail: "Sennheiser HD600" }),
+    );
+    removeHotkey(id);
+  });
+
+  it("does not emit an OSD payload while the window is focused", async () => {
+    withLibrary();
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    focus.cb?.({ payload: true }); // window focused (also the default)
+    vi.mocked(emit).mockClear();
+    const id = addHotkey();
+    updateHotkey(id, { key: "2", action: "tone-up", tone: "bass" });
+    listeners["hotkey-pressed"]({ payload: id });
+
+    await waitFor(() => expect(api.setTone).toHaveBeenCalled()); // the action still ran
+    expect(emit).not.toHaveBeenCalledWith("osd:show", expect.anything());
     removeHotkey(id);
   });
 });

@@ -23,3 +23,21 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 fastpeq-core = { path = "../crates/fastpeq-core" }
+
+# Windows audio-endpoint enumeration + default-device switching (the "switch
+# output device" hotkey action). Pinned to the same major already in the tree via
+# Tauri's deps. IMMDeviceEnumerator/IPropertyStore come from these features; the
+# undocumented IPolicyConfig is declared by hand in `audio.rs`.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_Media_Audio",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+# Pulled in directly so the `#[interface]` macro (which emits `windows_core::…`
+# paths for the hand-declared IPolicyConfig) resolves. Same version as above.
+windows-core = "0.61"
