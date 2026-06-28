@@ -66,6 +66,17 @@ async function pickBandType(band, token) {
   throw new Error(`filter type not offered: ${token}`);
 }
 
+// Create a new (empty) preset via the "+ New preset" → "From scratch" flow.
+async function createPreset(name) {
+  await $("button.new-btn").click();
+  await (await $(".create input")).setValue(name);
+  await (await $(".create-actions .primary")).click();
+  await browser.waitUntil(async () => (await presetNames()).includes(name), {
+    timeout: 10000,
+    timeoutMsg: `preset "${name}" was not created`,
+  });
+}
+
 describe("fastpeq E2E smokes", () => {
   it("launches and lists the seeded presets", async () => {
     await browser.waitUntil(async () => (await rows()).length >= 3, {
@@ -196,5 +207,88 @@ describe("editor: edit a band and save", () => {
       timeoutMsg: "save button never settled to Saved",
     });
     expect(readPreset("BassBoost")).toContain("LSC");
+  });
+});
+
+// ── Tier 2: tone overlay + preset lifecycle ──────────────────────────────────
+describe("tone overlay", () => {
+  before(showAll);
+
+  it("a tone knob layers a filter over the active preset, and Reset clears it", async () => {
+    await apply("BassBoost"); // tone is layered over whatever's active
+    const bass = await $('[role="slider"][aria-label="Bass"]');
+    await bass.waitForExist({ timeout: 10000 });
+
+    // Drive the knob up via its keyboard a11y path (ArrowUp = +one step).
+    await browser.execute((el) => el.focus(), bass);
+    for (let i = 0; i < 4; i++) await browser.keys(["ArrowUp"]);
+
+    await browser.waitUntil(async () => Number(await bass.getAttribute("aria-valuenow")) > 0, {
+      timeout: 5000,
+      timeoutMsg: "bass knob did not move with the keyboard",
+    });
+    // The bass tone is a low shelf at 105 Hz — a frequency no seeded preset uses.
+    await browser.waitUntil(() => readConfig().includes("Fc 105 Hz"), {
+      timeout: 10000,
+      timeoutMsg: "tone overlay was not written to config.txt",
+    });
+
+    await (await $(".tone-reset")).click();
+    await browser.waitUntil(() => !readConfig().includes("Fc 105 Hz"), {
+      timeout: 10000,
+      timeoutMsg: "Reset did not clear the tone overlay",
+    });
+    expect(Number(await bass.getAttribute("aria-valuenow"))).toBe(0);
+  });
+});
+
+describe("preset lifecycle: rename, delete, capture", () => {
+  before(showAll);
+
+  it("renames a preset in the list and on disk", async () => {
+    await createPreset("RenameMe");
+    const row = await rowFor("RenameMe");
+    await (await row.$('button[title="Rename"]')).click();
+
+    const input = await $(".rename-input");
+    await input.waitForExist({ timeout: 5000 });
+    await input.setValue("Renamed");
+    await browser.keys(["Enter"]);
+
+    await browser.waitUntil(
+      async () => {
+        const names = await presetNames();
+        return names.includes("Renamed") && !names.includes("RenameMe");
+      },
+      { timeout: 10000, timeoutMsg: "rename did not update the list" },
+    );
+    expect(presetExists("Renamed")).toBe(true);
+    expect(presetExists("RenameMe")).toBe(false);
+  });
+
+  it("deletes a preset from the list and disk", async () => {
+    await createPreset("DeleteMe");
+    const row = await rowFor("DeleteMe");
+    await (await row.$(".danger.icon")).click();
+
+    await browser.waitUntil(async () => !(await presetNames()).includes("DeleteMe"), {
+      timeout: 10000,
+      timeoutMsg: "delete did not remove the preset from the list",
+    });
+    expect(presetExists("DeleteMe")).toBe(false);
+  });
+
+  it("captures the current live config as a new preset", async () => {
+    await apply("Studio"); // make Studio the live config we're about to capture
+    await $("button.new-btn").click();
+    await (await $(".create input")).setValue("Captured");
+    await (await $(".create-actions .capture-btn")).click();
+
+    await browser.waitUntil(async () => (await presetNames()).includes("Captured"), {
+      timeout: 10000,
+      timeoutMsg: "captured preset never appeared in the list",
+    });
+    // Studio's signature filter (8 kHz) should be in the captured file.
+    expect(readPreset("Captured")).toContain("Fc 8000 Hz");
   });
 });
