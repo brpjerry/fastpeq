@@ -85,7 +85,7 @@
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 5px 14px rgba(0, 0, 0, 0.5);
     opacity: 0;
     transform: translateY(8px);
     transition:
