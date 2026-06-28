@@ -11,8 +11,8 @@ Guiding principles, to keep the bar high:
 - Keep the **Rust core pure** (parse/serialize/store); features that touch the
   EQ model belong there with round-trip tests.
 - **Out of scope, on purpose:** auto-generating EQ to match a target (AutoEQ-style
-  inversion). fastpeq is a manual/visual editor; the new target overlay + Match
-  control support hand-tuning, not automation.
+  inversion). fastpeq is a manual/visual editor; the target overlay + offset/align
+  controls support hand-tuning, not automation.
 
 ---
 
@@ -34,7 +34,8 @@ Guiding principles, to keep the bar high:
 
 - ✅ **Configurable global hotkeys** — done. A **Hotkeys** page lets you add any
   number of bindings (Ctrl+Alt / Ctrl+Shift + a key) for **switch preset / bypass /
-  tone up / tone down**, with a per-hotkey action + principal and drag reorder. The
+  tone up / tone down / reset tone**, with a per-hotkey action + principal and a
+  searchable preset picker + drag reorder. The
   old hardcoded `Ctrl+Alt+B → Bypass` is now a seeded default in this list. A tone
   step size lives in Settings. **Follow-up:** the **switch audio output device**
   action (device enumeration + default-device switching via Core Audio /

@@ -10,12 +10,12 @@ small WebDriver suite for a handful of true end-to-end smokes.
 
 ## Current coverage (already in place)
 
-- **Rust** — 29 tests across parse/serialize round-trip, `PresetStore`, the
-  `Manager` flow (apply/bypass/restore, capture), PEACE import, name safety,
-  and APO env. (`cargo test`)
-- **Frontend pure logic** — 28 vitest tests for `eq.ts` (biquad magnitude,
-  `balanceTrim`, `peakGainDb`, `toneFilters`), `measurement.ts`, `graph.ts`,
-  `starter.ts`. (`npm test`)
+- **Rust** — 30 tests across parse/serialize round-trip, `PresetStore`, the
+  `Manager` flow (apply/bypass/restore, capture), the tone overlay (compose/strip,
+  swap channel handling), PEACE import, name safety, and APO env. (`cargo test`)
+- **Frontend** — 146 vitest tests: pure logic (`eq.ts`, `measurement.ts`,
+  `graph.ts`, `curve.ts`, `floating.ts`, and the stores) **plus** component/UI
+  behavior (Layer 1, below, is now in place). (`npx vitest run`)
 
 **The gap this plan fills:** component/UI *interaction* behavior, and *true
 integration* (real Svelte UI ↔ real Rust backend ↔ real `config.txt`). These are
