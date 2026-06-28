@@ -5,6 +5,8 @@
   import FloatingMenu from "./FloatingMenu.svelte";
   import { anchorBelow, type Anchor } from "./floating";
   import { getSpecialtyIcons, getBluetoothIcons } from "./prefs.svelte";
+  import { CATEGORIES, CATEGORY_LABELS, CATEGORY_NONE } from "./constants";
+
 
   let {
     presets,
@@ -53,23 +55,10 @@
       if (!p.toLowerCase().includes(query.trim().toLowerCase())) return false;
       if (typeFilter === "") return true;
       const cat = categories[p] ?? null;
-      return typeFilter === "__none" ? cat === null : cat === typeFilter;
+      return typeFilter === CATEGORY_NONE ? cat === null : cat === typeFilter;
     }),
   );
 
-  const CATEGORIES: { value: string; label: string; group: "base" | "specialty" | "bluetooth" }[] = [
-    { value: "headphone", label: "Headphone", group: "base" },
-    { value: "iem", label: "IEM", group: "base" },
-    { value: "estat", label: "Electrostatic", group: "specialty" },
-    { value: "earbud", label: "Earbud", group: "specialty" },
-    { value: "bluetooth_headphone", label: "BT Headphone", group: "bluetooth" },
-    { value: "bluetooth_iem", label: "BT IEM", group: "bluetooth" },
-    { value: "bluetooth_earbud", label: "BT Earbud", group: "bluetooth" },
-    { value: "speaker", label: "Speaker", group: "base" },
-  ];
-  const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
-    CATEGORIES.map((c) => [c.value, c.label]),
-  );
   const categoryLabel = (c: string | undefined) =>
     c ? (CATEGORY_LABELS[c] ?? c) : "Uncategorized";
 
@@ -90,7 +79,7 @@
   $effect(() => {
     const stillValid =
       typeFilter === "" ||
-      (typeFilter === "__none" ? hasUncategorized : usedCategories.some((c) => c.value === typeFilter));
+      (typeFilter === CATEGORY_NONE ? hasUncategorized : usedCategories.some((c) => c.value === typeFilter));
     if (!stillValid) typeFilter = "";
   });
 
