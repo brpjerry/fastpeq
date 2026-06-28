@@ -18,7 +18,7 @@ import {
   setTargetOffset,
   getTargetAlignFreq,
   setTargetAlignFreq,
-} from "./presetView.svelte";
+} from "./preset-view.svelte";
 
 beforeEach(() => localStorage.clear());
 

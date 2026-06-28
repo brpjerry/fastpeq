@@ -56,8 +56,8 @@ export function pathFrom(
   const yBot = box.padT + box.plotH;
   let d = "";
   for (let i = 0; i < freqs.length; i++) {
-    const yy = Math.max(yTop, Math.min(yBot, dbToY(curve[i], preamp, dbMax, box)));
-    d += (i === 0 ? "M" : "L") + freqToX(freqs[i], box).toFixed(1) + "," + yy.toFixed(1) + " ";
+    const y = Math.max(yTop, Math.min(yBot, dbToY(curve[i], preamp, dbMax, box)));
+    d += (i === 0 ? "M" : "L") + freqToX(freqs[i], box).toFixed(1) + "," + y.toFixed(1) + " ";
   }
   return d.trim();
 }

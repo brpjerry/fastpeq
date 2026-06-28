@@ -14,7 +14,7 @@
   import { anchorBelow, type Anchor } from "./lib/floating";
   import { starterConfig, defaultBandCount } from "./lib/starter";
   import { addTarget } from "./lib/targets.svelte";
-  import { renamePresetView, clearPresetView } from "./lib/presetView.svelte";
+  import { renamePresetView, clearPresetView } from "./lib/preset-view.svelte";
   import { parseRew, normalize, downsample } from "./lib/measurement";
   import { getSpecialtyIcons, getBluetoothIcons, getToneStep } from "./lib/prefs.svelte";
   import { getHotkeys, accelerators } from "./lib/hotkeys.svelte";
@@ -94,9 +94,9 @@
     } else if (h.action === "preset") {
       if (h.preset && presets.includes(h.preset)) open(h.preset);
     } else if (h.action === "tone-up" || h.action === "tone-down") {
-      const which = h.tone ?? "bass";
+      const control = h.tone ?? "bass";
       const delta = getToneStep() * (h.action === "tone-up" ? 1 : -1);
-      setKnob(which, clampTone(tone[which] + delta));
+      setKnob(control, clampTone(tone[control] + delta));
     } else if (h.action === "device") {
       // Stable endpoint id: works again automatically once an unplugged device
       // returns; a currently-absent device just surfaces the backend error. Show
