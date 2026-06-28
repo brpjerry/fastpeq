@@ -22,7 +22,6 @@
   let categories = $state<Record<string, string>>({});
   let active = $state<string | null>(null);
   let selected = $state<string | null>(null);
-  let newName = $state("");
   let message = $state("");
   let busy = $state(false);
   let showSettings = $state(false);
@@ -34,8 +33,6 @@
   let bandCount = $state(defaultBandCount());
   let presetsDirPath = $state("");
   let refreshing = $state(false);
-  let renaming = $state<string | null>(null);
-  let renameValue = $state("");
   let editorReloadToken = $state(0);
 
   // Global tone overlay (bass/mid/treble), layered over the active preset by the

@@ -6,12 +6,10 @@
   import ResponseCurve from "./ResponseCurve.svelte";
   import CurveEditor from "./CurveEditor.svelte";
   import ToneGenerator from "./ToneGenerator.svelte";
-  import Switch from "./Switch.svelte";
   import GraphTools from "./GraphTools.svelte";
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import BandRow from "./BandRow.svelte";
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, balanceFromTrim, toneFilters, peakGainDb, type CurveFilter } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
     import { getFilterShapes } from "./prefs.svelte";
@@ -61,12 +59,9 @@
   let manualPreamp = $state(0);
   let balance = $state(0); // dB: <0 left louder, 0 centered, >0 right louder
   let hadPreamp = $state(false);
-  let showBalance = $state(false);
-  let chanBtn = $state<HTMLButtonElement | null>(null);
   let expanded = $state(false); // full-window graph + handle editing
   let view = $state<"both" | "left" | "right">("both"); // which channel list is shown
   let hoveredId = $state<number | null>(null); // graph handle under the cursor → row highlight
-  const BAL_MAX = 30; // balance range, dB of cut on the quieter side at full
   let rawLines = $state<string[]>([]); // preserved verbatim (comments, Device:, etc.)
   let err = $state("");
   let loading = $state(true);
@@ -426,37 +421,10 @@
     return c.kind === "both" || c.kind === "other"; // unmodeled specs ride along here
   }
   const shown = $derived(bands.filter((b) => inView(b.channel, view)));
-  const counts = $derived({
-    both: bands.filter((b) => inView(b.channel, "both")).length,
-    left: bands.filter((b) => b.channel.kind === "left").length,
-    right: bands.filter((b) => b.channel.kind === "right").length,
-  });
   function channelForView(v: "both" | "left" | "right"): Channel {
     if (v === "left") return { kind: "left" };
     if (v === "right") return { kind: "right" };
     return { kind: "both" };
-  }
-  function emptyMsg(v: "both" | "left" | "right"): string {
-    if (v === "left") return "No left-only filters yet.";
-    if (v === "right") return "No right-only filters yet.";
-    return "No filters yet — add a band to start shaping the curve.";
-  }
-
-  // Manual entry in dB: + = right louder, − = left louder.
-  function setBalanceDb(v: string) {
-    const db = Number(v);
-    if (!Number.isFinite(db)) return;
-    balance = Math.max(-BAL_MAX, Math.min(BAL_MAX, db));
-    schedule();
-  }
-  function centerBalance() {
-    balance = 0;
-    schedule();
-  }
-  function balanceLabel(b: number): string {
-    if (b === 0) return "Bal";
-    const v = Math.abs(b);
-    return (b > 0 ? "R" : "L") + (Number.isInteger(v) ? String(v) : v.toFixed(1));
   }
 
   function addBand() {
@@ -650,7 +618,7 @@
 
     <PreampRow bind:manualPreamp bind:autoPreamp bind:balance {livePreamp} onSchedule={schedule} onAutoPreampChange={(v) => { autoPreamp = v; schedule(); }} />
 
-    <FilterList bind:bands bind:view bind:hoveredId onSchedule={schedule} onRemoveBand={removeBand} />
+    <FilterList bind:bands bind:view bind:hoveredId onSchedule={schedule} onChangeKind={changeKind} onRemoveBand={removeBand} />
     
 
     {@render bandActions()}

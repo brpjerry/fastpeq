@@ -110,7 +110,7 @@
   const typeFilterLabel = $derived(
     typeFilter === ""
       ? "All types"
-      : typeFilter === "__none"
+      : typeFilter === CATEGORY_NONE
         ? "Uncategorized"
         : (CATEGORY_LABELS[typeFilter] ?? typeFilter),
   );
@@ -248,7 +248,7 @@
         <span class="type-trigger-icon">
           {#if typeFilter === ""}
             <svg class="type-all-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" /></svg>
-          {:else if typeFilter === "__none"}
+          {:else if typeFilter === CATEGORY_NONE}
             <CategoryIcon category={undefined} />
           {:else}
             <CategoryIcon category={typeFilter} />
@@ -405,7 +405,7 @@
     </button>
   {/each}
   {#if hasUncategorized}
-    <button class="menu-item cat-menu-item" class:sel={typeFilter === "__none"} onclick={() => pickType("__none")}>
+    <button class="menu-item cat-menu-item" class:sel={typeFilter === CATEGORY_NONE} onclick={() => pickType(CATEGORY_NONE)}>
       <span class="cat-menu-icon"><CategoryIcon category={undefined} /></span>
       Uncategorized
     </button>
