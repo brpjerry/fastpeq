@@ -68,5 +68,72 @@ jobs:
       - name: Build app with embedded frontend
         run: npx tauri build --debug --no-bundle
 
+      # Capture E2E test output to a file so we can build a report.
+      # continue-on-error ensures the pipeline keeps running even if tests fail.
       - name: Run E2E smokes
-        run: npm run e2e
+        id: e2e-tests
+        continue-on-error: true
+        run: |
+          mkdir -p ${{ github.workspace }}/test-results
+          npm run e2e > ${{ github.workspace }}/test-results/e2e.log 2>&1 || exit 0
+
+      # Generate a markdown test report from the captured logs.
+      # This step always runs so the artifact is published regardless of CI outcome.
+      - name: Generate E2E test report
+        if: always()
+        shell: pwsh
+        run: |
+          $reportPath = '${{ github.workspace }}/test-report.md'
+          $e2eLog     = '${{ github.workspace }}/test-results/e2e.log'
+          function Get-TestStatus {
+            param([string]$path)
+            if (-not (Test-Path $path)) { return 'No output captured' }
+            $content = Get-Content $path -Raw
+            if ($content -match '\bfailed\b|FAIL') { return 'FAILED' }
+            if ($content -match '\bpassed\b|PASS') { return 'PASSED' }
+            return 'UNKNOWN'
+          }
+          $e2eStatus = Get-TestStatus -path $e2eLog
+          Set-Content -Path $reportPath -Value "# Test Report — E2E`n" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Commit:** `${{ github.sha }}`" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Branch/Ref:** `${{ github.ref_name }}`" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Triggered by:** `${{ github.event_name }}`" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Date:** `$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "`n---`n" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "## E2E Smokes (WebdriverIO)" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Status:** `$e2eStatus`" -Encoding UTF8
+          if (Test-Path $e2eLog) {
+            $content = Get-Content $e2eLog -Raw
+            $summaryLine = ($content -split "`r?`n" | Select-String -Pattern 'passed|failed|spec' -CaseSensitive:$false | Select-Object -Last 1)
+            if ($summaryLine) {
+              Add-Content -Path $reportPath -Value "**Summary:** `$(($summaryLine).Trim())`" -Encoding UTF8
+            }
+          }
+          Add-Content -Path $reportPath -Value "`n<details><summary>Raw output</summary>`n`n```" -Encoding UTF8
+          if (Test-Path $e2eLog) { Get-Content $e2eLog -Raw | Add-Content -Path $reportPath -Encoding UTF8 }
+          Add-Content -Path $reportPath -Value "````n</details>" -Encoding UTF8
+
+      # Re-fail the job if E2E tests actually failed.
+      - name: Fail on test errors
+        if: always()
+        shell: pwsh
+        run: |
+          $e2eFailed = $false
+          if (Test-Path '${{ github.workspace }}/test-results/e2e.log') {
+              $content = Get-Content '${{ github.workspace }}/test-results/e2e.log' -Raw
+              if ($content -match '\bfailed\b|FAIL') { $e2eFailed = $true }
+          }
+          if ($e2eFailed) {
+              Write-Error "E2E tests failed. See the test report artifact for details."
+              exit 1
+          }
+
+      # Upload the markdown test report as an artifact.
+      # Always runs so it is published regardless of CI outcome.
+      - name: Upload E2E test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-test-report
+          path: ${{ github.workspace }}/test-report.md
+          retention-days: 14

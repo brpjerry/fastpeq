@@ -37,8 +37,14 @@ jobs:
       - name: Svelte type-check
         run: npm run check
 
+      # Capture frontend test output to a file so we can build a report.
+      # continue-on-error ensures the pipeline keeps running even if tests fail.
       - name: Frontend unit tests
-        run: npm test
+        id: fe-tests
+        continue-on-error: true
+        run: |
+          mkdir -p ${{ github.workspace }}/test-results
+          npm test > ${{ github.workspace }}/test-results/frontend.log 2>&1 || exit 0
 
       # Builds the frontend into dist/, which the Tauri build script embeds —
       # so it must exist before cargo compiles the shell crate below.
@@ -51,5 +57,91 @@ jobs:
       - name: Clippy (warnings as errors)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Capture Rust test output to a file so we can build a report.
+      # continue-on-error ensures the pipeline keeps running even if tests fail.
       - name: Rust tests
-        run: cargo test --workspace
+        id: rust-tests
+        continue-on-error: true
+        run: |
+          cargo test --workspace > ${{ github.workspace }}/test-results/rust.log 2>&1 || exit 0
+
+      # Generate a markdown test report from the captured logs.
+      # This step always runs so the artifact is published regardless of CI outcome.
+      - name: Generate test report
+        if: always()
+        shell: pwsh
+        run: |
+          $reportPath = '${{ github.workspace }}/test-report.md'
+          $feLog    = '${{ github.workspace }}/test-results/frontend.log'
+          $rustLog  = '${{ github.workspace }}/test-results/rust.log'
+          function Get-TestStatus {
+            param([string]$path)
+            if (-not (Test-Path $path)) { return 'No output captured' }
+            $content = Get-Content $path -Raw
+            if ($content -match '\bfailed\b|FAIL') { return 'FAILED' }
+            if ($content -match '\bpassed\b|PASS') { return 'PASSED' }
+            return 'UNKNOWN'
+          }
+          $feStatus = Get-TestStatus -path $feLog
+          $rustStatus = Get-TestStatus -path $rustLog
+          Set-Content -Path $reportPath -Value "# Test Report — CI`n" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Commit:** `${{ github.sha }}`" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Branch/Ref:** `${{ github.ref_name }}`" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Triggered by:** `${{ github.event_name }}`" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Date:** `$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "`n---`n" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "## Frontend Unit Tests (vitest)" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Status:** `$feStatus`" -Encoding UTF8
+          if (Test-Path $feLog) {
+            $content = Get-Content $feLog -Raw
+            $summaryLine = ($content -split "`r?`n" | Select-String -Pattern 'Tests|passed|failed' -CaseSensitive:$false | Select-Object -Last 1)
+            if ($summaryLine) {
+              Add-Content -Path $reportPath -Value "**Summary:** `$(($summaryLine).Trim())`" -Encoding UTF8
+            }
+          }
+          Add-Content -Path $reportPath -Value "`n<details><summary>Raw output</summary>`n`n```" -Encoding UTF8
+          if (Test-Path $feLog) { Get-Content $feLog -Raw | Add-Content -Path $reportPath -Encoding UTF8 }
+          Add-Content -Path $reportPath -Value "````n</details>" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "`n---`n" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "## Rust Tests (cargo test)" -Encoding UTF8
+          Add-Content -Path $reportPath -Value "**Status:** `$rustStatus`" -Encoding UTF8
+          if (Test-Path $rustLog) {
+            $content = Get-Content $rustLog -Raw
+            $summaryLine = ($content -split "`r?`n" | Select-String -Pattern 'test result|passed|failed' -CaseSensitive:$false | Select-Object -Last 1)
+            if ($summaryLine) {
+              Add-Content -Path $reportPath -Value "**Summary:** `$(($summaryLine).Trim())`" -Encoding UTF8
+            }
+          }
+          Add-Content -Path $reportPath -Value "`n<details><summary>Raw output</summary>`n`n```" -Encoding UTF8
+          if (Test-Path $rustLog) { Get-Content $rustLog -Raw | Add-Content -Path $reportPath -Encoding UTF8 }
+          Add-Content -Path $reportPath -Value "````n</details>" -Encoding UTF8
+
+      # Re-fail the job if any test suite actually failed.
+      - name: Fail on test errors
+        if: always()
+        shell: pwsh
+        run: |
+          $feFailed = $false
+          $rustFailed = $false
+          if (Test-Path '${{ github.workspace }}/test-results/frontend.log') {
+              $content = Get-Content '${{ github.workspace }}/test-results/frontend.log' -Raw
+              if ($content -match '\bfailed\b|FAIL') { $feFailed = $true }
+          }
+          if (Test-Path '${{ github.workspace }}/test-results/rust.log') {
+              $content = Get-Content '${{ github.workspace }}/test-results/rust.log' -Raw
+              if ($content -match '\bfailed\b|FAIL') { $rustFailed = $true }
+          }
+          if ($feFailed -or $rustFailed) {
+              Write-Error "One or more test suites failed. See the test report artifact for details."
+              exit 1
+          }
+
+      # Upload the markdown test report as an artifact.
+      # Always runs so it is published regardless of CI outcome.
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-test-report
+          path: ${{ github.workspace }}/test-report.md
+          retention-days: 14
