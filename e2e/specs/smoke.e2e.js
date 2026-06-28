@@ -292,3 +292,124 @@ describe("preset lifecycle: rename, delete, capture", () => {
     expect(readPreset("Captured")).toContain("Fc 8000 Hz");
   });
 });
+
+// ── Tier 3: search + editor tooling ──────────────────────────────────────────
+describe("search", () => {
+  before(showAll);
+
+  it("narrows the list and Enter applies the top match", async () => {
+    const search = await $(".search");
+    await search.setValue("Stud");
+    await browser.waitUntil(
+      async () => {
+        const names = await presetNames();
+        return names.length === 1 && names[0] === "Studio";
+      },
+      { timeout: 8000, timeoutMsg: "search did not narrow to Studio" },
+    );
+
+    await search.click(); // keep focus in the box, then submit
+    await browser.keys(["Enter"]);
+
+    await browser.waitUntil(
+      async () => ((await (await rowFor("Studio")).getAttribute("class")) || "").includes("active"),
+      { timeout: 10000, timeoutMsg: "Enter did not apply the top match" },
+    );
+    expect(readConfig()).toContain("Fc 8000 Hz");
+  });
+});
+
+describe("editor tooling: compare, undo/redo, auto preamp", () => {
+  before(showAll);
+
+  it("A/B compare arms only after an edit and toggles back to it", async () => {
+    await apply("Vocal");
+    await $(GRAPH).waitForExist({ timeout: 10000 });
+    const compare = await $(".compare-btn");
+    expect(await compare.isEnabled()).toBe(false); // nothing unsaved to compare yet
+
+    await pickBandType(await $(".band"), "LSC"); // an unsaved edit
+    await browser.waitUntil(async () => await compare.isEnabled(), {
+      timeout: 8000,
+      timeoutMsg: "compare stayed disabled after an edit",
+    });
+
+    await compare.click();
+    await browser.waitUntil(async () => (await compare.getText()).includes("Comparing"), {
+      timeout: 5000,
+      timeoutMsg: "compare did not arm",
+    });
+    // While comparing, the editor auditions the saved version.
+    expect(await (await $(".live")).getText()).toContain("saved");
+
+    await compare.click();
+    await browser.waitUntil(async () => (await compare.getText()).trim() === "Compare", {
+      timeout: 5000,
+      timeoutMsg: "compare did not return to the edit",
+    });
+  });
+
+  it("undo reverts an edit and redo reapplies it", async () => {
+    await apply("Studio");
+    await $(GRAPH).waitForExist({ timeout: 10000 });
+    const tok = () => $(".band .ts-btn .tok");
+    await browser.waitUntil(async () => (await (await tok()).getText()).trim() === "PK", {
+      timeout: 10000,
+      timeoutMsg: "Studio band did not load as PK",
+    });
+
+    const undoBtn = await $(".undo-btn");
+    const redoBtn = await $(".redo-btn");
+    expect(await undoBtn.isEnabled()).toBe(false);
+
+    await pickBandType(await $(".band"), "LSC");
+    // History records the edit after a short debounce, enabling undo.
+    await browser.waitUntil(async () => await undoBtn.isEnabled(), {
+      timeout: 5000,
+      timeoutMsg: "undo did not enable after an edit",
+    });
+
+    await undoBtn.click();
+    await browser.waitUntil(async () => (await (await tok()).getText()).trim() === "PK", {
+      timeout: 5000,
+      timeoutMsg: "undo did not revert the type change",
+    });
+
+    await browser.waitUntil(async () => await redoBtn.isEnabled(), {
+      timeout: 5000,
+      timeoutMsg: "redo did not enable after undo",
+    });
+    await redoBtn.click();
+    await browser.waitUntil(async () => (await (await tok()).getText()).trim() === "LSC", {
+      timeout: 5000,
+      timeoutMsg: "redo did not reapply the type change",
+    });
+  });
+
+  it("Auto Preamp disables the manual preamp slider", async () => {
+    await apply("BassBoost");
+    await $(GRAPH).waitForExist({ timeout: 10000 });
+    const slider = await $('.preamp input[type="range"]');
+    const auto = await $(".preamp .switch"); // the only switch in the preamp row
+
+    // Normalize to Auto-off first (the setting persists in localStorage).
+    if (!(await slider.isEnabled())) {
+      await auto.click();
+      await browser.waitUntil(async () => await slider.isEnabled(), { timeout: 5000 });
+    }
+    expect(await slider.isEnabled()).toBe(true);
+
+    await auto.click();
+    await browser.waitUntil(async () => !(await slider.isEnabled()), {
+      timeout: 5000,
+      timeoutMsg: "Auto Preamp did not disable the manual slider",
+    });
+
+    // Leave it off so a re-run starts from a known state.
+    await auto.click();
+    await browser.waitUntil(async () => await slider.isEnabled(), {
+      timeout: 5000,
+      timeoutMsg: "toggling Auto off did not re-enable the slider",
+    });
+  });
+});
