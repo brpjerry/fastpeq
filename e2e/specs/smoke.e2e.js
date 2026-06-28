@@ -250,10 +250,13 @@ describe("preset lifecycle: rename, delete, capture", () => {
     const row = await rowFor("RenameMe");
     await (await row.$('button[title="Rename"]')).click();
 
-    const input = await $(".rename-input");
-    await input.waitForExist({ timeout: 5000 });
-    await input.setValue("Renamed");
-    await browser.keys(["Enter"]);
+    await (await $(".rename-input")).waitForExist({ timeout: 5000 });
+    // The box auto-focuses and selects its text. Type into the focused element
+    // rather than setValue(): setValue()'s clear step blurs the box, and its
+    // onblur commits the (unchanged) name and unmounts it before keys land.
+    await browser.keys(["Control", "a"]); // select existing text
+    await browser.keys("Renamed"); // replace it
+    await browser.keys(["Enter"]); // commit
 
     await browser.waitUntil(
       async () => {

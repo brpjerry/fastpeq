@@ -23,14 +23,19 @@ categories before launch, and asserts against the `config.txt` the backend write
 ## Running locally (Windows)
 
 1. **tauri-driver**: `cargo install tauri-driver`
-2. **msedgedriver** matching the installed WebView2 runtime. Check the version:
+2. **msedgedriver** matching the installed WebView2 runtime. Check the version
+   (the runtime is separate from the Edge browser — read the runtime, not Edge):
    ```powershell
-   (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Edge\BLBeacon').version
+   (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}').pv
    ```
    Download `edgedriver_win64.zip` for that version from
    `https://msedgedriver.microsoft.com/<version>/edgedriver_win64.zip`, and place
    `msedgedriver.exe` at `e2e/drivers/` (or point `MSEDGEDRIVER` at it).
-3. **Build the app**: `npm run build && cargo build -p fastpeq`
+3. **Build the app**: `npx tauri build --debug --no-bundle`. This must be a
+   `tauri build` (it runs `npm run build` then embeds `dist/` into the debug
+   binary). A plain `cargo build` produces a debug binary that loads the frontend
+   from the dev server (`devUrl`, localhost:1420) instead, so the app shows
+   `ERR_CONNECTION_REFUSED` and every spec fails to find the UI.
 4. **Run**: `npm run e2e`
 
 ## CI
