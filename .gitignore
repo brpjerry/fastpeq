@@ -23,3 +23,7 @@ e2e/drivers/
 *.swp
 .DS_Store
 Thumbs.db
+
+# AI Rules
+.clinerules
+

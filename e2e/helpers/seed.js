@@ -44,3 +44,17 @@ export function readConfig() {
     return "";
   }
 }
+
+/** A saved preset file's body (empty string if it doesn't exist). */
+export function readPreset(name) {
+  try {
+    return fs.readFileSync(path.join(PRESETS_DIR, `${name}.txt`), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** Whether a preset file exists on disk. */
+export function presetExists(name) {
+  return fs.existsSync(path.join(PRESETS_DIR, `${name}.txt`));
+}

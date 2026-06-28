@@ -6,13 +6,13 @@
   import ResponseCurve from "./ResponseCurve.svelte";
   import CurveEditor from "./CurveEditor.svelte";
   import ToneGenerator from "./ToneGenerator.svelte";
-  import Switch from "./Switch.svelte";
   import GraphTools from "./GraphTools.svelte";
-  import BandRow from "./BandRow.svelte";
+  import { createHistory, type Snapshot } from "./history.svelte";
+  import PreampRow from "./PreampRow.svelte";
+  import FilterList from "./FilterList.svelte";
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, balanceFromTrim, toneFilters, peakGainDb, type CurveFilter } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
-  import { dismissable } from "./dismiss";
-  import { getFilterShapes } from "./prefs.svelte";
+    import { getFilterShapes } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
   import {
     getTargetId,
@@ -59,12 +59,9 @@
   let manualPreamp = $state(0);
   let balance = $state(0); // dB: <0 left louder, 0 centered, >0 right louder
   let hadPreamp = $state(false);
-  let showBalance = $state(false);
-  let chanBtn = $state<HTMLButtonElement | null>(null);
   let expanded = $state(false); // full-window graph + handle editing
   let view = $state<"both" | "left" | "right">("both"); // which channel list is shown
   let hoveredId = $state<number | null>(null); // graph handle under the cursor → row highlight
-  const BAL_MAX = 30; // balance range, dB of cut on the quieter side at full
   let rawLines = $state<string[]>([]); // preserved verbatim (comments, Device:, etc.)
   let err = $state("");
   let loading = $state(true);
@@ -216,17 +213,15 @@
   });
 
   // ── Undo / redo ────────────────────────────────────────────────────────────
-  // History of the editable state (bands + manualPreamp + balance). A burst of edits —
-  // e.g. a slider drag — coalesces into one entry once it settles, so a single
-  // undo steps back a whole gesture rather than one pixel of movement.
-  type Snapshot = { key: string; bands: Band[]; manualPreamp: number; balance: number };
-  let history = $state<Snapshot[]>([]);
-  let histIndex = $state(-1);
-  const HIST_MAX = 100;
-  const HIST_COALESCE = 400;
+  const hist = createHistory((s) => {
+    bands = s.bands.map((b) => ({ ...b }));
+    manualPreamp = s.manualPreamp;
+    balance = s.balance;
+    schedule();
+  }, () => comparing);
 
-  const canUndo = $derived(histIndex > 0);
-  const canRedo = $derived(histIndex < history.length - 1);
+  const canUndo = $derived(hist.canUndo);
+  const canRedo = $derived(hist.canRedo);
 
   function snapState(): Snapshot {
     return {
@@ -237,8 +232,7 @@
     };
   }
   function resetHistory() {
-    history = [snapState()];
-    histIndex = 0;
+    hist.reset(snapState());
   }
   function restoreSnap(s: Snapshot) {
     bands = s.bands.map((b) => ({ ...b })); // fresh copies so later edits don't touch history
@@ -247,16 +241,10 @@
     schedule();
   }
   function undo() {
-    if (comparing) return; // editing is locked while comparing
-    flushHistory(); // capture an in-flight edit so it's undoable right away
-    if (histIndex <= 0) return;
-    restoreSnap(history[--histIndex]);
+    hist.undo(snapState());
   }
   function redo() {
-    if (comparing) return;
-    flushHistory();
-    if (histIndex >= history.length - 1) return;
-    restoreSnap(history[++histIndex]);
+    hist.redo(snapState());
   }
 
   // Append the current state as a new history entry if it differs from the top —
@@ -265,11 +253,7 @@
   // Restoring sets state back to an existing entry whose key then matches, so
   // undo/redo never record themselves.
   function flushHistory() {
-    const snap = snapState();
-    if (history[histIndex]?.key === snap.key) return;
-    history = [...history.slice(0, histIndex + 1), snap];
-    if (history.length > HIST_MAX) history = history.slice(history.length - HIST_MAX);
-    histIndex = history.length - 1;
+    hist.flush(snapState());
   }
 
   // A burst of edits coalesces into one entry once it settles. JSON.stringify
@@ -277,7 +261,7 @@
   $effect(() => {
     JSON.stringify({ bands, manualPreamp, balance });
     if (loading) return;
-    const t = setTimeout(flushHistory, HIST_COALESCE);
+    const t = setTimeout(flushHistory, 400);
     return () => clearTimeout(t);
   });
 
@@ -437,37 +421,10 @@
     return c.kind === "both" || c.kind === "other"; // unmodeled specs ride along here
   }
   const shown = $derived(bands.filter((b) => inView(b.channel, view)));
-  const counts = $derived({
-    both: bands.filter((b) => inView(b.channel, "both")).length,
-    left: bands.filter((b) => b.channel.kind === "left").length,
-    right: bands.filter((b) => b.channel.kind === "right").length,
-  });
   function channelForView(v: "both" | "left" | "right"): Channel {
     if (v === "left") return { kind: "left" };
     if (v === "right") return { kind: "right" };
     return { kind: "both" };
-  }
-  function emptyMsg(v: "both" | "left" | "right"): string {
-    if (v === "left") return "No left-only filters yet.";
-    if (v === "right") return "No right-only filters yet.";
-    return "No filters yet — add a band to start shaping the curve.";
-  }
-
-  // Manual entry in dB: + = right louder, − = left louder.
-  function setBalanceDb(v: string) {
-    const db = Number(v);
-    if (!Number.isFinite(db)) return;
-    balance = Math.max(-BAL_MAX, Math.min(BAL_MAX, db));
-    schedule();
-  }
-  function centerBalance() {
-    balance = 0;
-    schedule();
-  }
-  function balanceLabel(b: number): string {
-    if (b === 0) return "Bal";
-    const v = Math.abs(b);
-    return (b > 0 ? "R" : "L") + (Number.isInteger(v) ? String(v) : v.toFixed(1));
   }
 
   function addBand() {
@@ -616,110 +573,8 @@
   </button>
 {/snippet}
 
-{#snippet preampRow()}
-  <div class="preamp">
-    <span class="plabel">Preamp</span>
-    <input
-      type="range"
-      min="-30"
-      max="6"
-      step="0.1"
-      value={livePreamp}
-      oninput={(e) => {
-        manualPreamp = Number(e.currentTarget.value);
-        schedule();
-      }}
-      disabled={autoPreamp}
-    />
-    <span class="pval">{livePreamp.toFixed(1)} dB</span>
-    <Switch
-      compact
-      label="Auto"
-      checked={autoPreamp}
-      onChange={(v) => {
-        autoPreamp = v;
-        if (!comparing) api.applyLive(buildConfig(false)).catch((e) => (err = String(e)));
-      }}
-      title="Automatically set the preamp so the EQ never clips"
-    />
-    <div class="balance-wrap">
-      <button
-        bind:this={chanBtn}
-        class="chan"
-        class:on={balance !== 0}
-        onclick={() => (showBalance = !showBalance)}
-        title="Channel balance">{balanceLabel(balance)}</button
-      >
-      {#if showBalance}
-        <div class="bal-pop" use:dismissable={{ onDismiss: () => (showBalance = false), ignore: chanBtn }}>
-          <div class="bal-slider">
-            <small>L</small>
-            <input
-              type="range"
-              min={-BAL_MAX}
-              max={BAL_MAX}
-              step="0.5"
-              bind:value={balance}
-              oninput={schedule}
-              oncontextmenu={centerBalance}
-              title="Right-click to reset to center"
-            />
-            <small>R</small>
-          </div>
-          <div class="bal-foot">
-            <label class="bal-input" title="Balance: + right louder, − left louder">
-              <input
-                type="number"
-                min={-BAL_MAX}
-                max={BAL_MAX}
-                step="0.5"
-                value={balance}
-                onchange={(e) => setBalanceDb(e.currentTarget.value)}
-              />
-              <small>dB</small>
-            </label>
-            <span class="bal-hint">+R&nbsp;/&nbsp;−L</span>
-            <button class="bal-center" onclick={centerBalance} disabled={balance === 0}>Center</button>
-          </div>
-        </div>
-      {/if}
-    </div>
-  </div>
-{/snippet}
 
-{#snippet bandsHead()}
-  <div class="bands-head">
-    <div class="seg view-seg" role="group" aria-label="Channel filter list">
-      <button class:sel={view === "both"} onclick={() => (view = "both")} title="Filters applied to both channels">
-        L+R{counts.both ? ` · ${counts.both}` : ""}
-      </button>
-      <button class:sel={view === "left"} onclick={() => (view = "left")} title="Left-channel-only filters">
-        L{counts.left ? ` · ${counts.left}` : ""}
-      </button>
-      <button class:sel={view === "right"} onclick={() => (view = "right")} title="Right-channel-only filters">
-        R{counts.right ? ` · ${counts.right}` : ""}
-      </button>
-    </div>
-  </div>
-{/snippet}
 
-{#snippet bandsBody()}
-  {#each bands as band, i (band.id)}
-    {#if inView(band.channel, view)}
-      <BandRow
-        bind:band={bands[i]}
-        hovered={band.id === hoveredId}
-        onChange={schedule}
-        onChangeKind={() => changeKind(band)}
-        onRemove={() => removeBand(band.id)}
-        onHover={(h) => (hoveredId = h ? band.id : null)}
-      />
-    {/if}
-  {/each}
-  {#if shown.length === 0}
-    <p class="none">{emptyMsg(view)}</p>
-  {/if}
-{/snippet}
 
 {#snippet bandActions()}
   <div class="band-actions">
@@ -761,12 +616,10 @@
       </button>
     </div>
 
-    {@render preampRow()}
+    <PreampRow bind:manualPreamp bind:autoPreamp bind:balance {livePreamp} onSchedule={schedule} onAutoPreampChange={(v) => { autoPreamp = v; schedule(); }} />
 
-    {@render bandsHead()}
-    <div class="bands">
-      {@render bandsBody()}
-    </div>
+    <FilterList bind:bands bind:view bind:hoveredId onSchedule={schedule} onChangeKind={changeKind} onRemoveBand={removeBand} />
+    
 
     {@render bandActions()}
   </section>
@@ -795,11 +648,16 @@
 
     <div class="overlay-body">
       <aside class="overlay-side">
-        {@render preampRow()}
-        {@render bandsHead()}
-        <div class="bands">
-          {@render bandsBody()}
-        </div>
+        <PreampRow bind:manualPreamp bind:autoPreamp bind:balance {livePreamp} onSchedule={schedule} onAutoPreampChange={(v) => { autoPreamp = v; schedule(); }} />
+        <FilterList
+          bind:bands
+          bind:view
+          bind:hoveredId
+          onSchedule={schedule}
+          onChangeKind={changeKind}
+          onRemoveBand={removeBand}
+        />
+        
         {@render bandActions()}
       </aside>
       <div class="overlay-graph">
@@ -874,8 +732,8 @@
   }
   /* While comparing, the EQ controls are locked (dimmed, non-interactive) and
      the graph handles can't be dragged — only the live output is swapped. */
-  .panel.comparing .preamp,
-  .panel.comparing .bands,
+  .panel.comparing :global(.preamp),
+  .panel.comparing :global(.bands),
   .panel.comparing .band-actions,
   .overlay.comparing .overlay-side {
     opacity: 0.5;
@@ -985,148 +843,7 @@
     place-items: center;
   }
 
-  .preamp {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin: 8px 0 6px;
-  }
-  .preamp input[type="range"] {
-    flex: 1;
-  }
-  .plabel {
-    color: var(--muted);
-    width: 54px;
-    font-size: 12px;
-  }
-  .pval {
-    width: 60px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    font-size: 12px;
-  }
 
-  .chan {
-    flex: none;
-    min-width: 36px;
-    padding: 2px 5px;
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    border-radius: 6px;
-  }
-  .chan.on {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  /* Balance popover anchored under the preamp's balance button. */
-  .balance-wrap {
-    position: relative;
-    flex: none;
-  }
-  .bal-pop {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 6px);
-    z-index: 51;
-    width: 232px;
-    padding: 10px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  }
-  .bal-slider {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .bal-slider input[type="range"] {
-    flex: 1;
-  }
-  .bal-slider small {
-    color: var(--muted);
-    font-size: 11px;
-    width: 10px;
-    text-align: center;
-  }
-  .bal-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 8px;
-  }
-  .bal-input {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    color: var(--muted);
-    font-size: 11px;
-  }
-  .bal-input input {
-    width: 48px;
-    padding: 2px 5px;
-    font-size: 12px;
-  }
-  .bal-hint {
-    font-size: 11px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-  .bal-center {
-    padding: 2px 8px;
-    font-size: 11px;
-  }
-
-  /* Channel-list toggle above the band list. */
-  .bands-head {
-    display: flex;
-    align-items: center;
-    margin-bottom: 6px;
-  }
-  .view-seg {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    overflow: hidden;
-  }
-  .view-seg button {
-    border: none;
-    border-right: 1px solid var(--border);
-    border-radius: 0;
-    background: transparent;
-    padding: 4px 12px;
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    color: var(--muted);
-  }
-  .view-seg button:last-child {
-    border-right: none;
-  }
-  .view-seg button:hover:not(.sel) {
-    background: var(--panel-2);
-    color: var(--text);
-  }
-  .view-seg button.sel {
-    background: var(--accent);
-    color: #fff;
-  }
-
-  /* Dense, table-like list: one bordered container, thin row separators, and an
-     internal scroll so the curve and controls stay put. */
-  .bands {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-  }
-  .none {
-    color: var(--muted);
-    padding: 12px 6px;
-  }
   .band-actions {
     display: flex;
     gap: 8px;
@@ -1138,10 +855,4 @@
 
   /* In the stacked layout the page scrolls, so the list shows all bands
      instead of opening a second internal scrollbar. */
-  @media (max-width: 820px) {
-    .bands {
-      flex: none;
-      overflow: visible;
-    }
-  }
 </style>
