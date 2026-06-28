@@ -16,7 +16,7 @@
     setTargetOffset,
     getTargetAlignFreq,
     setTargetAlignFreq,
-  } from "./presetView.svelte";
+  } from "./preset-view.svelte";
   import Switch from "./Switch.svelte";
   import SelectMenu from "./SelectMenu.svelte";
   import type { MeasPoint } from "./measurement";

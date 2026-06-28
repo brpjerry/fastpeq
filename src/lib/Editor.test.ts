@@ -15,7 +15,7 @@ import {
   setCompensate,
   getShowMeasRef,
   getTargetOffset,
-} from "./presetView.svelte";
+} from "./preset-view.svelte";
 import Editor from "./Editor.svelte";
 
 // The Editor only touches these four IPC calls; an explicit mock is clearer than

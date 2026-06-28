@@ -39,38 +39,38 @@ function initial(): Hotkey[] {
   return seed;
 }
 
-let list = $state<Hotkey[]>(initial());
+let hotkeys = $state<Hotkey[]>(initial());
 
 export function getHotkeys(): Hotkey[] {
-  return list;
+  return hotkeys;
 }
 
 /** Append a blank binding (user fills in the key + principal); returns its id. */
 export function addHotkey(): string {
   const h: Hotkey = { id: freshId(), mod: "ctrl-alt", key: "", action: "preset" };
-  list = [...list, h];
-  saveJson(KEY, list);
+  hotkeys = [...hotkeys, h];
+  saveJson(KEY, hotkeys);
   return h.id;
 }
 
 export function updateHotkey(id: string, patch: Partial<Hotkey>): void {
-  list = list.map((h) => (h.id === id ? { ...h, ...patch } : h));
-  saveJson(KEY, list);
+  hotkeys = hotkeys.map((h) => (h.id === id ? { ...h, ...patch } : h));
+  saveJson(KEY, hotkeys);
 }
 
 export function removeHotkey(id: string): void {
-  list = list.filter((h) => h.id !== id);
-  saveJson(KEY, list);
+  hotkeys = hotkeys.filter((h) => h.id !== id);
+  saveJson(KEY, hotkeys);
 }
 
 /** Reorder: move the entry at `from` to index `to`. No-op for out-of-range. */
 export function moveHotkey(from: number, to: number): void {
-  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return;
-  const next = [...list];
+  if (from === to || from < 0 || to < 0 || from >= hotkeys.length || to >= hotkeys.length) return;
+  const next = [...hotkeys];
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
-  list = next;
-  saveJson(KEY, list);
+  hotkeys = next;
+  saveJson(KEY, hotkeys);
 }
 
 /** A valid hotkey key is exactly one uppercase letter or digit. */
@@ -95,7 +95,7 @@ export function accelerator(h: Hotkey): string | null {
 export function accelerators(): { id: string; accelerator: string }[] {
   const seen = new Set<string>();
   const out: { id: string; accelerator: string }[] = [];
-  for (const h of list) {
+  for (const h of hotkeys) {
     const acc = accelerator(h);
     if (!acc || seen.has(acc)) continue;
     seen.add(acc);

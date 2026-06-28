@@ -26,7 +26,7 @@
     getTargetOffset,
     setTargetOffset,
     getTargetAlignFreq,
-  } from "./presetView.svelte";
+  } from "./preset-view.svelte";
   import { alignOffset } from "./curve";
   import { getToneHeadroom } from "./prefs.svelte";
 
