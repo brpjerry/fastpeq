@@ -49,33 +49,58 @@ impl Config {
         })
     }
 
-    /// Returns true if this config is functionally equivalent to `other`,
-    /// ignoring differences in line ordering and overall `Preamp` (Both) gain.
-    /// This allows a live config modified by `autoPreamp` (and reordered by the UI)
-    /// to still match its source preset.
+    /// Whether `self` would drive Equalizer APO to the same processing as
+    /// `other` once the *master* `Preamp:` (the `Both` channel) is set aside.
+    ///
+    /// Specifically: the modeled `Filter:` lines must match in document order,
+    /// the one-sided preamp *trims* (balance) must match, and the unmodeled
+    /// [`Line::Raw`] lines must match as a set (order-independent). The master
+    /// preamp is ignored entirely — both its value and its presence.
+    ///
+    /// This exists so a preset still reads as "active" after Auto Preamp has
+    /// recomputed the master gain on the live config (which may *add* a preamp
+    /// to a preset that had none), and after the editor has rewritten the line
+    /// order. Because it deliberately ignores the master preamp, two configs
+    /// that differ *only* by that gain cannot be told apart — that ambiguity is
+    /// inherent once Auto Preamp overwrites the field, so callers must try exact
+    /// equality first and fall back to this only on a miss.
     pub fn is_equivalent(&self, other: &Config) -> bool {
-        let f1: Vec<_> = self.filters().collect();
-        let f2: Vec<_> = other.filters().collect();
-        if f1 != f2 {
+        // Modeled filters, in document order. (Order is audibly neutral for APO,
+        // but the editor preserves it, so we keep the comparison strict.)
+        if self.filters().ne(other.filters()) {
             return false;
         }
 
-        let is_bal = |l: &&Line| matches!(l, Line::Preamp { channel: Channel::Left | Channel::Right | Channel::Other(_), .. });
-        let bal1: Vec<_> = self.lines.iter().filter(is_bal).collect();
-        let bal2: Vec<_> = other.lines.iter().filter(is_bal).collect();
-        if bal1 != bal2 {
-            return false;
-        }
-        
-        let mut r1: Vec<_> = self.lines.iter().filter_map(|l| match l { Line::Raw(s) => Some(s), _ => None }).collect();
-        let mut r2: Vec<_> = other.lines.iter().filter_map(|l| match l { Line::Raw(s) => Some(s), _ => None }).collect();
-        r1.sort();
-        r2.sort();
-        if r1 != r2 {
+        // One-sided preamps are balance trims, not the master gain — keep them.
+        let is_trim = |l: &&Line| {
+            matches!(
+                l,
+                Line::Preamp {
+                    channel: Channel::Left | Channel::Right | Channel::Other(_),
+                    ..
+                }
+            )
+        };
+        let trims_self: Vec<_> = self.lines.iter().filter(is_trim).collect();
+        let trims_other: Vec<_> = other.lines.iter().filter(is_trim).collect();
+        if trims_self != trims_other {
             return false;
         }
 
-        true
+        // Unmodeled lines (comments, Device:, Include:, …) as an order-free set.
+        let mut raw_self: Vec<_> = self.raw_lines().collect();
+        let mut raw_other: Vec<_> = other.raw_lines().collect();
+        raw_self.sort();
+        raw_other.sort();
+        raw_self == raw_other
+    }
+
+    /// Iterate over the unmodeled [`Line::Raw`] payloads.
+    fn raw_lines(&self) -> impl Iterator<Item = &String> {
+        self.lines.iter().filter_map(|l| match l {
+            Line::Raw(s) => Some(s),
+            _ => None,
+        })
     }
 }
 
@@ -266,5 +291,89 @@ mod tests {
         // And it survives a JSON round-trip unchanged.
         let back: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(back, config);
+    }
+
+    fn both_preamp(gain: f64) -> Line {
+        Line::Preamp {
+            gain,
+            channel: Channel::Both,
+        }
+    }
+
+    #[test]
+    fn is_equivalent_ignores_master_preamp() {
+        // Same filters, different master gain (the Auto Preamp case).
+        let a = Config {
+            lines: vec![
+                both_preamp(-6.0),
+                Line::Filter(Filter::peak(1000.0, 3.0, 1.0)),
+            ],
+        };
+        let b = Config {
+            lines: vec![
+                both_preamp(-2.0),
+                Line::Filter(Filter::peak(1000.0, 3.0, 1.0)),
+            ],
+        };
+        assert!(a.is_equivalent(&b));
+        assert_ne!(a, b); // ...but they are NOT exactly equal.
+
+        // Auto Preamp may *add* a master preamp the source preset lacked.
+        let no_preamp = Config {
+            lines: vec![Line::Filter(Filter::peak(1000.0, 3.0, 1.0))],
+        };
+        assert!(no_preamp.is_equivalent(&a));
+    }
+
+    #[test]
+    fn is_equivalent_ignores_raw_line_order_but_not_content() {
+        let a = Config {
+            lines: vec![
+                Line::Raw("Device: Speakers".into()),
+                Line::Raw("# comment".into()),
+                Line::Filter(Filter::peak(1000.0, 3.0, 1.0)),
+            ],
+        };
+        let reordered = Config {
+            lines: vec![
+                Line::Raw("# comment".into()),
+                Line::Filter(Filter::peak(1000.0, 3.0, 1.0)),
+                Line::Raw("Device: Speakers".into()),
+            ],
+        };
+        assert!(a.is_equivalent(&reordered));
+
+        let different_raw = Config {
+            lines: vec![
+                Line::Raw("Device: Headphones".into()),
+                Line::Filter(Filter::peak(1000.0, 3.0, 1.0)),
+            ],
+        };
+        assert!(!a.is_equivalent(&different_raw));
+    }
+
+    #[test]
+    fn is_equivalent_distinguishes_filters_and_balance_trims() {
+        let base = Config {
+            lines: vec![Line::Filter(Filter::peak(1000.0, 3.0, 1.0))],
+        };
+
+        // A differing filter is not equivalent.
+        let other_filter = Config {
+            lines: vec![Line::Filter(Filter::peak(2000.0, 3.0, 1.0))],
+        };
+        assert!(!base.is_equivalent(&other_filter));
+
+        // A one-sided preamp (balance trim) is significant, unlike the master.
+        let with_trim = Config {
+            lines: vec![
+                Line::Preamp {
+                    gain: -2.0,
+                    channel: Channel::Left,
+                },
+                Line::Filter(Filter::peak(1000.0, 3.0, 1.0)),
+            ],
+        };
+        assert!(!base.is_equivalent(&with_trim));
     }
 }

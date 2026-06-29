@@ -40,7 +40,7 @@
   <div
     class="fmenu {extraClass}"
     {role}
-    style="left:{anchor.left}px; {anchor.top !== undefined ? `top:${anchor.top}px;` : ''} {anchor.bottom !== undefined ? `bottom:${anchor.bottom}px;` : ''} min-width:{anchor.minWidth ?? 0}px; z-index:{zIndex}; max-height:{anchor.maxHeight !== undefined ? `${anchor.maxHeight}px` : maxHeight}"
+    style="left:{anchor.left}px; {anchor.top !== undefined ? `top:${anchor.top}px;` : ''} {anchor.bottom !== undefined ? `bottom:${anchor.bottom}px;` : ''} min-width:{anchor.minWidth ?? 0}px; z-index:{zIndex}; max-height:{anchor.maxHeight !== undefined ? `min(${maxHeight}, ${anchor.maxHeight}px)` : maxHeight}"
     use:dismissable={{ onDismiss, ignore }}
   >
     {@render children()}

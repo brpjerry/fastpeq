@@ -215,22 +215,27 @@ impl Manager {
             return Ok(None);
         }
 
-        let presets = self.store.list()?;
-        
-        // First, check for an exact match
-        for name in &presets {
-            if self.store.load(name)? == live {
-                return Ok(Some(name.clone()));
-            }
+        // Load every preset once; the two passes below both scan this set.
+        let presets: Vec<(String, Config)> = self
+            .store
+            .list()?
+            .into_iter()
+            .map(|name| self.store.load(&name).map(|config| (name, config)))
+            .collect::<io::Result<_>>()?;
+
+        // Prefer an exact match.
+        if let Some((name, _)) = presets.iter().find(|(_, config)| *config == live) {
+            return Ok(Some(name.clone()));
         }
-        
-        // Fallback: check for an equivalent match (ignoring Preamp gain and line order)
-        // This keeps the active preset match intact even if Auto Preamp dynamically
-        // tweaked the live config's preamp, or the UI reordered the lines.
-        for name in &presets {
-            if self.store.load(name)?.is_equivalent(&live) {
-                return Ok(Some(name.clone()));
-            }
+
+        // Fall back to an equivalent match: Auto Preamp may have rewritten the
+        // live master gain, or the editor reordered lines, without changing the
+        // EQ. (Exact wins first, so this only fires on a genuine miss.)
+        if let Some((name, _)) = presets
+            .iter()
+            .find(|(_, config)| config.is_equivalent(&live))
+        {
+            return Ok(Some(name.clone()));
         }
 
         Ok(None)
