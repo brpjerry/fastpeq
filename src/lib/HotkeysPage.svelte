@@ -3,7 +3,7 @@
   // a "New" button. Reads/writes the hotkeys store directly; App passes the preset
   // names (for the "switch preset" principal) and the ids that failed to register.
   import { onDestroy } from "svelte";
-  import { getHotkeys, addHotkey, updateHotkey, removeHotkey, moveHotkey } from "./hotkeys.svelte";
+  import { getHotkeys, addHotkey, updateHotkey, removeHotkey, moveHotkey, duplicateIds } from "./hotkeys.svelte";
   import HotkeyRow from "./HotkeyRow.svelte";
   import type { AudioDevice } from "./api";
 
@@ -23,6 +23,10 @@
   // crosses each row's midpoint. (Native HTML5 DnD is unreliable inside WebView2.)
   let listEl = $state<HTMLUListElement | null>(null);
   let dragId = $state<string | null>(null);
+
+  // Combos shadowed by an earlier row (registration keeps the first); flagged so
+  // the silently-dead row is visible rather than just not firing.
+  const dups = $derived(duplicateIds());
 
   function onDragStart(index: number, e: PointerEvent) {
     e.preventDefault();
@@ -61,7 +65,8 @@
     <p class="hint">
       Global shortcuts that work anywhere in Windows, even when fastpeq is minimized.
       Each is a modifier plus a single key — Ctrl+Alt and Ctrl+Shift are the safest
-      choices. A combo already used by another app shows a ⚠ and won't fire.
+      choices. A ⚠ means the combo won't fire — either it's already used by another
+      app, or it repeats one set above (only the first of a repeated combo fires).
     </p>
 
     {#if getHotkeys().length}
@@ -74,6 +79,7 @@
             {categories}
             {devices}
             failed={failedIds.includes(h.id)}
+            duplicate={dups.has(h.id)}
             dragging={h.id === dragId}
             onUpdate={(patch) => updateHotkey(h.id, patch)}
             onRemove={() => removeHotkey(h.id)}

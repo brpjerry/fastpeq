@@ -15,6 +15,7 @@
     categories,
     devices = [],
     failed = false,
+    duplicate = false,
     dragging = false,
     onUpdate,
     onRemove,
@@ -26,6 +27,7 @@
     categories: Record<string, string>;
     devices?: AudioDevice[];
     failed?: boolean;
+    duplicate?: boolean;
     dragging?: boolean;
     onUpdate: (patch: Partial<Hotkey>) => void;
     onRemove: () => void;
@@ -78,7 +80,7 @@
   }
 </script>
 
-<li class="hk-row" class:failed class:dragging>
+<li class="hk-row" class:failed class:duplicate class:dragging>
   <span
     class="drag"
     role="button"
@@ -154,6 +156,8 @@
   <span class="hk-tail">
     {#if failed}
       <span class="warn" title="This combo couldn't be registered — it may already be in use by another app.">⚠</span>
+    {:else if duplicate}
+      <span class="warn" title="This combo duplicates another hotkey above — only the first one fires. Change the key or modifier.">⚠</span>
     {/if}
     <button class="danger icon hk-remove" onclick={onRemove} title="Remove hotkey" aria-label="Remove hotkey">
       &#10005;
@@ -170,7 +174,8 @@
     border: 1px solid var(--border);
     border-radius: 8px;
   }
-  .hk-row.failed {
+  .hk-row.failed,
+  .hk-row.duplicate {
     border-color: var(--danger);
   }
   .hk-row.dragging {

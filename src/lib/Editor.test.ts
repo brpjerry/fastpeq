@@ -393,6 +393,47 @@ describe("Editor", () => {
     await waitFor(() => expect(parseFloat(container.querySelector(".pval")!.textContent!)).toBeLessThan(0));
   });
 
+  it("re-applies the auto preamp to config.txt when the global tone overlay changes", async () => {
+    // Auto on with flat tone → preamp sits at 0; a louder tone arriving from the
+    // global controls (a prop change, not an editor edit) must push a fresh config
+    // so config.txt's preamp tracks it instead of going stale until the next edit.
+    localStorage.setItem("fastpeq:autoPreamp", "false"); // start from a known state, then toggle on
+    const props = { name: "Test", bypassed: false, reloadToken: 0, onApplied: vi.fn() };
+    const { container, rerender } = renderEditor(cfg(0, [[1000, 0, 1]]), { ...props, tone: FLAT_TONE });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    const auto = [...container.querySelectorAll(".switch")].find((l) => l.textContent!.includes("Auto"))!;
+    const cb = auto.querySelector<HTMLInputElement>("input[type='checkbox']")!;
+    cb.checked = true;
+    await fireEvent.change(cb);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    vi.mocked(api.applyLive).mockClear();
+
+    await rerender({ ...props, tone: { bass: 8, mid: 0, treble: 0, invert: false, swap: false } });
+
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const lastCfg = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    const preamp = lastCfg.lines.find(
+      (l) => l.kind === "Preamp" && l.value.channel.kind === "both",
+    );
+    expect(preamp).toBeTruthy();
+    expect((preamp!.value as { gain: number }).gain).toBeLessThan(0);
+  });
+
+  it("does not re-apply on tone changes while Auto Preamp is off", async () => {
+    localStorage.setItem("fastpeq:autoPreamp", "false"); // the persisted switch can leak between tests
+    const props = { name: "Test", bypassed: false, reloadToken: 0, onApplied: vi.fn() };
+    const { container, rerender } = renderEditor(cfg(-10, [[1000, 0, 1]]), { ...props, tone: FLAT_TONE });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    vi.mocked(api.applyLive).mockClear();
+
+    await rerender({ ...props, tone: { bass: 8, mid: 0, treble: 0, invert: false, swap: false } });
+    await tick();
+
+    // Manual preamp is static; the backend re-lays tone itself, so the editor stays out of it.
+    expect(api.applyLive).not.toHaveBeenCalled();
+  });
+
   it("A/B compares the working edit against the saved version", async () => {
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));
