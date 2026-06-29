@@ -25,7 +25,7 @@
     children,
   }: {
     open: boolean;
-    anchor: Anchor | { left: number; top: number; minWidth?: number } | null;
+    anchor: Anchor | { left: number; top?: number; bottom?: number; minWidth?: number; maxHeight?: number } | null;
     onDismiss: () => void;
     ignore?: HTMLElement | null;
     zIndex?: number;
@@ -40,7 +40,7 @@
   <div
     class="fmenu {extraClass}"
     {role}
-    style="left:{anchor.left}px; top:{anchor.top}px; min-width:{anchor.minWidth ?? 0}px; z-index:{zIndex}; max-height:{maxHeight}"
+    style="left:{anchor.left}px; {anchor.top !== undefined ? `top:${anchor.top}px;` : ''} {anchor.bottom !== undefined ? `bottom:${anchor.bottom}px;` : ''} min-width:{anchor.minWidth ?? 0}px; z-index:{zIndex}; max-height:{anchor.maxHeight !== undefined ? `${anchor.maxHeight}px` : maxHeight}"
     use:dismissable={{ onDismiss, ignore }}
   >
     {@render children()}

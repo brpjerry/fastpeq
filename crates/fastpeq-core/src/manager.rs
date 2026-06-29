@@ -214,11 +214,25 @@ impl Manager {
         if live.preamp().is_none() && live.filters().next().is_none() {
             return Ok(None);
         }
-        for name in self.store.list()? {
-            if self.store.load(&name)? == live {
-                return Ok(Some(name));
+
+        let presets = self.store.list()?;
+        
+        // First, check for an exact match
+        for name in &presets {
+            if self.store.load(name)? == live {
+                return Ok(Some(name.clone()));
             }
         }
+        
+        // Fallback: check for an equivalent match (ignoring Preamp gain and line order)
+        // This keeps the active preset match intact even if Auto Preamp dynamically
+        // tweaked the live config's preamp, or the UI reordered the lines.
+        for name in &presets {
+            if self.store.load(name)?.is_equivalent(&live) {
+                return Ok(Some(name.clone()));
+            }
+        }
+
         Ok(None)
     }
 

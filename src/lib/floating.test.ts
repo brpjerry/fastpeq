@@ -2,19 +2,30 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { anchorBelow } from "./floating";
 
-const elWith = (rect: { left: number; bottom: number; width: number }) =>
-  ({ getBoundingClientRect: () => rect }) as unknown as HTMLElement;
+const elWith = (rect: { left: number; top?: number; bottom: number; width: number }) =>
+  ({ getBoundingClientRect: () => ({ top: rect.bottom - 20, ...rect }) }) as unknown as HTMLElement;
 
 describe("anchorBelow", () => {
   beforeEach(() => {
     window.innerWidth = 1000;
+    window.innerHeight = 1000;
   });
 
-  it("places the menu flush under the trigger", () => {
+  it("places the menu flush under the trigger when in top 80%", () => {
     expect(anchorBelow(elWith({ left: 100, bottom: 50, width: 80 }))).toEqual({
       left: 100,
       top: 54,
       minWidth: 80,
+      maxHeight: 938,
+    });
+  });
+
+  it("places the menu flush above the trigger when in bottom 20%", () => {
+    expect(anchorBelow(elWith({ left: 100, bottom: 900, width: 80 }))).toEqual({
+      left: 100,
+      bottom: 124, // 1000 - 880 + 4
+      minWidth: 80,
+      maxHeight: 868, // 880 - 12
     });
   });
 

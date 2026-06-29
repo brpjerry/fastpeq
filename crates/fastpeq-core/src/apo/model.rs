@@ -48,6 +48,35 @@ impl Config {
             _ => None,
         })
     }
+
+    /// Returns true if this config is functionally equivalent to `other`,
+    /// ignoring differences in line ordering and overall `Preamp` (Both) gain.
+    /// This allows a live config modified by `autoPreamp` (and reordered by the UI)
+    /// to still match its source preset.
+    pub fn is_equivalent(&self, other: &Config) -> bool {
+        let f1: Vec<_> = self.filters().collect();
+        let f2: Vec<_> = other.filters().collect();
+        if f1 != f2 {
+            return false;
+        }
+
+        let is_bal = |l: &&Line| matches!(l, Line::Preamp { channel: Channel::Left | Channel::Right | Channel::Other(_), .. });
+        let bal1: Vec<_> = self.lines.iter().filter(is_bal).collect();
+        let bal2: Vec<_> = other.lines.iter().filter(is_bal).collect();
+        if bal1 != bal2 {
+            return false;
+        }
+        
+        let mut r1: Vec<_> = self.lines.iter().filter_map(|l| match l { Line::Raw(s) => Some(s), _ => None }).collect();
+        let mut r2: Vec<_> = other.lines.iter().filter_map(|l| match l { Line::Raw(s) => Some(s), _ => None }).collect();
+        r1.sort();
+        r2.sort();
+        if r1 != r2 {
+            return false;
+        }
+
+        true
+    }
 }
 
 /// A single line of an APO configuration.
