@@ -103,3 +103,22 @@ export function accelerators(): { id: string; accelerator: string }[] {
   }
   return out;
 }
+
+/**
+ * Ids of bindings whose combo is already claimed by an *earlier* binding —
+ * exactly the ones `accelerators()` drops. These never reach the backend (so
+ * they're never in the failed-registration list either), and silently do
+ * nothing; the Hotkeys page flags them so the dead row is visible. Invalid keys
+ * are ignored here (the key input flags those on its own).
+ */
+export function duplicateIds(): Set<string> {
+  const seen = new Set<string>();
+  const dups = new Set<string>();
+  for (const h of hotkeys) {
+    const acc = accelerator(h);
+    if (!acc) continue;
+    if (seen.has(acc)) dups.add(h.id);
+    else seen.add(acc);
+  }
+  return dups;
+}

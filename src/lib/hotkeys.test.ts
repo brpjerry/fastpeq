@@ -9,6 +9,7 @@ import {
   validKey,
   accelerator,
   accelerators,
+  duplicateIds,
   type Hotkey,
 } from "./hotkeys.svelte";
 
@@ -76,6 +77,25 @@ describe("hotkeys store", () => {
 
     const accs = accelerators();
     expect(accs).toEqual([{ id: a, accelerator: "Ctrl+Alt+1" }]);
+    clearAll();
+  });
+
+  it("flags later bindings that shadow an earlier combo, ignoring invalid keys", () => {
+    clearAll();
+    const a = addHotkey();
+    const b = addHotkey();
+    const c = addHotkey();
+    const d = addHotkey();
+    updateHotkey(a, { mod: "ctrl-alt", key: "F" });
+    updateHotkey(b, { mod: "ctrl-alt", key: "F" }); // duplicate of a → flagged
+    updateHotkey(c, { mod: "ctrl-shift", key: "F" }); // different modifier → fine
+    updateHotkey(d, { mod: "ctrl-alt", key: "" }); // invalid key → not a duplicate
+
+    const dups = duplicateIds();
+    expect([...dups]).toEqual([b]); // only the later, shadowed binding
+    expect(dups.has(a)).toBe(false);
+    expect(dups.has(c)).toBe(false);
+    expect(dups.has(d)).toBe(false);
     clearAll();
   });
 });

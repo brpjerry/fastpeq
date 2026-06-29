@@ -106,4 +106,10 @@ describe("HotkeyRow", () => {
     expect(container.querySelector(".warn")).not.toBeNull();
     expect(container.querySelector(".hk-row")!.classList.contains("failed")).toBe(true);
   });
+
+  it("flags a duplicate combo with its own warning", () => {
+    const { container } = renderRow(base(), [], {}, { duplicate: true });
+    expect(container.querySelector(".hk-row")!.classList.contains("duplicate")).toBe(true);
+    expect(container.querySelector(".warn")!.getAttribute("title")).toContain("duplicates another hotkey");
+  });
 });
