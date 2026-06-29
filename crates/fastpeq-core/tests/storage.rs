@@ -1,7 +1,9 @@
 //! Integration tests for the preset store, atomic writer, and manager flow.
 
 use fastpeq_core::apo::env::ApoInstall;
-use fastpeq_core::{Channel, Config, Filter, FilterKind, Line, Manager, PresetStore, Tone};
+use fastpeq_core::{
+    Channel, Config, Filter, FilterKind, Line, Manager, PresetStore, Tone, provenance, serialize,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -206,8 +208,8 @@ fn active_preset_survives_auto_preamp_gain_change() {
     assert_eq!(manager.active_preset().unwrap(), Some("Bass".to_string()));
 
     // Simulate Auto Preamp recomputing the master gain: same filters, a
-    // different `Both` preamp. There is no exact match anymore, but the
-    // equivalence fallback must still recognise the source preset.
+    // different `Both` preamp. There is no exact match anymore, but the stamp
+    // (carried through `apply_config`) still resolves to the source preset.
     let mut retuned = sample_config();
     for line in &mut retuned.lines {
         if let Line::Preamp {
@@ -228,6 +230,118 @@ fn active_preset_survives_auto_preamp_gain_change() {
         .lines
         .push(Line::Filter(Filter::peak(120.0, 5.0, 0.7)));
     manager.apply_config(&different, &Tone::default()).unwrap();
+    assert_eq!(manager.active_preset().unwrap(), None);
+}
+
+#[test]
+fn provenance_stamp_disambiguates_equivalent_presets() {
+    let apo_dir = TempDir::new("prov-apo");
+    let presets_dir = TempDir::new("prov-presets");
+    let install = ApoInstall {
+        config_path: apo_dir.path().to_path_buf(),
+    };
+    let backup = apo_dir.path().join("config.backup.txt");
+    let manager = Manager::new(install, PresetStore::new(presets_dir.path()), backup);
+
+    // Two presets with identical filters that differ ONLY by master preamp, so
+    // they are equivalent to each other — and to any auto-preamped live config.
+    let band = Filter::peak(1000.0, 3.0, 1.0);
+    let soft = Config {
+        lines: vec![
+            Line::Preamp {
+                gain: -6.0,
+                channel: Channel::Both,
+            },
+            Line::Filter(band.clone()),
+        ],
+    };
+    let loud = Config {
+        lines: vec![
+            Line::Preamp {
+                gain: -1.0,
+                channel: Channel::Both,
+            },
+            Line::Filter(band),
+        ],
+    };
+    assert!(soft.is_equivalent(&loud)); // genuinely ambiguous by content alone
+    manager.save_preset("Loud", &loud).unwrap(); // sorts before "Soft"
+    manager.save_preset("Soft", &soft).unwrap();
+
+    // Apply Soft, then let Auto Preamp rewrite the master gain so it matches
+    // NEITHER preset exactly. The stamp keeps it pinned to the applied preset.
+    manager.apply_preset("Soft", &Tone::default()).unwrap();
+    let mut retuned = soft.clone();
+    for line in &mut retuned.lines {
+        if let Line::Preamp {
+            gain,
+            channel: Channel::Both,
+        } = line
+        {
+            *gain = -9.5;
+        }
+    }
+    manager.apply_config(&retuned, &Tone::default()).unwrap();
+    assert_eq!(manager.active_preset().unwrap(), Some("Soft".to_string()));
+
+    // Contrast: the same EQ written *without* a stamp (as another tool would
+    // leave it) is not detected at all. Provenance is required — we no longer
+    // guess by content, so the "Loud" vs "Soft" ambiguity simply isn't entered.
+    std::fs::write(manager.install().config_file(), serialize(&retuned)).unwrap();
+    assert_eq!(manager.active_preset().unwrap(), None);
+}
+
+#[test]
+fn saved_presets_never_carry_the_provenance_stamp() {
+    let apo_dir = TempDir::new("prov-save-apo");
+    let presets_dir = TempDir::new("prov-save-presets");
+    let install = ApoInstall {
+        config_path: apo_dir.path().to_path_buf(),
+    };
+    let backup = apo_dir.path().join("config.backup.txt");
+    let manager = Manager::new(install, PresetStore::new(presets_dir.path()), backup);
+
+    manager.save_preset("Bass", &sample_config()).unwrap();
+    manager.apply_preset("Bass", &Tone::default()).unwrap();
+    // The live config IS stamped...
+    assert_eq!(
+        provenance::name(&manager.current_config().unwrap()).as_deref(),
+        Some("Bass")
+    );
+
+    // ...but capturing it back into a preset must strip the stamp, even though
+    // the captured EQ stays equivalent to its source.
+    manager.capture_current("Copy").unwrap();
+    let copy = manager.load_preset("Copy").unwrap();
+    assert_eq!(provenance::name(&copy), None);
+    assert!(copy.is_equivalent(&sample_config()));
+    // Belt-and-suspenders: no marker comment survives in the file text.
+    let text = std::fs::read_to_string(presets_dir.path().join("Copy.txt")).unwrap();
+    assert!(!text.contains("fastpeq:preset"), "{text}");
+}
+
+#[test]
+fn stale_stamp_for_deleted_preset_is_not_active() {
+    let apo_dir = TempDir::new("prov-stale-apo");
+    let presets_dir = TempDir::new("prov-stale-presets");
+    let install = ApoInstall {
+        config_path: apo_dir.path().to_path_buf(),
+    };
+    let backup = apo_dir.path().join("config.backup.txt");
+    let manager = Manager::new(install, PresetStore::new(presets_dir.path()), backup);
+
+    manager.save_preset("Bass", &sample_config()).unwrap();
+    manager.apply_preset("Bass", &Tone::default()).unwrap();
+
+    // Delete the stamped preset: the live config still names "Bass", but its
+    // file is gone. The dangling stamp must resolve to nothing (and not panic on
+    // the missing-file load path).
+    manager.delete_preset("Bass").unwrap();
+    assert_eq!(manager.active_preset().unwrap(), None);
+
+    // Even an equivalent preset saved under a new name stays undetected: there
+    // is no content scan, so only a matching *stamp* makes a preset active.
+    manager.save_preset("Rescue", &sample_config()).unwrap();
     assert_eq!(manager.active_preset().unwrap(), None);
 }
 

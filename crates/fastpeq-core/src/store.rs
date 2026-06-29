@@ -66,7 +66,10 @@ impl PresetStore {
 
     pub fn save(&self, name: &str, config: &Config) -> io::Result<()> {
         self.ensure_dir()?;
-        write_config_atomic(&self.path_for(name)?, config)
+        // A preset file is pure EQ: never carry the live config's provenance
+        // stamp into one (a captured/edited config may still have it).
+        let config = crate::provenance::strip(config);
+        write_config_atomic(&self.path_for(name)?, &config)
     }
 
     /// Delete a preset. Deleting a non-existent preset is a no-op.
