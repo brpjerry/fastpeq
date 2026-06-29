@@ -191,6 +191,47 @@ fn manager_active_preset_tracks_live_config() {
 }
 
 #[test]
+fn active_preset_survives_auto_preamp_gain_change() {
+    let apo_dir = TempDir::new("auto-preamp-apo");
+    let presets_dir = TempDir::new("auto-preamp-presets");
+    let install = ApoInstall {
+        config_path: apo_dir.path().to_path_buf(),
+    };
+    let backup = apo_dir.path().join("config.backup.txt");
+    let manager = Manager::new(install, PresetStore::new(presets_dir.path()), backup);
+
+    // A preset with a master preamp and one band.
+    manager.save_preset("Bass", &sample_config()).unwrap();
+    manager.apply_preset("Bass", &Tone::default()).unwrap();
+    assert_eq!(manager.active_preset().unwrap(), Some("Bass".to_string()));
+
+    // Simulate Auto Preamp recomputing the master gain: same filters, a
+    // different `Both` preamp. There is no exact match anymore, but the
+    // equivalence fallback must still recognise the source preset.
+    let mut retuned = sample_config();
+    for line in &mut retuned.lines {
+        if let Line::Preamp {
+            gain,
+            channel: Channel::Both,
+        } = line
+        {
+            *gain = -9.5;
+        }
+    }
+    assert_ne!(retuned, sample_config());
+    manager.apply_config(&retuned, &Tone::default()).unwrap();
+    assert_eq!(manager.active_preset().unwrap(), Some("Bass".to_string()));
+
+    // A genuinely different EQ still matches nothing.
+    let mut different = sample_config();
+    different
+        .lines
+        .push(Line::Filter(Filter::peak(120.0, 5.0, 0.7)));
+    manager.apply_config(&different, &Tone::default()).unwrap();
+    assert_eq!(manager.active_preset().unwrap(), None);
+}
+
+#[test]
 fn categories_set_get_and_track_rename_delete() {
     let apo_dir = TempDir::new("cat-apo");
     let presets_dir = TempDir::new("cat-presets");
