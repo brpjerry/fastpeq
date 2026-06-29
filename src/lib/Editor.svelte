@@ -407,6 +407,27 @@
     }
   }
 
+  // Auto Preamp's master gain has to account for the global tone overlay, but the
+  // tone is driven by the global controls (TonePanel / hotkeys) → `set_tone`,
+  // which re-lays tone over the *existing* config and never runs the editor's
+  // commit. So when tone shifts, the auto preamp already in config.txt goes stale
+  // and the EQ can clip until the next band edit or an Auto toggle re-writes it.
+  // Re-apply on a tone change so config.txt tracks it — directly (not via
+  // `schedule`), so it doesn't dirty the preset, exactly like the on-load apply.
+  // Only bass/mid/treble feed the preamp; invert/swap don't change the peak, and
+  // the headroom setting can only change while the editor is unmounted (Settings).
+  // Seeded on the first (loading-guarded) run, so the initial tone never counts
+  // as a change and double-applies on top of the on-load apply above.
+  let lastToneSig = "";
+  $effect(() => {
+    const sig = `${tone.bass},${tone.mid},${tone.treble}`;
+    const changed = sig !== lastToneSig;
+    lastToneSig = sig;
+    if (changed && !loading && !comparing && autoPreamp) {
+      api.applyLive(buildConfig(false)).catch((e) => (err = String(e)));
+    }
+  });
+
   function changeKind(band: Band) {
     if (kindHasQ(band.kind) && (!band.q || band.q <= 0)) band.q = defaultQ(band.kind);
     schedule();
