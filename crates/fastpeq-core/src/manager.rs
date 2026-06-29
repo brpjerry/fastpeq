@@ -10,6 +10,7 @@ use crate::apo::model::{Config, Line};
 use crate::apo::writer;
 use crate::category::Category;
 use crate::parse;
+use crate::provenance;
 use crate::store::PresetStore;
 use crate::tone::{self, Tone};
 use serde::Serialize;
@@ -172,15 +173,28 @@ impl Manager {
     /// APO live-reloads, no restart. The caller supplies the tone (the shell
     /// caches it) so this never has to read the sidecar.
     pub fn apply_preset(&self, name: &str, tone: &Tone) -> io::Result<()> {
-        let config = self.store.load(name)?;
+        let config = provenance::set(&self.store.load(name)?, name);
         self.write_live(&tone::compose(&config, tone))
     }
 
     /// Write the given (base) config to the live `config.txt`, layering the
     /// given tone overlay on top. Called rapidly during a drag, so the tone is
     /// passed in rather than re-read from disk each time.
+    ///
+    /// Carries the provenance stamp forward — from the config itself if it has
+    /// one (e.g. an un-bypass restore), otherwise from the current live config —
+    /// so a live edit or Auto Preamp tweak that keeps the EQ equivalent still
+    /// resolves to the same active preset, even across a restart.
     pub fn apply_config(&self, config: &Config, tone: &Tone) -> io::Result<()> {
-        self.write_live(&tone::compose(config, tone))
+        let carried = match provenance::name(config) {
+            Some(name) => Some(name),
+            None => provenance::name(&self.current_config()?),
+        };
+        let stamped = match carried {
+            Some(name) => provenance::set(config, &name),
+            None => provenance::strip(config),
+        };
+        self.write_live(&tone::compose(&stamped, tone))
     }
 
     /// Bypass the EQ: drop every filter but keep the rest of the live config —
@@ -188,9 +202,10 @@ impl Manager {
     /// preamp means an A/B against the active preset isn't skewed by a level
     /// difference.
     pub fn bypass(&self) -> io::Result<()> {
-        // Strip the tone overlay (sentinels and all) before dropping filters, so
-        // bypass leaves neither the preset's EQ nor the tone controls.
-        let current = tone::strip(&self.current_config()?);
+        // Strip the tone overlay (sentinels and all) and the provenance stamp
+        // before dropping filters: a bypassed config has neither the preset's EQ,
+        // the tone controls, nor an active preset.
+        let current = provenance::strip(&tone::strip(&self.current_config()?));
         let config = Config {
             lines: current
                 .lines
@@ -201,41 +216,37 @@ impl Manager {
         self.write_live(&config)
     }
 
-    /// The preset whose contents match the live `config.txt`, if any.
+    /// The active preset, if any — identified purely by the live `config.txt`'s
+    /// [provenance] stamp.
     ///
     /// Derived from disk rather than tracked in memory, so it stays correct
-    /// across restarts and reflects reality even if the config was changed by
-    /// another tool. Returns `None` when the live config is bypass (no preamp or
-    /// filters) or matches no stored preset.
+    /// across restarts. The stamp is written on apply, so this is O(1): the live
+    /// config is "active" iff it carries a stamp whose preset still exists and
+    /// still matches the live EQ — exactly, or equivalently after Auto Preamp has
+    /// rewritten the master gain (see [`Config::is_equivalent`]). There is no
+    /// content scan: a config produced *outside* fastpeq has no stamp and is, by
+    /// design, not detected. Returns `None` for a bypassed config (no preamp or
+    /// filters), a missing/stale stamp, or an EQ that has diverged from its preset.
+    ///
+    /// [provenance]: crate::provenance
     pub fn active_preset(&self) -> io::Result<Option<String>> {
-        // Compare the base EQ (tone overlay removed) against stored presets, so
-        // the global tone controls never break the active-preset match.
-        let live = tone::strip(&self.current_config()?);
+        let current = self.current_config()?;
+        // The base EQ: tone overlay and provenance stamp removed, so neither the
+        // global tone controls nor the stamp itself can break the equivalence check.
+        let live = provenance::strip(&tone::strip(&current));
         if live.preamp().is_none() && live.filters().next().is_none() {
             return Ok(None);
         }
 
-        // Load every preset once; the two passes below both scan this set.
-        let presets: Vec<(String, Config)> = self
-            .store
-            .list()?
-            .into_iter()
-            .map(|name| self.store.load(&name).map(|config| (name, config)))
-            .collect::<io::Result<_>>()?;
-
-        // Prefer an exact match.
-        if let Some((name, _)) = presets.iter().find(|(_, config)| *config == live) {
-            return Ok(Some(name.clone()));
-        }
-
-        // Fall back to an equivalent match: Auto Preamp may have rewritten the
-        // live master gain, or the editor reordered lines, without changing the
-        // EQ. (Exact wins first, so this only fires on a genuine miss.)
-        if let Some((name, _)) = presets
-            .iter()
-            .find(|(_, config)| config.is_equivalent(&live))
+        // Trust the stamp, but only while the live EQ still matches the named
+        // preset (`is_equivalent` also covers exact equality, and tolerates the
+        // master gain Auto Preamp rewrites). A divergent edit or a since-deleted
+        // preset therefore reads as "not active" rather than guessing by content.
+        if let Some(name) = provenance::name(&current)
+            && let Ok(preset) = self.store.load(&name)
+            && preset.is_equivalent(&live)
         {
-            return Ok(Some(name.clone()));
+            return Ok(Some(name));
         }
 
         Ok(None)

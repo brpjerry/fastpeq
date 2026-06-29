@@ -15,6 +15,7 @@ pub mod apo;
 pub mod category;
 pub mod manager;
 pub mod peace;
+pub mod provenance;
 pub mod store;
 pub mod tone;
 

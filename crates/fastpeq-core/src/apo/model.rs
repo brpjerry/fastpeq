@@ -60,10 +60,12 @@ impl Config {
     /// This exists so a preset still reads as "active" after Auto Preamp has
     /// recomputed the master gain on the live config (which may *add* a preamp
     /// to a preset that had none), and after the editor has rewritten the line
-    /// order. Because it deliberately ignores the master preamp, two configs
-    /// that differ *only* by that gain cannot be told apart — that ambiguity is
-    /// inherent once Auto Preamp overwrites the field, so callers must try exact
-    /// equality first and fall back to this only on a miss.
+    /// order. It deliberately ignores the master preamp, so two configs that
+    /// differ *only* by that gain compare equal here; that ambiguity is resolved
+    /// upstream by the [provenance] stamp, which names *which* preset produced the
+    /// live config — this only confirms the named preset still matches.
+    ///
+    /// [provenance]: crate::provenance
     pub fn is_equivalent(&self, other: &Config) -> bool {
         // Modeled filters, in document order. (Order is audibly neutral for APO,
         // but the editor preserves it, so we keep the comparison strict.)

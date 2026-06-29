@@ -46,17 +46,29 @@ editor reorders lines — so the live config is now a *lossy, non-deterministic*
 function of the preset. `Config::is_equivalent` (`apo/model.rs`) is the third patch
 over this crack. Worth retiring the inference model rather than patching it again:
 
-- [ ] 21. **Provenance, not inference.** On apply, stamp the live config with a
-  marker comment (`# fastpeq:preset=<name>` + a hash of the base EQ). APO ignores
+- [x] 21. **Provenance, not inference.** On apply, the live config is stamped with
+  a marker comment (`# fastpeq:preset=<name>`, see `provenance.rs`). APO ignores
   `#` lines and the model round-trips them as `Line::Raw`, so `active_preset()`
-  becomes O(1) and exact, immune to Auto Preamp, and can report "active but
-  modified" when a hand-edit changes the hash. Keep `is_equivalent` as the
-  fallback for externally-edited configs. Also resolves perf item #4 (no library
-  scan). Note the inherent limit it removes: two presets differing *only* by master
-  gain are indistinguishable by content once Auto Preamp overwrites that field.
+  reads it back in O(1) and — its key win — *disambiguates* presets that differ
+  only by a master gain Auto Preamp has overwritten (the inherent limit of the
+  content match). `active_preset` is now **provenance-only**: the live config is
+  active iff its stamp names a preset that still exists and still
+  `is_equivalent` to the live EQ (which tolerates the Auto-Preamp master-gain
+  rewrite). The old content-inference scan over the whole library was **removed**
+  — a config produced outside fastpeq has no stamp and is, by design, not
+  detected (single-user app; legacy/external configs self-heal on next apply).
+  `PresetStore::save` strips the stamp so preset files never carry one.
+  Implementation notes: name stamp + equivalence check rather than a base-EQ
+  *hash* (avoids fragile float canonicalization, reuses tested logic); kept the
+  `active_preset → Option<String>` IPC contract stable (no frontend churn).
+  `is_equivalent` stays as the stamp *validator* (not a fallback matcher).
+  **Deferred:** surfacing an explicit "active but modified" state in the UI — the
+  pieces are in place, but it needs an IPC shape change + a UI affordance.
 - [ ] 22. **Per-preset editor metadata is keyed by name in `localStorage`**
   (target, target offset, align freq, measurement, show-ref flags, compensate) —
-  unlike categories/tone, which are Rust sidecars that `rename_preset` migrates.
-  So renaming a preset silently orphans its target + measurement, and the metadata
-  doesn't travel when a preset is shared/backed up. Move it to a sidecar next to
-  the preset (or a Rust-managed store) so it migrates on rename and exports.
+  unlike categories/tone, which are Rust sidecars. The rename/delete *orphaning*
+  is now handled on the frontend (`renamePresetView`/`clearPresetView`, REVIEW-2
+  P1), but the data still lives only in `localStorage`, so it doesn't travel when
+  a preset is shared/backed up/moved across machines. Open work: move it to a
+  sidecar next to the preset (or a Rust-managed store) so it exports with the
+  preset. (Lower priority — only matters once preset portability does.)
