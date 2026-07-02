@@ -130,7 +130,10 @@ impl MoondropDevice {
         buf[0] = REPORT_ID;
         buf[1..1 + payload.len()].copy_from_slice(payload);
         if dry_run() {
-            eprintln!("[hw dry-run] moondrop send {:02x?}", &buf[..1 + payload.len()]);
+            eprintln!(
+                "[hw dry-run] moondrop send {:02x?}",
+                &buf[..1 + payload.len()]
+            );
             return Ok(());
         }
         self.device.write(&buf).map_err(|e| e.to_string())?;
@@ -152,7 +155,11 @@ impl MoondropDevice {
             if n == 0 {
                 continue;
             }
-            let payload = if buf[0] == REPORT_ID { &buf[1..n] } else { &buf[..n] };
+            let payload = if buf[0] == REPORT_ID {
+                &buf[1..n]
+            } else {
+                &buf[..n]
+            };
             if payload.len() > 1 && payload[0] == c0 && payload[1] == c1 {
                 return Ok(payload.to_vec());
             }
@@ -254,7 +261,12 @@ fn decode_band(p: &[u8]) -> HwBand {
         Some(&TYPE_HSQ) => HwFilterType::HighShelf,
         _ => HwFilterType::Peak,
     };
-    HwBand { kind, freq, gain, q }
+    HwBand {
+        kind,
+        freq,
+        gain,
+        q,
+    }
 }
 
 /// Whether `FASTPEQ_HW_DRYRUN` is set — log packets instead of writing, for safe
@@ -375,7 +387,8 @@ mod tests {
             gain: 6.0,
             q: 1.0,
         };
-        dev.push(&[band.clone()], -6.0, false).expect("push band");
+        dev.push(std::slice::from_ref(&band), -6.0, false)
+            .expect("push band");
         let read_back = dev.pull().expect("pull bands");
         let first = &read_back[0];
         assert!((first.freq - 1000.0).abs() < 2.0, "freq: {}", first.freq);

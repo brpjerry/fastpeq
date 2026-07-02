@@ -248,8 +248,12 @@ fn active_preset_by_stamp_resolves_an_offload_remainder() {
 
     // A preset with several bands.
     let mut preset = sample_config();
-    preset.lines.push(Line::Filter(Filter::peak(60.0, 4.0, 0.7)));
-    preset.lines.push(Line::Filter(Filter::peak(8000.0, 3.0, 1.0)));
+    preset
+        .lines
+        .push(Line::Filter(Filter::peak(60.0, 4.0, 0.7)));
+    preset
+        .lines
+        .push(Line::Filter(Filter::peak(8000.0, 3.0, 1.0)));
     manager.save_preset("HD600", &preset).unwrap();
 
     // Write a stamped remainder straight to the live config (what's on disk after

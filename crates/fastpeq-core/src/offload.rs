@@ -280,8 +280,10 @@ fn select_min_preamp(candidates: &[(usize, HwBand)], max: usize, fs: f64) -> Vec
     }
 
     if chosen.len() < max {
-        let mut rest: Vec<&(usize, HwBand)> =
-            candidates.iter().filter(|(i, _)| !chosen.contains(i)).collect();
+        let mut rest: Vec<&(usize, HwBand)> = candidates
+            .iter()
+            .filter(|(i, _)| !chosen.contains(i))
+            .collect();
         rest.sort_by(|a, b| {
             band_area(&b.1, fs)
                 .total_cmp(&band_area(&a.1, fs))
@@ -593,7 +595,10 @@ mod tests {
             OffloadMode::FirstX,
         );
         assert!(boost.hw_pregain < 0.0, "boost should reserve headroom");
-        assert!((boost.hw_pregain + 6.0).abs() < 0.5, "≈ -6 dB for a +6 dB peak");
+        assert!(
+            (boost.hw_pregain + 6.0).abs() < 0.5,
+            "≈ -6 dB for a +6 dB peak"
+        );
 
         let cut = split(
             &Config {
@@ -726,7 +731,10 @@ mod tests {
             ..Tone::default()
         };
         let with_tone = auto_preamp(&cut, &bass);
-        assert!(with_tone < -5.0, "tone boost should be covered, was {with_tone}");
+        assert!(
+            with_tone < -5.0,
+            "tone boost should be covered, was {with_tone}"
+        );
     }
 
     #[test]

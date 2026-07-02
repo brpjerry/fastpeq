@@ -227,9 +227,7 @@ mod imp {
         unsafe {
             let enumerator: IMMDeviceEnumerator =
                 CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
-            let device = enumerator
-                .GetDefaultAudioEndpoint(eRender, eConsole)
-                .ok()?;
+            let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
             device
                 .OpenPropertyStore(STGM_READ)
                 .ok()

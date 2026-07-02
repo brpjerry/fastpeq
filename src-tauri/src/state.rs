@@ -6,8 +6,8 @@ use crate::audio;
 use crate::hardware::{self, DetectedDevice, HardwareSession};
 use fastpeq_core::apo::env;
 use fastpeq_core::{
-    Category, Config, ImportReport, Manager as CoreManager, OffloadMode, PresetStore, Tone, offload,
-    provenance,
+    Category, Config, ImportReport, Manager as CoreManager, OffloadMode, PresetStore, Tone,
+    offload, provenance,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -244,9 +244,7 @@ impl AppState {
 
         // The output (or on/off state) changed — resolve the supported device for it
         // (this is the part that enumerates HID) and reconcile the session.
-        let target = output_name
-            .as_deref()
-            .and_then(hardware::device_for_output);
+        let target = output_name.as_deref().and_then(hardware::device_for_output);
         let current = self
             .hardware
             .lock()
@@ -475,13 +473,13 @@ impl AppState {
         if bypassed {
             // Un-bypass: re-apply the exact base that was live before bypassing,
             // restoring both the software and (if offloaded) the hardware bands.
-            if let Some(base) = &restore {
-                if !offloaded || !self.offload_apply(base, None, true, None)? {
-                    let tone = self.tone_cache();
-                    manager
-                        .apply_config(base, &tone)
-                        .map_err(|e| e.to_string())?;
-                }
+            if let Some(base) = &restore
+                && (!offloaded || !self.offload_apply(base, None, true, None)?)
+            {
+                let tone = self.tone_cache();
+                manager
+                    .apply_config(base, &tone)
+                    .map_err(|e| e.to_string())?;
             }
             let mut inner = self.inner.lock().unwrap();
             inner.bypassed = false;
