@@ -5,7 +5,7 @@ Reviews #1 (`REVIEW.md`) and #2 (`REVIEW-2.md`) are fully worked through; this i
 a fresh list. Health at review time: clippy clean, svelte-check clean, 176
 frontend + all Rust tests green, no TODO/FIXME markers.
 
-**Status:** ✅ P1 (items 1–3) and P2 item 4 done · ⬜ items 5–15 open.
+**Status:** ✅ P1 (items 1–3) and P2 (items 4–6) done · ⬜ items 7–15 open.
 
 ---
 
@@ -60,23 +60,29 @@ frontend + all Rust tests green, no TODO/FIXME markers.
     filter (`biquadCoeffs`), and the per-frequency trig once per point shared
     across all filters.
 
-- [ ] 5. **`reload()` serializes eight IPC round-trips** (`src/App.svelte`):
+- [x] 5. **`reload()` serializes eight IPC round-trips** (`src/App.svelte`):
   `apoStatus`, `presetsDir`, `hardwareStatus`, then `listPresets`,
   `presetCategories`, `activePreset`, `bypassed`, `getTone` one at a time — and
   it runs on every window focus. Most are independent; `Promise.all` would cut
-  focus-refresh latency substantially.
+  focus-refresh latency substantially. **Fix:** two parallel `Promise.all`
+  rounds (the second gated on `installed`, as before).
 
-- [ ] 6. **Small ones:**
+- [x] 6. **Small ones:**
   - `apply()` (`src-tauri/src/state.rs`) loads the preset from disk, and when
     offload is off `manager.apply_preset` loads it a second time — pass the
-    already-parsed config through.
-  - `Manager::apply_config` (`crates/fastpeq-core/src/manager.rs`) re-reads and
-    re-parses `config.txt` on every throttled drag write just to carry the
-    provenance stamp; the shell already caches active-preset state and could
-    supply it.
-  - `PresetStore::list` (`crates/fastpeq-core/src/store.rs`) uses
+    already-parsed config through. **Fix:** new
+    `Manager::apply_loaded_preset(name, config, tone)`; `apply_preset` (kept —
+    the core integration tests use it) delegates to it.
+  - ~~`Manager::apply_config` re-reads `config.txt` on every throttled drag
+    write just to carry the provenance stamp.~~ **Deliberately skipped** on a
+    closer look: the carried stamp must reflect what is actually in
+    `config.txt` — a cache would need invalidation on every writer *including
+    edits made by other tools* (which should drop the stamp; a cache would
+    wrongly resurrect it). A ~kB read+parse behind the 75 ms live-apply
+    throttle doesn't justify that risk.
+  - `PresetStore::list` (`crates/fastpeq-core/src/store.rs`) used
     `sort_by_key(|n| n.to_lowercase())`, which re-allocates the key per
-    comparison — `sort_by_cached_key` is the drop-in fix.
+    comparison — switched to `sort_by_cached_key`.
 
 ## P3 — Duplication / refactoring
 

@@ -449,7 +449,7 @@ impl AppState {
         if !offloaded {
             let tone = self.tone_cache();
             manager
-                .apply_preset(name, &tone)
+                .apply_loaded_preset(name, &config, &tone)
                 .map_err(|e| e.to_string())?;
         }
         let mut inner = self.inner.lock().unwrap();

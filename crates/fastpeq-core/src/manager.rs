@@ -173,8 +173,15 @@ impl Manager {
     /// APO live-reloads, no restart. The caller supplies the tone (the shell
     /// caches it) so this never has to read the sidecar.
     pub fn apply_preset(&self, name: &str, tone: &Tone) -> io::Result<()> {
-        let config = provenance::set(&self.store.load(name)?, name);
-        self.write_live(&tone::compose(&config, tone))
+        self.apply_loaded_preset(name, &self.store.load(name)?, tone)
+    }
+
+    /// [`apply_preset`](Self::apply_preset) for an already-parsed preset config.
+    /// The shell loads the preset once anyway (the offload split needs it), so
+    /// this spares a second read of the same file.
+    pub fn apply_loaded_preset(&self, name: &str, config: &Config, tone: &Tone) -> io::Result<()> {
+        let stamped = provenance::set(config, name);
+        self.write_live(&tone::compose(&stamped, tone))
     }
 
     /// Write the given (base) config to the live `config.txt`, layering the

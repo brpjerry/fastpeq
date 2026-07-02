@@ -150,15 +150,30 @@
   });
 
   async function reload() {
-    status = await api.apoStatus();
-    presetsDirPath = await api.presetsDir();
-    offload = await api.hardwareStatus().catch(() => null);
-    if (status.installed) {
-      presets = await api.listPresets();
-      categories = await api.presetCategories();
-      active = await api.activePreset();
-      isBypassed = await api.bypassed(); // backend owns bypass state (tray/hotkey too)
-      tone = await api.getTone();
+    // The reads are independent, so batch them into two parallel IPC rounds
+    // instead of eight sequential round-trips — reload runs on every window
+    // focus, so the latency is felt.
+    const [st, dir, hw] = await Promise.all([
+      api.apoStatus(),
+      api.presetsDir(),
+      api.hardwareStatus().catch(() => null),
+    ]);
+    status = st;
+    presetsDirPath = dir;
+    offload = hw;
+    if (st.installed) {
+      const [pres, cats, act, byp, tn] = await Promise.all([
+        api.listPresets(),
+        api.presetCategories(),
+        api.activePreset(),
+        api.bypassed(), // backend owns bypass state (tray/hotkey too)
+        api.getTone(),
+      ]);
+      presets = pres;
+      categories = cats;
+      active = act;
+      isBypassed = byp;
+      tone = tn;
       if (selected && !presets.includes(selected)) selected = null;
       // Default the editor to the active preset when nothing is selected
       // (e.g. on startup), so it opens in the right panel automatically.

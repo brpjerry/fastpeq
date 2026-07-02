@@ -51,7 +51,9 @@ impl PresetStore {
                 names.push(stem.to_string());
             }
         }
-        names.sort_by_key(|n| n.to_lowercase());
+        // Cached keys: `sort_by_key` would re-allocate the lowercase string on
+        // every comparison.
+        names.sort_by_cached_key(|n| n.to_lowercase());
         Ok(names)
     }
 
