@@ -91,9 +91,21 @@ export function balanceFromTrim(side: "left" | "right", trimDb: number): number 
   return side === "left" ? -cut : cut;
 }
 
-/** Magnitude (dB) of one biquad filter at `freq`. */
-function magnitudeDb(f: CurveFilter, freq: number, fs: number): number {
-  if (f.kind === "AllPass") return 0; // flat magnitude — phase only
+/** Biquad coefficients for one filter (`a0` kept un-normalized; the evaluation
+ *  divides it out), computed once per filter — they don't depend on the probe
+ *  frequency. `null` for types with a flat magnitude (AllPass / unmodeled),
+ *  which contribute nothing to the response. */
+interface BiquadCoeffs {
+  b0: number;
+  b1: number;
+  b2: number;
+  a0: number;
+  a1: number;
+  a2: number;
+}
+
+function biquadCoeffs(f: CurveFilter, fs: number): BiquadCoeffs | null {
+  if (f.kind === "AllPass") return null; // flat magnitude — phase only
 
   const w0 = (2 * Math.PI * f.freq) / fs;
   const cw = Math.cos(w0);
@@ -175,35 +187,43 @@ function magnitudeDb(f: CurveFilter, freq: number, fs: number): number {
       a2 = 1 - alpha;
       break;
     default:
-      return 0;
+      return null;
   }
 
-  // |H(e^jw)| = |numerator| / |denominator| (the a0 stays in the denominator).
-  const w = (2 * Math.PI * freq) / fs;
-  const c1 = Math.cos(-w);
-  const s1 = Math.sin(-w);
-  const c2 = Math.cos(-2 * w);
-  const s2 = Math.sin(-2 * w);
-  const nr = b0 + b1 * c1 + b2 * c2;
-  const ni = b1 * s1 + b2 * s2;
-  const dr = a0 + a1 * c1 + a2 * c2;
-  const di = a1 * s1 + a2 * s2;
-  const den = Math.hypot(dr, di);
-  if (den === 0) return 0;
-  return 20 * Math.log10(Math.hypot(nr, ni) / den);
+  return { b0, b1, b2, a0, a1, a2 };
 }
 
-/** Combined response (dB) across `freqs`: preamp + sum of enabled filters. */
+/** Combined response (dB) across `freqs`: preamp + sum of enabled filters.
+ *  Coefficients are computed once per filter, and the per-frequency trig once
+ *  per point (shared by every filter) — this runs per drag frame over up to
+ *  ~1600 points, so no per-(filter, freq) transcendentals. */
 export function responseCurve(
   filters: CurveFilter[],
   preamp: number,
   freqs: number[] = FREQS,
   fs: number = SAMPLE_RATE,
 ): number[] {
+  const coeffs: BiquadCoeffs[] = [];
+  for (const f of filters) {
+    if (!f.enabled) continue;
+    const c = biquadCoeffs(f, fs);
+    if (c) coeffs.push(c);
+  }
   return freqs.map((freq) => {
+    const w = (2 * Math.PI * freq) / fs;
+    const c1 = Math.cos(-w);
+    const s1 = Math.sin(-w);
+    const c2 = Math.cos(-2 * w);
+    const s2 = Math.sin(-2 * w);
     let db = preamp;
-    for (const f of filters) {
-      if (f.enabled) db += magnitudeDb(f, freq, fs);
+    for (const c of coeffs) {
+      // |H(e^jw)| = |numerator| / |denominator| (the a0 stays in the denominator).
+      const nr = c.b0 + c.b1 * c1 + c.b2 * c2;
+      const ni = c.b1 * s1 + c.b2 * s2;
+      const dr = c.a0 + c.a1 * c1 + c.a2 * c2;
+      const di = c.a1 * s1 + c.a2 * s2;
+      const den = Math.hypot(dr, di);
+      if (den !== 0) db += 20 * Math.log10(Math.hypot(nr, ni) / den);
     }
     return db;
   });

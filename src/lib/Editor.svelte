@@ -270,8 +270,10 @@
       loading = false;
       resetHistory(); // start a fresh undo history at the loaded state
       
-      // If Auto Preamp is enabled, pushing it to the live config doesn't dirty the preset
-      if (effectiveAuto && !comparing) {
+      // If Auto Preamp is enabled, pushing it to the live config doesn't dirty
+      // the preset. Skipped when the load failed: bands/rawLines were just reset,
+      // so applying would overwrite the live config with an empty one.
+      if (effectiveAuto && !comparing && !err) {
         api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
       }
     }

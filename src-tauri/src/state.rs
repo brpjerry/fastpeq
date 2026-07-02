@@ -269,8 +269,8 @@ impl AppState {
         }
 
         match target {
-            Some(dev) => {
-                if let Ok(profile) = hardware::profile(&dev.id) {
+            Some(dev) => match hardware::profile(&dev.id) {
+                Ok(profile) => {
                     *self.hardware.lock().unwrap() = Some(HardwareSession::start(dev, profile));
                     // Push the current EQ to the new device (RAM only — following the
                     // output shouldn't wear the device's flash) and write the remainder.
@@ -280,7 +280,13 @@ impl AppState {
                         self.inner.lock().unwrap().last_full = Some(full.clone());
                     }
                 }
-            }
+                Err(_) => {
+                    // The device vanished (or HID glitched) between detection and
+                    // open. Clear the sync cache so the next reconcile retries,
+                    // instead of treating this output as already handled.
+                    *self.last_sync.lock().unwrap() = None;
+                }
+            },
             None => {
                 // No longer offloading: put the full EQ back into software.
                 if let Some(full) = &full {
@@ -612,10 +618,12 @@ impl AppState {
     /// cache. A change *between* offloading modes only re-splits, which is cheap, so
     /// we do it inline for an immediate result.
     pub fn set_offload_mode(&self, mode: OffloadMode) -> Result<(), String> {
-        *self.offload_mode.lock().unwrap() = mode;
+        // Persist first: if the settings write fails, the in-memory mode stays
+        // untouched, so the UI never shows a mode that won't survive a restart.
         let mut settings = load_settings(&self.data_dir);
         settings.offload_mode = Some(mode);
         save_settings(&self.data_dir, &settings).map_err(|e| e.to_string())?;
+        *self.offload_mode.lock().unwrap() = mode;
 
         // Force the background reconciler to re-evaluate on/off + device next tick.
         *self.last_sync.lock().unwrap() = None;

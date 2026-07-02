@@ -223,14 +223,14 @@ fn select(candidates: &[(usize, HwBand)], max: usize, fs: f64, mode: OffloadMode
             candidates.iter().take(max).map(|(i, _)| *i).collect()
         }
         OffloadMode::LargestChange => {
-            let mut ranked: Vec<&(usize, HwBand)> = candidates.iter().collect();
+            // Area computed once per candidate, not inside the comparator.
+            let mut ranked: Vec<(usize, f64)> = candidates
+                .iter()
+                .map(|(i, band)| (*i, band_area(band, fs)))
+                .collect();
             // Largest area first; ties keep document order for stability.
-            ranked.sort_by(|a, b| {
-                band_area(&b.1, fs)
-                    .total_cmp(&band_area(&a.1, fs))
-                    .then(a.0.cmp(&b.0))
-            });
-            ranked.iter().take(max).map(|(i, _)| *i).collect()
+            ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+            ranked.into_iter().take(max).map(|(i, _)| i).collect()
         }
         OffloadMode::MinimizePreamp => select_min_preamp(candidates, max, fs),
     }
@@ -240,56 +240,80 @@ fn select(candidates: &[(usize, HwBand)], max: usize, fs: f64, mode: OffloadMode
 /// probe frequencies) — how much the band alters the sound. Wide/low-Q bands and
 /// shelves score higher than narrow peaks of the same gain.
 fn band_area(band: &HwBand, fs: f64) -> f64 {
-    probe_freqs().map(|f| magnitude_db(band, f, fs).abs()).sum()
+    band_response(band, fs).iter().map(|m| m.abs()).sum()
 }
 
 /// Greedily move the band whose removal most lowers the combined software boost
 /// peak, until that peak can't drop below 0 (preamp already ~0) or the budget runs
 /// out; then spend any leftover budget on the largest-area remaining bands (moving
 /// cuts to hardware can't raise the already-≤0 software peak).
+///
+/// Each candidate's magnitude response over the probe grid is computed once up
+/// front, so every trial in the greedy loop is a vector sum rather than a fresh
+/// round of biquad evaluations — this runs on every live-edit write while
+/// offloading, so it has to stay cheap.
 fn select_min_preamp(candidates: &[(usize, HwBand)], max: usize, fs: f64) -> Vec<usize> {
-    let collect_software = |chosen: &[usize]| -> Vec<HwBand> {
-        candidates
-            .iter()
-            .filter(|(i, _)| !chosen.contains(i))
-            .map(|(_, b)| b.clone())
-            .collect()
+    let responses: Vec<Vec<f64>> = candidates
+        .iter()
+        .map(|(_, band)| band_response(band, fs))
+        .collect();
+    // Peak of the summed response of the candidates still in software (`taken`
+    // marks the ones moved to hardware). An all-zero sum (every band taken)
+    // peaks at 0.0, matching `peak_gain_db` for an empty set.
+    let software_peak = |taken: &[bool]| -> f64 {
+        let probes = responses.first().map_or(0, Vec::len);
+        (0..probes)
+            .map(|k| {
+                responses
+                    .iter()
+                    .zip(taken)
+                    .filter(|&(_, &t)| !t)
+                    .map(|(r, _)| r[k])
+                    .sum::<f64>()
+            })
+            .fold(f64::NEG_INFINITY, f64::max)
     };
 
+    let mut taken = vec![false; candidates.len()];
     let mut chosen: Vec<usize> = Vec::new();
     while chosen.len() < max {
-        let current = peak_gain_db(&collect_software(&chosen), fs);
+        let current = software_peak(&taken);
         if current <= 0.0 {
             break; // no positive peak left — APO preamp is already ~0
         }
         // The unchosen band whose removal yields the lowest remaining peak.
         let mut best: Option<(usize, f64)> = None;
-        for (i, _) in candidates.iter().filter(|(i, _)| !chosen.contains(i)) {
-            let mut trial = chosen.clone();
-            trial.push(*i);
-            let peak = peak_gain_db(&collect_software(&trial), fs);
+        for pos in 0..candidates.len() {
+            if taken[pos] {
+                continue;
+            }
+            taken[pos] = true;
+            let peak = software_peak(&taken);
+            taken[pos] = false;
             match best {
                 Some((_, bp)) if peak >= bp => {}
-                _ => best = Some((*i, peak)),
+                _ => best = Some((pos, peak)),
             }
         }
         match best {
-            Some((i, peak)) if peak < current => chosen.push(i),
+            Some((pos, peak)) if peak < current => {
+                taken[pos] = true;
+                chosen.push(candidates[pos].0);
+            }
             _ => break, // only cuts remain; removing one would raise the peak
         }
     }
 
     if chosen.len() < max {
-        let mut rest: Vec<&(usize, HwBand)> = candidates
+        // Reuses the precomputed responses for the area ranking (see `select`).
+        let mut rest: Vec<(usize, f64)> = candidates
             .iter()
-            .filter(|(i, _)| !chosen.contains(i))
+            .enumerate()
+            .filter(|&(pos, _)| !taken[pos])
+            .map(|(pos, (i, _))| (*i, responses[pos].iter().map(|m| m.abs()).sum()))
             .collect();
-        rest.sort_by(|a, b| {
-            band_area(&b.1, fs)
-                .total_cmp(&band_area(&a.1, fs))
-                .then(a.0.cmp(&b.0))
-        });
-        chosen.extend(rest.into_iter().take(max - chosen.len()).map(|(i, _)| *i));
+        rest.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        chosen.extend(rest.into_iter().take(max - chosen.len()).map(|(i, _)| i));
     }
     chosen
 }
@@ -418,9 +442,19 @@ pub fn biquad_coeffs(kind: HwFilterType, freq: f64, gain: f64, q: f64, fs: f64) 
 }
 
 /// Magnitude (dB) of one band's biquad at `freq`, evaluated at sample rate `fs`.
-/// Mirrors `magnitudeDb` in `src/lib/eq.ts`.
+/// Mirrors `magnitudeDb` in `src/lib/eq.ts`. Test-only convenience — production
+/// paths evaluate over the whole probe grid via [`band_response`], which computes
+/// the coefficients once instead of per point.
+#[cfg(test)]
 fn magnitude_db(band: &HwBand, freq: f64, fs: f64) -> f64 {
-    let [b0, b1, b2, a1, a2] = biquad_coeffs(band.kind, band.freq, band.gain, band.q, fs);
+    let coeffs = biquad_coeffs(band.kind, band.freq, band.gain, band.q, fs);
+    coeffs_magnitude_db(&coeffs, freq, fs)
+}
+
+/// Magnitude (dB) at `freq` of a normalized biquad, from its coefficients — the
+/// evaluation half of the response math, split out so a band's coefficients are
+/// computed once and reused across a whole frequency grid.
+fn coeffs_magnitude_db(&[b0, b1, b2, a1, a2]: &[f64; 5], freq: f64, fs: f64) -> f64 {
     let w = 2.0 * PI * freq / fs;
     let (c1, s1) = ((-w).cos(), (-w).sin());
     let (c2, s2) = ((-2.0 * w).cos(), (-2.0 * w).sin());
@@ -433,6 +467,16 @@ fn magnitude_db(band: &HwBand, freq: f64, fs: f64) -> f64 {
         return 0.0;
     }
     20.0 * (nr.hypot(ni) / den).log10()
+}
+
+/// One band's magnitude (dB) at every probe frequency, with the biquad
+/// coefficients computed once for the whole grid. The peak/area math sums and
+/// scans these vectors, so no trig runs inside selection loops.
+fn band_response(band: &HwBand, fs: f64) -> Vec<f64> {
+    let coeffs = biquad_coeffs(band.kind, band.freq, band.gain, band.q, fs);
+    probe_freqs()
+        .map(|f| coeffs_magnitude_db(&coeffs, f, fs))
+        .collect()
 }
 
 /// Log-spaced probe frequencies (20 Hz – 20 kHz), matching the live curve's
@@ -450,8 +494,9 @@ pub fn peak_gain_db(bands: &[HwBand], fs: f64) -> f64 {
     if bands.is_empty() {
         return 0.0;
     }
-    probe_freqs()
-        .map(|f| bands.iter().map(|b| magnitude_db(b, f, fs)).sum::<f64>())
+    let responses: Vec<Vec<f64>> = bands.iter().map(|b| band_response(b, fs)).collect();
+    (0..responses[0].len())
+        .map(|k| responses.iter().map(|r| r[k]).sum::<f64>())
         .fold(f64::NEG_INFINITY, f64::max)
 }
 
