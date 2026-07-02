@@ -29,7 +29,7 @@ fastpeq-core = { path = "../crates/fastpeq-core" }
 # Tauri's deps. IMMDeviceEnumerator/IPropertyStore come from these features; the
 # undocumented IPolicyConfig is declared by hand in `audio.rs`.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
