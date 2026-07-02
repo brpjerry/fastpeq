@@ -234,6 +234,48 @@ fn active_preset_survives_auto_preamp_gain_change() {
 }
 
 #[test]
+fn active_preset_by_stamp_resolves_an_offload_remainder() {
+    // Reproduces the hardware-offload restart case: the live config holds only the
+    // software *remainder* (offloaded bands removed) plus the provenance stamp. The
+    // strict content check can't match the full preset, but the stamp still does.
+    let apo_dir = TempDir::new("stamp-apo");
+    let presets_dir = TempDir::new("stamp-presets");
+    let install = ApoInstall {
+        config_path: apo_dir.path().to_path_buf(),
+    };
+    let backup = apo_dir.path().join("config.backup.txt");
+    let manager = Manager::new(install, PresetStore::new(presets_dir.path()), backup);
+
+    // A preset with several bands.
+    let mut preset = sample_config();
+    preset.lines.push(Line::Filter(Filter::peak(60.0, 4.0, 0.7)));
+    preset.lines.push(Line::Filter(Filter::peak(8000.0, 3.0, 1.0)));
+    manager.save_preset("HD600", &preset).unwrap();
+
+    // Write a stamped remainder straight to the live config (what's on disk after
+    // offloading two bands to hardware and restarting).
+    let remainder = provenance::set(
+        &Config {
+            lines: vec![Line::Filter(Filter::peak(8000.0, 3.0, 1.0))],
+        },
+        "HD600",
+    );
+    fs::write(manager.install().config_file(), serialize(&remainder)).unwrap();
+
+    // Strict content match fails (bands are missing)...
+    assert_eq!(manager.active_preset().unwrap(), None);
+    // ...but the stamp resolves it.
+    assert_eq!(
+        manager.active_preset_by_stamp().unwrap(),
+        Some("HD600".to_string())
+    );
+
+    // A stamp pointing at a deleted preset resolves to nothing.
+    manager.delete_preset("HD600").unwrap();
+    assert_eq!(manager.active_preset_by_stamp().unwrap(), None);
+}
+
+#[test]
 fn provenance_stamp_disambiguates_equivalent_presets() {
     let apo_dir = TempDir::new("prov-apo");
     let presets_dir = TempDir::new("prov-presets");

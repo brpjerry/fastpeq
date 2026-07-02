@@ -35,6 +35,9 @@ no restart, no process churn.
 - **Preset organisation** — search, device-type filter, and per-preset category icons.
 - **Configurable global hotkeys** — bind any number of `Ctrl+Alt` / `Ctrl+Shift` keys to switch
   presets, toggle bypass, or nudge / reset the tone controls, working anywhere in Windows.
+- **Hardware EQ offload** — send a preset's first bands to a supported DAC/amp that runs
+  parametric EQ in hardware (currently the **Moondrop DHA15**); overflow bands stay in Equalizer
+  APO. The hardware EQ persists in the device and keeps working even when fastpeq is closed.
 - **System tray**, single-instance, first-run backup of your config.
 - **PEACE import** — bring your existing `.peace` presets across.
 
@@ -79,8 +82,8 @@ A hard split between a UI-agnostic Rust core and a thin Tauri + Svelte shell.
 
 | Component | Role |
 |-----------|------|
-| `crates/fastpeq-core` | Detect APO, parse/edit/serialize configs, preset store, atomic writes |
-| `src-tauri` | Tauri 2 commands, system tray, configurable global hotkeys, single-instance |
+| `crates/fastpeq-core` | Detect APO, parse/edit/serialize configs, preset store, atomic writes, hardware/software split + biquad math (`offload`) |
+| `src-tauri` | Tauri 2 commands, system tray, configurable global hotkeys, single-instance, hardware-EQ device I/O (`hardware/`) |
 | `src/` | Svelte + TS UI: preset list, band editor, response curve, curve editor |
 
 The core models an APO configuration as an ordered list of lines. It only understands `Preamp:`
@@ -94,6 +97,38 @@ parse(serialize(config)) == config
 
 Unrecognised types or variants that can't be reproduced faithfully (e.g. `LS 6dB`) are kept as
 raw lines rather than coerced.
+
+### Hardware EQ offload
+
+Some DACs/amps can run parametric EQ on-chip. fastpeq can route a preset's EQ between Equalizer APO
+and such a device. Under **Settings → Hardware EQ offload** a single control (adjustable with
+nothing connected) picks the routing; offload **follows your active output device** and engages only
+while the current default output is a supported device — switch to a different output and nothing is
+offloaded:
+
+- **APO Only** — offload off; every band stays in Equalizer APO.
+- **First X** — the first X bands (X = the device's budget) go to hardware, the rest to APO.
+- **Biggest effect** — the X bands that alter the response most (largest area under the bell/shelf).
+- **Min. APO preamp** — the boosts, so Equalizer APO's preamp stays near 0 and the device's pregain
+  handles the headroom (forces the editor's **Auto Preamp** on so the APO bands can't clip).
+- **Hardware Only** — run everything on the device where it fits (selection tuning in progress).
+
+The band editor marks each offloaded band with a **HW** chip, so you can see exactly which bands
+the device is running versus Equalizer APO. While offload is on, the preamp control splits into two
+sliders — **APO** (the software remainder) and **Device** (the hardware pregain) — so each gain
+stage can be set independently (Auto sizes both to avoid clipping).
+
+The split logic and the device biquad math are pure and live in `fastpeq_core::offload`; the
+USB/HID I/O lives in the shell (`src-tauri/src/hardware/`), mirroring how Windows output-device
+switching is isolated in `audio.rs`. Each device family is a self-contained *driver*, so adding
+hardware means adding a driver and registering it. A dedicated worker thread **rate-limits** and
+coalesces updates, since devices can't be rewritten as fast as APO's file reload; live edits go to
+volatile RAM and an applied preset is committed to the device's flash.
+
+> The Moondrop protocol is community **reverse-engineered** (no official spec); see the driver in
+> `src-tauri/src/hardware/moondrop.rs`. Set `FASTPEQ_HW_DRYRUN=1` to log device packets without
+> sending them. The DHA15 driver is validated against real hardware by an ignored test:
+> `cargo test -p fastpeq -- --ignored dha15` (writes to RAM only).
 
 ## Roadmap
 

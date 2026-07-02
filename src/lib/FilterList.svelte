@@ -7,6 +7,7 @@
     bands = $bindable(),
     view = $bindable(),
     hoveredId = $bindable(),
+    offloadedIdx = new Set<number>(),
     onSchedule,
     onChangeKind,
     onRemoveBand,
@@ -14,6 +15,8 @@
     bands: EditorBand[];
     view: "both" | "left" | "right";
     hoveredId: number | null;
+    /** Band indices currently sent to the hardware device (shown with a chip). */
+    offloadedIdx?: Set<number>;
     onSchedule: () => void;
     onChangeKind: (band: EditorBand) => void;
     onRemoveBand: (id: number) => void;
@@ -59,6 +62,7 @@
       <BandRow
         bind:band={bands[i]}
         hovered={hoveredId === band.id}
+        offloaded={offloadedIdx.has(i)}
         onChange={onSchedule}
         onChangeKind={() => onChangeKind(band)}
         onRemove={() => onRemoveBand(band.id)}

@@ -28,6 +28,7 @@
   let showHotkeys = $state(false);
   let failedHotkeys = $state<string[]>([]); // binding ids that couldn't register
   let devices = $state<api.AudioDevice[]>([]); // audio outputs for the "switch device" hotkey
+  let offload = $state<api.HardwareStatus | null>(null); // hardware EQ offload state
   let windowFocused = $state(true); // gates the OSD overlay: only show feedback when unfocused
   let isBypassed = $state(false);
   let bandCount = $state(defaultBandCount());
@@ -41,6 +42,10 @@
   const toneFlat = $derived(
     tone.bass === 0 && tone.mid === 0 && tone.treble === 0 && !tone.invert && !tone.swap,
   );
+  // In Min. APO preamp offload mode the editor's Auto Preamp is forced on, so APO
+  // carries no headroom (the device's pregain does) and the bands left to APO can't
+  // clip. Keyed on `active` (offload actually engaged), not the global toggle.
+  const forceAutoPreamp = $derived(!!offload?.active && offload.mode === "minimize-preamp");
   let toneTimer: ReturnType<typeof setTimeout> | null = null;
   let toneLast = 0;
   function pushTone() {
@@ -84,8 +89,16 @@
     } else if (h.action === "device") {
       // Stable endpoint id: works again automatically once an unplugged device
       // returns; a currently-absent device just surfaces the backend error. Show
-      // the OSD only once the switch actually succeeds.
-      if (h.device) api.setDefaultAudioDevice(h.device).then(() => maybeOsd(h)).catch((e) => flash(String(e)));
+      // the OSD only once the switch actually succeeds. Switching output may change
+      // whether offload engages, so reconcile after.
+      if (h.device)
+        api
+          .setDefaultAudioDevice(h.device)
+          .then(() => {
+            refreshOffload();
+            maybeOsd(h);
+          })
+          .catch((e) => flash(String(e)));
       return;
     } else if (h.action === "tone-reset") {
       resetTone();
@@ -103,6 +116,16 @@
       presetName: h.preset && presets.includes(h.preset) ? h.preset : undefined,
     });
     if (payload) emit(OSD_EVENT, payload).catch(() => {});
+  }
+
+  // Reconcile hardware offload with the active output (off the UI thread) and pick
+  // up the fresh status. Called on demand — window focus and output switches — so
+  // offload follows the active output without polling.
+  function refreshOffload() {
+    api
+      .refreshHardware()
+      .then((s) => (offload = s))
+      .catch(() => {});
   }
 
   // Audio outputs can change as hardware is plugged/unplugged, so refresh on
@@ -129,6 +152,7 @@
   async function reload() {
     status = await api.apoStatus();
     presetsDirPath = await api.presetsDir();
+    offload = await api.hardwareStatus().catch(() => null);
     if (status.installed) {
       presets = await api.listPresets();
       categories = await api.presetCategories();
@@ -388,6 +412,7 @@
     const onFocus = () => {
       reload();
       loadDevices();
+      refreshOffload(); // follow an output-device change made while we were away
     };
     window.addEventListener("focus", onFocus);
     return () => {
@@ -474,6 +499,7 @@
       onOpenPresets={openPresets}
       onChangePresetsDir={changePresetsDir}
       onResetPresetsDir={resetPresetsDir}
+      onHardwareChanged={reload}
     />
   {:else if showHotkeys}
     <HotkeysPage {presets} {categories} {devices} failedIds={failedHotkeys} />
@@ -506,6 +532,8 @@
         name={selected}
         {tone}
         bypassed={isBypassed}
+        {forceAutoPreamp}
+        offloadActive={!!offload?.active}
         reloadToken={editorReloadToken}
         onApplied={(n) => {
           active = n;

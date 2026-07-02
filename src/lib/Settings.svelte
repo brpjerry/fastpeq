@@ -25,6 +25,7 @@
   const TONE_STEPS = [0.25, 0.5, 1];
   import { getTargets, removeTarget, FLAT_TARGET } from "./targets.svelte";
   import Switch from "./Switch.svelte";
+  import HardwarePanel from "./HardwarePanel.svelte";
 
   let {
     status,
@@ -37,6 +38,7 @@
     onOpenPresets,
     onChangePresetsDir,
     onResetPresetsDir,
+    onHardwareChanged,
   }: {
     status: ApoStatus | null;
     presetsDirPath: string;
@@ -48,6 +50,7 @@
     onOpenPresets: () => void;
     onChangePresetsDir: () => void;
     onResetPresetsDir: () => void;
+    onHardwareChanged: () => void;
   } = $props();
 
   let accentId = $state(currentAccentId());
@@ -225,6 +228,7 @@
         <button onclick={onResetPresetsDir} disabled={busy}>Use default</button>
       </div>
     </section>
+    <HardwarePanel onChanged={onHardwareChanged} />
     <section class="settings-section">
       <h3>Equalizer APO</h3>
       {#if status?.installed}

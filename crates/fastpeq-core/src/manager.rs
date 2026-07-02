@@ -252,6 +252,23 @@ impl Manager {
         Ok(None)
     }
 
+    /// The active preset identified by the provenance stamp alone, *without* the
+    /// content-equivalence check of [`active_preset`].
+    ///
+    /// Used when hardware EQ offload is active: the offloaded bands are removed
+    /// from `config.txt` (they live on the device), so the live EQ deliberately no
+    /// longer matches the full stored preset and the equivalence check would fail.
+    /// The stamp still names which preset produced this state, so we trust it as
+    /// long as that preset still exists. A bypassed config (stamp stripped) and an
+    /// unstamped/foreign config both read as not active.
+    pub fn active_preset_by_stamp(&self) -> io::Result<Option<String>> {
+        let current = self.current_config()?;
+        match provenance::name(&current) {
+            Some(name) if self.store.exists(&name) => Ok(Some(name)),
+            _ => Ok(None),
+        }
+    }
+
     /// Bulk-import PEACE presets (`*.peace`) from the Equalizer APO config folder,
     /// converting PEACE's INI format to APO filters. Only the folder itself is
     /// scanned (not subfolders like `OLD\`); templates with no EQ are skipped;

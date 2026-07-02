@@ -25,6 +25,7 @@ vi.mock("./api", () => ({
   applyLive: vi.fn(() => Promise.resolve()),
   savePreset: vi.fn(() => Promise.resolve()),
   readTextFile: vi.fn(() => Promise.resolve("")),
+  offloadSelection: vi.fn(() => Promise.resolve([])),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -66,6 +67,67 @@ describe("Editor", () => {
     await waitFor(() => expect(bandCount(container)).toBe(1));
     await fireEvent.click(container.querySelector(".band-actions .add")!);
     expect(bandCount(container)).toBe(2);
+  });
+
+  it("marks bands sent to hardware with a chip when offload is active", async () => {
+    vi.mocked(api.offloadSelection).mockResolvedValue([0]); // only the first band
+    const { container } = renderEditor(cfg(0, [[100, 3, 1], [1000, 3, 1]]), {
+      offloadActive: true,
+    });
+    await waitFor(() => expect(bandCount(container)).toBe(2));
+    await waitFor(() => expect(container.querySelector(".hw-chip")).toBeTruthy());
+
+    const bandRows = container.querySelectorAll(".band");
+    expect(bandRows[0].classList.contains("offloaded")).toBe(true);
+    expect(bandRows[1].classList.contains("offloaded")).toBe(false);
+    expect(container.querySelectorAll(".hw-chip").length).toBe(1);
+  });
+
+  it("shows no hardware chips when offload is inactive", async () => {
+    vi.mocked(api.offloadSelection).mockResolvedValue([0]);
+    const { container } = renderEditor(cfg(0, [[100, 3, 1]]), { offloadActive: false });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    // Offload is off, so the effect short-circuits and no band is marked.
+    expect(container.querySelector(".hw-chip")).toBeNull();
+  });
+
+  it("splits the preamp into APO + Device sliders when offload is active", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 6, 1]]), { offloadActive: true });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    const labels = [...container.querySelectorAll(".plabel")].map((e) => e.textContent?.trim());
+    expect(labels).toContain("APO");
+    expect(labels).toContain("Device");
+    expect(container.querySelectorAll(".preamp").length).toBe(2);
+  });
+
+  it("shows a single preamp slider when offload is off", async () => {
+    const { container } = renderEditor(cfg(-6, [[1000, 6, 1]]), { offloadActive: false });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    const labels = [...container.querySelectorAll(".plabel")].map((e) => e.textContent?.trim());
+    expect(labels).toEqual(["Preamp"]);
+  });
+
+  it("forces Auto Preamp on and locks the toggle in Min. APO preamp offload mode", async () => {
+    // A +8 dB boost with no preset preamp would clip without auto preamp.
+    const { container } = renderEditor(cfg(0, [[1000, 8, 1]]), { forceAutoPreamp: true });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    // The manual preamp slider is driven by auto, so it's disabled...
+    const slider = container.querySelector(".preamp input[type='range']") as HTMLInputElement;
+    expect(slider.disabled).toBe(true);
+    // ...and auto pulled the preamp negative to clear the +8 dB boost.
+    expect(Number(slider.value)).toBeLessThan(0);
+
+    // The Auto toggle reads on and is locked (disabled).
+    const autoSwitch = [...container.querySelectorAll(".switch")].find((s) =>
+      s.textContent?.includes("Auto"),
+    );
+    const autoInput = autoSwitch?.querySelector("input") as HTMLInputElement;
+    expect(autoInput.checked).toBe(true);
+    expect(autoInput.disabled).toBe(true);
+
+    // No clip warning, since auto preamp prevents clipping.
+    expect(container.querySelector(".clip")).toBeNull();
   });
 
   it("removes a band", async () => {

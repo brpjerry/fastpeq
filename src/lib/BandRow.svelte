@@ -22,6 +22,7 @@
   let {
     band = $bindable(),
     hovered,
+    offloaded = false,
     onChange,
     onChangeKind,
     onRemove,
@@ -29,6 +30,8 @@
   }: {
     band: Band;
     hovered: boolean;
+    /** This band is currently sent to the hardware device (shows a "HW" chip). */
+    offloaded?: boolean;
     onChange: () => void;
     onChangeKind: () => void;
     onRemove: () => void;
@@ -40,6 +43,7 @@
   class="band"
   class:off={!band.enabled}
   class:hover={hovered}
+  class:offloaded
   onmouseenter={() => onHover(true)}
   onmouseleave={() => onHover(false)}
   role="presentation"
@@ -81,6 +85,9 @@
       <small>Q</small>
       <input type="number" min="0.1" max="36" step="0.1" bind:value={band.q} onchange={onChange} />
     </span>
+  {/if}
+  {#if offloaded}
+    <span class="hw-chip" title="Sent to the hardware device">HW</span>
   {/if}
   <button class="danger remove" onclick={onRemove} title="Remove band">
     &#10005;
@@ -159,5 +166,19 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+  }
+  /* Marks a band that's offloaded to the hardware device. */
+  .hw-chip {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    background: var(--accent);
+    color: #fff;
+  }
+  .band.offloaded {
+    box-shadow: inset -2px 0 0 var(--accent);
   }
 </style>
