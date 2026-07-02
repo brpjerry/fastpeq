@@ -216,6 +216,33 @@ mod imp {
         Ok(())
     }
 
+    /// The friendly name of the current default render endpoint, without
+    /// enumerating every device. Cheap enough to poll from the offload reconciler
+    /// (which only needs to notice when the active output *changes*).
+    pub fn default_output_name() -> Option<String> {
+        let _com = ComGuard::new();
+        // SAFETY: guarded by the COM init above; the endpoint + its property store
+        // are owned here, and the friendly-name PROPVARIANT is read like in
+        // `list_devices`.
+        unsafe {
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+            let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
+            device
+                .OpenPropertyStore(STGM_READ)
+                .ok()
+                .and_then(|store| store.GetValue(&PKEY_Device_FriendlyName).ok())
+                .and_then(|prop| {
+                    if prop.Anonymous.Anonymous.vt == VT_LPWSTR {
+                        prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string().ok()
+                    } else {
+                        None
+                    }
+                })
+                .filter(|s| !s.is_empty())
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::{list_devices, set_default};
@@ -258,7 +285,7 @@ mod imp {
 }
 
 #[cfg(windows)]
-pub use imp::{list_devices, set_default};
+pub use imp::{default_output_name, list_devices, set_default};
 
 /// Enumerate output devices (non-Windows stub).
 #[cfg(not(windows))]
@@ -270,4 +297,10 @@ pub fn list_devices() -> Result<Vec<AudioDevice>, String> {
 #[cfg(not(windows))]
 pub fn set_default(_id: &str) -> Result<(), String> {
     Err("Switching audio devices is only supported on Windows".to_string())
+}
+
+/// The default output device name (non-Windows stub).
+#[cfg(not(windows))]
+pub fn default_output_name() -> Option<String> {
+    None
 }

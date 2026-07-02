@@ -1,11 +1,11 @@
 //! IPC commands invoked from the Svelte frontend. Each is a thin wrapper that
 //! delegates to [`AppState`] and refreshes the tray when state changes.
 
-use crate::state::{ApoStatus, AppState};
+use crate::state::{ApoStatus, AppState, HardwareStatus};
 use crate::tray;
-use fastpeq_core::{Category, Config, ImportReport, Tone};
+use fastpeq_core::{Category, Config, ImportReport, OffloadMode, Tone};
 use std::collections::BTreeMap;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 pub fn apo_status(state: State<'_, AppState>) -> ApoStatus {
@@ -98,9 +98,16 @@ pub fn save_preset(
     Ok(())
 }
 
+/// Live preview. `pregain` (dB, `≤ 0`), when present, is the hardware device's
+/// pregain set by the editor's hardware preamp slider; `null` keeps the automatic
+/// pregain (and lets Min. APO preamp mode recompute the APO preamp).
 #[tauri::command]
-pub fn apply_live(state: State<'_, AppState>, config: Config) -> Result<(), String> {
-    state.apply_config(&config)
+pub fn apply_live(
+    state: State<'_, AppState>,
+    config: Config,
+    pregain: Option<f64>,
+) -> Result<(), String> {
+    state.apply_config(&config, pregain)
 }
 
 #[tauri::command]
@@ -210,4 +217,58 @@ pub fn list_audio_devices() -> Result<Vec<crate::audio::AudioDevice>, String> {
 #[tauri::command]
 pub fn set_default_audio_device(id: String) -> Result<(), String> {
     crate::audio::set_default(&id)
+}
+
+/// List supported hardware-EQ devices currently connected (for the hardware panel).
+/// Async + `spawn_blocking`: HID enumeration takes ~1 s, so it must not run on the
+/// UI thread (where synchronous commands execute).
+#[tauri::command]
+pub async fn list_hardware_devices() -> Result<Vec<crate::hardware::DetectedDevice>, String> {
+    tauri::async_runtime::spawn_blocking(crate::hardware::detect)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The current hardware-offload status (enabled device, firmware, errors, mode).
+/// A cheap read — does not reconcile with the active output (see `refresh_hardware`).
+#[tauri::command]
+pub fn hardware_status(state: State<'_, AppState>) -> HardwareStatus {
+    state.hardware_status()
+}
+
+/// Reconcile offload with the active output device, then return the fresh status.
+/// The frontend calls this on demand — window focus, opening the panel, a mode
+/// change, or after switching output — so offload follows the output without any
+/// polling. The reconcile runs off the UI thread (its HID enumeration takes ~1 s).
+#[tauri::command]
+pub async fn refresh_hardware(app: AppHandle) -> Result<HardwareStatus, String> {
+    let sync_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(state) = sync_app.try_state::<AppState>() {
+            state.sync_offload();
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(app.state::<AppState>().hardware_status())
+}
+
+/// Which of `config`'s filters (positions in document order) are currently sent to
+/// hardware — for the editor's per-band indicator. Empty when offload is off.
+#[tauri::command]
+pub fn offload_selection(state: State<'_, AppState>, config: Config) -> Vec<usize> {
+    state.offload_selection(&config)
+}
+
+/// Set how bands are selected for hardware offload. Refreshes the tray since the
+/// active-preset display can change.
+#[tauri::command]
+pub fn set_offload_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mode: OffloadMode,
+) -> Result<(), String> {
+    state.set_offload_mode(mode)?;
+    let _ = tray::refresh(&app);
+    Ok(())
 }

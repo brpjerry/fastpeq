@@ -55,6 +55,30 @@ vi.mock("./lib/api", () => {
     getTone: vi.fn(),
     getPreset: vi.fn(() => Promise.resolve({ lines: [] })),
     listAudioDevices: vi.fn(() => Promise.resolve([])),
+    listHardwareDevices: vi.fn(() => Promise.resolve([])),
+    hardwareStatus: vi.fn(() =>
+      Promise.resolve({
+        enabled: false,
+        active: false,
+        device: null,
+        version: null,
+        error: null,
+        max_filters: null,
+        mode: "apo-only",
+      }),
+    ),
+    refreshHardware: vi.fn(() =>
+      Promise.resolve({
+        enabled: false,
+        active: false,
+        device: null,
+        version: null,
+        error: null,
+        max_filters: null,
+        mode: "apo-only",
+      }),
+    ),
+    offloadSelection: vi.fn(() => Promise.resolve([])),
     // Mutations — resolve to void / a report.
     applyPreset: ok(),
     toggleBypass: ok(),
@@ -66,6 +90,7 @@ vi.mock("./lib/api", () => {
     applyLive: ok(),
     setTone: ok(),
     setDefaultAudioDevice: ok(),
+    setOffloadMode: ok(),
     setHotkeys: vi.fn(() => Promise.resolve([])),
     readTextFile: vi.fn(() => Promise.resolve("")),
     setPresetsDir: ok(),

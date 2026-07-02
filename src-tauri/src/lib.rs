@@ -5,6 +5,7 @@
 
 mod audio;
 mod commands;
+mod hardware;
 mod hotkeys;
 mod state;
 mod tray;
@@ -132,6 +133,17 @@ pub fn run() {
             // Detect Equalizer APO and prepare the preset library.
             app.manage(AppState::initialize(&handle)?);
 
+            // Engage offload at startup (if the active output is a supported device),
+            // off the UI thread since the HID enumeration takes ~1 s. After this,
+            // reconciles happen on demand via `refresh_hardware` (focus / mode change
+            // / output switch) — no polling.
+            let startup_handle = handle.clone();
+            std::thread::spawn(move || {
+                if let Some(state) = startup_handle.try_state::<AppState>() {
+                    state.sync_offload();
+                }
+            });
+
             // System tray with live preset switching.
             tray::build_tray(&handle)?;
 
@@ -176,6 +188,11 @@ pub fn run() {
             commands::set_hotkeys,
             commands::list_audio_devices,
             commands::set_default_audio_device,
+            commands::list_hardware_devices,
+            commands::hardware_status,
+            commands::refresh_hardware,
+            commands::set_offload_mode,
+            commands::offload_selection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running fastpeq");

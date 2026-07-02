@@ -36,13 +36,50 @@
     onApplied,
     tone = { bass: 0, mid: 0, treble: 0, invert: false, swap: false },
     bypassed = false,
+    forceAutoPreamp = false,
+    offloadActive = false,
   }: {
     name: string;
     reloadToken: number;
     onApplied: (name: string) => void;
     tone?: api.Tone;
     bypassed?: boolean;
+    /** Hardware offload's Min. APO preamp mode forces Auto Preamp on (and locked). */
+    forceAutoPreamp?: boolean;
+    /** Whether EQ offload to a hardware device is currently on (drives the per-band
+     * "→ hardware" indicator). */
+    offloadActive?: boolean;
   } = $props();
+
+  // Which band indices are currently sent to the hardware device. Queried from the
+  // backend (the source of truth across all selection modes) and refreshed,
+  // debounced, whenever the bands change while offload is on.
+  let hwBandIdx = $state<Set<number>>(new Set());
+  $effect(() => {
+    // Track the band shape so a freq/gain/Q/type/enable change re-queries.
+    const sig = JSON.stringify(
+      bands.map((b) => [b.enabled, b.kind, b.freq, b.gain, b.q, b.channel.kind]),
+    );
+    void sig;
+    if (!offloadActive) {
+      hwBandIdx = new Set();
+      return;
+    }
+    const cfg = buildConfig(false);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api
+        .offloadSelection(cfg)
+        .then((idx) => {
+          if (!cancelled) hwBandIdx = new Set(idx);
+        })
+        .catch(() => {});
+    }, 120);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  });
 
   // Editable band: gain/q kept as plain numbers; nulled out per-type on save.
   type Band = {
@@ -82,10 +119,17 @@
     }
   });
 
-  function computeAutoPreamp(): number {
-    const bandsPeak = peakGainDb(bands as CurveFilter[], 0, balance);
+  // Auto Preamp is on either by the user's toggle or because hardware offload's
+  // Min. APO preamp mode forces it. The forced state never overwrites the user's
+  // stored preference — it just overrides the effective behavior while active.
+  const effectiveAuto = $derived(forceAutoPreamp || autoPreamp);
+
+  // Auto-preamp value for a band set: the lowest (≤ 0) master preamp that keeps the
+  // summed boost — those bands plus the global tone overlay — from clipping.
+  function computeAutoPreamp(forBands: CurveFilter[] = bands as CurveFilter[]): number {
+    const bandsPeak = peakGainDb(forBands, 0, balance);
     const combinedPeak = peakGainDb(
-      [...bands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
+      [...forBands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
       0,
       balance,
     );
@@ -93,7 +137,36 @@
     return Math.round(Math.min(0, -requiredPeak) * 10) / 10;
   }
 
-  const livePreamp = $derived(autoPreamp ? computeAutoPreamp() : manualPreamp);
+  // Hardware offload splits the preamp into two stages: APO (the software remainder)
+  // and the device's pregain (the offloaded bands). `hwBandIdx` (from the backend)
+  // says which bands run on the device.
+  const hwBands = $derived(bands.filter((_, i) => hwBandIdx.has(i)) as CurveFilter[]);
+  const softwareBands = $derived(bands.filter((_, i) => !hwBandIdx.has(i)) as CurveFilter[]);
+
+  // Manual (Auto-off) values for the two offload stages — runtime only, never saved
+  // into the preset (which stays the full EQ). Seeded from the auto values when Auto
+  // is switched off so the sliders don't jump.
+  let apoManual = $state(0);
+  let hwManual = $state(0);
+
+  // The device pregain that keeps the offloaded bands from clipping the device.
+  function computeHwPregain(): number {
+    return Math.round(Math.min(0, -Math.max(0, peakGainDb(hwBands, 0, balance))) * 10) / 10;
+  }
+
+  // The effective value of each offload stage (auto-computed or manual).
+  const apoPreamp = $derived(effectiveAuto ? computeAutoPreamp(softwareBands) : apoManual);
+  const hwPregain = $derived(effectiveAuto ? computeHwPregain() : hwManual);
+
+  // What the curve + clip check use: the single master preamp when offload is off,
+  // or the combined attenuation of both stages when it's on (both reduce the final
+  // output level).
+  const livePreamp = $derived(
+    offloadActive ? apoPreamp + hwPregain : effectiveAuto ? computeAutoPreamp() : manualPreamp,
+  );
+
+  // The device pregain to send with a live preview (`null` = automatic / no offload).
+  const livePregain = $derived(offloadActive ? hwPregain : null);
 
   // Possible clipping when the summed boost — the active bands plus the global
   // tone overlay, on whichever channel ends up louder — tops 0 dB. Past that the
@@ -197,9 +270,9 @@
       loading = false;
       resetHistory(); // start a fresh undo history at the loaded state
       
-      // If Auto Preamp is globally enabled, pushing it to the live config doesn't dirty the preset
-      if (autoPreamp && !comparing) {
-        api.applyLive(buildConfig(false)).catch((e) => (err = String(e)));
+      // If Auto Preamp is enabled, pushing it to the live config doesn't dirty the preset
+      if (effectiveAuto && !comparing) {
+        api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
       }
     }
   }
@@ -349,7 +422,16 @@
   function buildConfig(forSave = false): Config {
     const lines: Line[] = [];
     for (const r of rawLines) lines.push({ kind: "Raw", value: r });
-    const p = (forSave && autoPreamp) ? manualPreamp : livePreamp;
+    // Save writes the full preset's preamp (clean when auto, else the combined
+    // value). A live preview under offload writes only the APO-stage preamp; the
+    // device pregain rides alongside via `apply_live`'s `pregain` argument.
+    const p = forSave
+      ? effectiveAuto
+        ? manualPreamp
+        : livePreamp
+      : offloadActive
+        ? apoPreamp
+        : livePreamp;
     if (hadPreamp || p !== 0) {
       lines.push({ kind: "Preamp", value: { gain: p, channel: { kind: "both" } } });
     }
@@ -386,7 +468,7 @@
     }
     lastApply = Date.now();
     try {
-      await api.applyLive(buildConfig(false)); // live preview -> config.txt only
+      await api.applyLive(buildConfig(false), livePregain); // live preview -> config.txt only
       err = "";
       onApplied(name); // keep the active highlight on the preset being edited
     } catch (e) {
@@ -423,7 +505,7 @@
     const sig = `${tone.bass},${tone.mid},${tone.treble}`;
     const changed = sig !== lastToneSig;
     lastToneSig = sig;
-    if (changed && !loading && !comparing && autoPreamp) {
+    if (changed && !loading && !comparing && effectiveAuto) {
       api.applyLive(buildConfig(false)).catch((e) => (err = String(e)));
     }
   });
@@ -637,9 +719,9 @@
       </button>
     </div>
 
-    <PreampRow bind:manualPreamp bind:autoPreamp bind:balance {livePreamp} onSchedule={schedule} onAutoPreampChange={(v) => { autoPreamp = v; schedule(); }} />
+    <PreampRow bind:manualPreamp autoPreamp={effectiveAuto} lockedAuto={forceAutoPreamp} bind:balance {livePreamp} offload={offloadActive} {apoPreamp} {hwPregain} bind:apoManual bind:hwManual onSchedule={schedule} onAutoPreampChange={(v) => { if (!v && offloadActive) { apoManual = computeAutoPreamp(softwareBands); hwManual = computeHwPregain(); } autoPreamp = v; schedule(); }} />
 
-    <FilterList bind:bands bind:view bind:hoveredId onSchedule={schedule} onChangeKind={changeKind} onRemoveBand={removeBand} />
+    <FilterList bind:bands bind:view bind:hoveredId offloadedIdx={hwBandIdx} onSchedule={schedule} onChangeKind={changeKind} onRemoveBand={removeBand} />
     
 
     {@render bandActions()}
@@ -669,11 +751,12 @@
 
     <div class="overlay-body">
       <aside class="overlay-side">
-        <PreampRow bind:manualPreamp bind:autoPreamp bind:balance {livePreamp} onSchedule={schedule} onAutoPreampChange={(v) => { autoPreamp = v; schedule(); }} />
+        <PreampRow bind:manualPreamp autoPreamp={effectiveAuto} lockedAuto={forceAutoPreamp} bind:balance {livePreamp} offload={offloadActive} {apoPreamp} {hwPregain} bind:apoManual bind:hwManual onSchedule={schedule} onAutoPreampChange={(v) => { if (!v && offloadActive) { apoManual = computeAutoPreamp(softwareBands); hwManual = computeHwPregain(); } autoPreamp = v; schedule(); }} />
         <FilterList
           bind:bands
           bind:view
           bind:hoveredId
+          offloadedIdx={hwBandIdx}
           onSchedule={schedule}
           onChangeKind={changeKind}
           onRemoveBand={removeBand}

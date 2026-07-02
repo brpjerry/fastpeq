@@ -46,7 +46,7 @@ impl Tone {
     }
 
     /// The filters this tone produces, skipping any knob left at 0 dB.
-    fn filters(&self) -> Vec<Filter> {
+    pub(crate) fn filters(&self) -> Vec<Filter> {
         let mut out = Vec::new();
         let mut push = |kind, freq, gain: f64, q| {
             if gain != 0.0 {

@@ -6,14 +6,31 @@
     manualPreamp = $bindable(),
     livePreamp,
     autoPreamp = $bindable(),
+    lockedAuto = false,
     balance = $bindable(),
+    offload = false,
+    apoPreamp = 0,
+    hwPregain = 0,
+    apoManual = $bindable(0),
+    hwManual = $bindable(0),
     onSchedule,
     onAutoPreampChange,
   }: {
     manualPreamp: number;
     livePreamp: number;
     autoPreamp: boolean;
+    /** When set, Auto Preamp is forced on and the toggle is disabled (e.g. by
+     * hardware offload's Min. APO preamp mode). */
+    lockedAuto?: boolean;
     balance: number;
+    /** Hardware offload active → split the preamp into APO + device sliders. */
+    offload?: boolean;
+    /** Effective APO-stage preamp / device pregain shown on the two sliders. */
+    apoPreamp?: number;
+    hwPregain?: number;
+    /** Manual (Auto-off) values the two offload sliders write back. */
+    apoManual?: number;
+    hwManual?: number;
     onSchedule: () => void;
     onAutoPreampChange: (v: boolean) => void;
   } = $props();
@@ -40,26 +57,46 @@
 </script>
 
 <div class="preamp">
-  <span class="plabel">Preamp</span>
-  <input
-    type="range"
-    min="-30"
-    max="6"
-    step="0.1"
-    value={livePreamp}
-    oninput={(e) => {
-      manualPreamp = Number(e.currentTarget.value);
-      onSchedule();
-    }}
-    disabled={autoPreamp}
-  />
-  <span class="pval">{livePreamp.toFixed(1)} dB</span>
+  {#if offload}
+    <span class="plabel" title="Equalizer APO preamp — applied to the bands kept in software">APO</span>
+    <input
+      type="range"
+      min="-30"
+      max="6"
+      step="0.1"
+      value={apoPreamp}
+      oninput={(e) => {
+        apoManual = Number(e.currentTarget.value);
+        onSchedule();
+      }}
+      disabled={autoPreamp}
+    />
+    <span class="pval">{apoPreamp.toFixed(1)} dB</span>
+  {:else}
+    <span class="plabel">Preamp</span>
+    <input
+      type="range"
+      min="-30"
+      max="6"
+      step="0.1"
+      value={livePreamp}
+      oninput={(e) => {
+        manualPreamp = Number(e.currentTarget.value);
+        onSchedule();
+      }}
+      disabled={autoPreamp}
+    />
+    <span class="pval">{livePreamp.toFixed(1)} dB</span>
+  {/if}
   <Switch
     compact
     label="Auto"
     checked={autoPreamp}
+    disabled={lockedAuto}
     onChange={onAutoPreampChange}
-    title="Automatically set the preamp so the EQ never clips"
+    title={lockedAuto
+      ? "Auto Preamp is managed by hardware offload (Min. APO preamp mode)"
+      : "Automatically set the preamp so the EQ never clips"}
   />
   <div class="balance-wrap">
     <button
@@ -104,6 +141,27 @@
     {/if}
   </div>
 </div>
+{#if offload}
+  <div class="preamp device">
+    <span
+      class="plabel"
+      title="Hardware device pregain — applied to the bands offloaded to the device">Device</span
+    >
+    <input
+      type="range"
+      min="-30"
+      max="6"
+      step="0.1"
+      value={hwPregain}
+      oninput={(e) => {
+        hwManual = Number(e.currentTarget.value);
+        onSchedule();
+      }}
+      disabled={autoPreamp}
+    />
+    <span class="pval">{hwPregain.toFixed(1)} dB</span>
+  </div>
+{/if}
 
 <style>
   .preamp {
@@ -111,6 +169,10 @@
     align-items: center;
     gap: 10px;
     margin: 8px 0 6px;
+  }
+  /* The second (device) row sits snug under the APO row. */
+  .preamp.device {
+    margin-top: 0;
   }
   .preamp input[type="range"] {
     flex: 1;

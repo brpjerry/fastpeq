@@ -14,6 +14,7 @@
 pub mod apo;
 pub mod category;
 pub mod manager;
+pub mod offload;
 pub mod peace;
 pub mod provenance;
 pub mod store;
@@ -23,5 +24,8 @@ pub use apo::env;
 pub use apo::{Channel, Config, Filter, FilterKind, Line, parse, serialize};
 pub use category::Category;
 pub use manager::{ImportReport, Manager};
+pub use offload::{
+    HardwareProfile, HwBand, HwFilterType, OffloadMode, Split, biquad_coeffs, peak_gain_db, split,
+};
 pub use store::PresetStore;
 pub use tone::Tone;
