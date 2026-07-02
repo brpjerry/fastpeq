@@ -8,12 +8,13 @@
   import Settings from "./lib/Settings.svelte";
   import HotkeysPage from "./lib/HotkeysPage.svelte";
   import TonePanel from "./lib/TonePanel.svelte";
-  import PresetsPanel from "./lib/PresetsPanel.svelte";
+  import PresetsPanel, { scrollCurrentIntoView } from "./lib/PresetsPanel.svelte";
   import { starterConfig, defaultBandCount } from "./lib/starter";
   import { addTarget } from "./lib/targets.svelte";
   import { renamePresetView, clearPresetView } from "./lib/preset-view.svelte";
   import { parseRew, normalize, downsample } from "./lib/measurement";
-  import { getSpecialtyIcons, getBluetoothIcons, getToneStep } from "./lib/prefs.svelte";
+  import { getToneStep } from "./lib/prefs.svelte";
+  import { createTrailingThrottle } from "./lib/throttle";
   import { getHotkeys, accelerators } from "./lib/hotkeys.svelte";
   import { OSD_EVENT, payloadForHotkey } from "./lib/osd";
 
@@ -46,30 +47,21 @@
   // carries no headroom (the device's pregain does) and the bands left to APO can't
   // clip. Keyed on `active` (offload actually engaged), not the global toggle.
   const forceAutoPreamp = $derived(!!offload?.active && offload.mode === "minimize-preamp");
-  let toneTimer: ReturnType<typeof setTimeout> | null = null;
-  let toneLast = 0;
+  const toneThrottle = createTrailingThrottle(() => {
+    api.setTone(tone).catch((e) => flash(String(e)));
+  }, 80);
   function pushTone() {
     if (!status?.installed) return;
-    const send = () => {
-      toneLast = Date.now();
-      api.setTone(tone).catch((e) => flash(String(e)));
-    };
-    const elapsed = Date.now() - toneLast;
-    if (toneTimer) clearTimeout(toneTimer);
-    if (elapsed >= 80) send();
-    else toneTimer = setTimeout(send, 80 - elapsed);
+    toneThrottle.schedule();
   }
   function setKnob(which: "bass" | "mid" | "treble", v: number) {
     tone[which] = v;
     pushTone();
   }
   function resetTone() {
-    if (toneTimer) clearTimeout(toneTimer);
+    toneThrottle.cancel();
     tone = { bass: 0, mid: 0, treble: 0, invert: false, swap: false };
-    if (status?.installed) {
-      toneLast = Date.now();
-      api.setTone(tone).catch((e) => flash(String(e)));
-    }
+    if (status?.installed) toneThrottle.flush();
   }
   const clampTone = (v: number) => Math.max(-12, Math.min(12, v)); // matches the tone Knob range
 
@@ -333,14 +325,7 @@
 
   // Returning from Settings recreates the preset list (resetting its scroll to
   // the top), so jump back to the active preset instead of leaving it at top.
-
-  function scrollCurrentIntoView() {
-    const el = document.querySelector(".presets .active") as HTMLElement;
-    if (el && typeof el.scrollIntoView === "function") {
-      el.scrollIntoView({ block: "center" });
-    }
-  }
-
+  // (scrollCurrentIntoView is shared from PresetsPanel's module script.)
   let wasOnSubPage = false;
   $effect(() => {
     const onSubPage = showSettings || showHotkeys;

@@ -383,7 +383,7 @@ fn offload_band(f: &Filter, profile: &HardwareProfile) -> Option<HwBand> {
         HwFilterType::HighShelf if !profile.supports_high_shelf => return None,
         _ => {}
     }
-    let clamp = |v: f64, (lo, hi): (f64, f64)| v.max(lo).min(hi);
+    let clamp = |v: f64, (lo, hi): (f64, f64)| v.clamp(lo, hi);
     Some(HwBand {
         kind,
         freq: clamp(f.freq, profile.freq_range),

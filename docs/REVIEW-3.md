@@ -5,7 +5,7 @@ Reviews #1 (`REVIEW.md`) and #2 (`REVIEW-2.md`) are fully worked through; this i
 a fresh list. Health at review time: clippy clean, svelte-check clean, 176
 frontend + all Rust tests green, no TODO/FIXME markers.
 
-**Status:** ✅ P1 (items 1–3) and P2 (items 4–6) done · ⬜ items 7–15 open.
+**Status:** ✅ All items (1–15) worked through.
 
 ---
 
@@ -86,51 +86,53 @@ frontend + all Rust tests green, no TODO/FIXME markers.
 
 ## P3 — Duplication / refactoring
 
-- [ ] 7. **Editor.svelte duplicates its control strip between the two
+- [x] 7. **Editor.svelte duplicates its control strip between the two
   layouts.** The `PreampRow` invocation — including the non-trivial inline
   `onAutoPreampChange` handler — is copy-pasted verbatim in the collapsed panel
   and the expanded overlay. The file already uses `{#snippet}` for
-  `headActions`/`bandActions`; wrap `PreampRow` + `FilterList` in a third
-  snippet and hoist the handler to a named function.
+  `headActions`/`bandActions`. **Fix:** new `eqControls` snippet
+  (PreampRow + FilterList + bandActions) rendered by both layouts; the handler
+  hoisted to a named `setAutoPreamp`.
 
-- [ ] 8. **Config→editor-state parsing exists twice in Editor.svelte.**
+- [x] 8. **Config→editor-state parsing exists twice in Editor.svelte.**
   `load()` and `configToCurve` both walk `cfg.lines` splitting
-  preamp/balance/filters with identical logic. Extract one shared
-  "parse config into {filters, preamp, balance, raw}" helper.
+  preamp/balance/filters with identical logic. **Fix:** shared
+  `parseConfigEq(cfg)` in `eq.ts` (returns filters/preamp/balance/hadPreamp/raw);
+  `configToCurve` deleted, both paths use it.
 
-- [ ] 9. **The trailing-throttle pattern is hand-rolled twice.** Editor's
+- [x] 9. **The trailing-throttle pattern is hand-rolled twice.** Editor's
   `schedule`/`commit`/`lastApply`/`timer` and App's
   `pushTone`/`toneLast`/`toneTimer` are the same throttle-with-trailing-call.
-  Extract a shared `createTrailingThrottle(fn, ms)` utility (also makes the
-  timers impossible to leak).
+  **Fix:** shared `createTrailingThrottle(fn, ms)` in `src/lib/throttle.ts`
+  (with unit tests); both call sites migrated, `resetTone` uses its `flush()`.
 
-- [ ] 10. **`scrollCurrentIntoView` is defined identically in App.svelte and
+- [x] 10. **`scrollCurrentIntoView` is defined identically in App.svelte and
   PresetsPanel.svelte**, both reaching into the DOM via global
-  `document.querySelector`. Either lift into a shared helper, or let
-  `PresetsPanel` own it — the unused `presetListEl` bindable (item 13) was
-  seemingly added for exactly this and never wired up.
+  `document.querySelector`. **Fix:** one definition in PresetsPanel's
+  `<script module>`, imported by App; the dead `presetListEl` bindable (item
+  13) removed rather than wired up.
 
-- [ ] 11. **Editor bypasses the storage helpers it's supposed to use.**
-  `src/lib/Editor.svelte` does raw `localStorage.getItem/setItem` with
-  `typeof localStorage` guards for `autoPreamp` — the `loadBool`/`save`
-  wrappers in `src/lib/storage.ts` were centralized in review #1 for precisely
-  this. (Nit: the key is `fastpeq:autoPreamp` while everything else uses the
-  `fastpeq.` dot style.)
+- [x] 11. **Editor bypasses the storage helpers it's supposed to use.**
+  `src/lib/Editor.svelte` did raw `localStorage.getItem/setItem` with
+  `typeof localStorage` guards for `autoPreamp`. **Fix:** `loadBool`/`save`
+  from `storage.ts`. The `fastpeq:autoPreamp` key (colon, not dot) is kept so
+  existing user settings survive.
 
 ## P4 — Dead code / nits
 
-- [ ] 12. `src/App.svelte` imports `getSpecialtyIcons` and `getBluetoothIcons`
-  but never uses them (only `getToneStep` is used there).
+- [x] 12. `src/App.svelte` imported `getSpecialtyIcons` and `getBluetoothIcons`
+  but never used them (only `getToneStep`) — removed. Same for the unused
+  `tick` import in `PresetsPanel.svelte`.
 
-- [ ] 13. `presetListEl = $bindable()` in `src/lib/PresetsPanel.svelte` is bound
-  to the `<ul>` but no parent binds it and nothing reads it — dead API surface
-  (or the missing piece of item 10).
+- [x] 13. `presetListEl = $bindable()` in `src/lib/PresetsPanel.svelte` was
+  bound to the `<ul>` but no parent bound it and nothing read it — removed
+  (item 10 went the module-script route instead).
 
-- [ ] 14. `src/lib/Editor.svelte` has a mis-indented import, and `prefs.svelte`
-  is imported on two separate lines — merge them.
+- [x] 14. `src/lib/Editor.svelte` mis-indented import / duplicate
+  `prefs.svelte` import lines — merged.
 
-- [ ] 15. The `clamp` closure in `offload_band`
-  (`crates/fastpeq-core/src/offload.rs`) can just be `f64::clamp`.
+- [x] 15. The `clamp` closure in `offload_band`
+  (`crates/fastpeq-core/src/offload.rs`) now uses `f64::clamp`.
 
 ---
 
