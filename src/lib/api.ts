@@ -35,6 +35,13 @@ export const setTone = (tone: Tone) => invoke<void>("set_tone", { tone });
 export const setHotkeys = (bindings: { id: string; accelerator: string }[]) =>
   invoke<string[]>("set_hotkeys", { bindings });
 
+/** Persisted hotkey bindings — a raw JSON document owned by hotkeys.svelte.ts,
+ *  stored by the backend as hotkeys.json in the app data dir (atomic writes),
+ *  so bindings survive webview profile loss. `null` = never saved. */
+export const loadHotkeyBindings = () => invoke<string | null>("load_hotkey_bindings");
+export const saveHotkeyBindings = (json: string) =>
+  invoke<void>("save_hotkey_bindings", { json });
+
 /** An audio output device, for the "switch output device" hotkey principal. */
 export interface AudioDevice {
   id: string;

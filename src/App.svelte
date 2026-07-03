@@ -15,7 +15,7 @@
   import { parseRew, normalize, downsample } from "./lib/measurement";
   import { getToneStep } from "./lib/prefs.svelte";
   import { createTrailingThrottle } from "./lib/throttle";
-  import { getHotkeys, accelerators } from "./lib/hotkeys.svelte";
+  import { getHotkeys, accelerators, initHotkeys } from "./lib/hotkeys.svelte";
   import { OSD_EVENT, payloadForHotkey } from "./lib/osd";
 
   let status = $state<api.ApoStatus | null>(null);
@@ -400,6 +400,7 @@
 
   onMount(() => {
     reload().then(scrollCurrentIntoView); // on open, jump to the active preset
+    initHotkeys().catch(() => {}); // the accelerators() effect registers once loaded
     loadDevices();
     const unlisten = listen("fastpeq:changed", () => reload());
     const unlistenHotkey = listen<string>("hotkey-pressed", (e) => dispatchHotkey(e.payload));

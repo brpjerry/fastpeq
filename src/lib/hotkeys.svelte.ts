@@ -1,9 +1,17 @@
-// User-configurable global hotkeys, persisted to localStorage. Each binding is a
-// modifier (Ctrl+Alt or Ctrl+Shift) plus a single key, mapped to an action. The
-// list is ordered (the Hotkeys page lets the user reorder it). The backend just
-// registers the accelerators and emits an event on press; App.svelte dispatches
-// the action, so all the semantics live here on the frontend.
+// User-configurable global hotkeys. Each binding is a modifier (Ctrl+Alt or
+// Ctrl+Shift) plus a single key, mapped to an action. The list is ordered (the
+// Hotkeys page lets the user reorder it). The backend just registers the
+// accelerators and emits an event on press; App.svelte dispatches the action,
+// so all the semantics live here on the frontend.
+//
+// Persistence: the source of truth is `hotkeys.json` in the app data dir,
+// written atomically by the backend. Bindings used to live only in WebView
+// localStorage — a browser profile shared by the installed app and any debug
+// build run directly, which an unclean shutdown can silently discard; a user's
+// bindings were really lost that way once. localStorage is now only read as a
+// one-time migration source and kept updated as a secondary backup copy.
 
+import * as api from "./api";
 import { loadJson, saveJson } from "./storage";
 
 export type HotkeyMod = "ctrl-alt" | "ctrl-shift";
@@ -29,17 +37,55 @@ function freshId(): string {
   return `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-// Seed a single Ctrl+Alt+B → Bypass binding on first run only. Once the list has
-// been written (even emptied), it's respected — a deleted default stays deleted.
-function initial(): Hotkey[] {
-  const stored = loadJson<Hotkey[] | null>(KEY, null);
-  if (stored !== null) return stored;
-  const seed: Hotkey[] = [{ id: freshId(), mod: "ctrl-alt", key: "B", action: "bypass" }];
-  saveJson(KEY, seed);
-  return seed;
+let hotkeys = $state<Hotkey[]>([]);
+
+/** The bindings as a `Hotkey[]`, or `null` when the document is unusable. */
+function parseBindings(json: string): Hotkey[] | null {
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? (parsed as Hotkey[]) : null;
+  } catch {
+    return null;
+  }
 }
 
-let hotkeys = $state<Hotkey[]>(initial());
+/**
+ * Load the bindings from the backend's `hotkeys.json` (App calls this once on
+ * mount; the store starts empty until it resolves). When no file exists yet,
+ * migrate the pre-file localStorage list — or, on a true first run (neither
+ * source has ever stored anything), seed a single Ctrl+Alt+B → Bypass binding.
+ * Once a list has been written (even emptied), it's respected: a deleted
+ * default stays deleted.
+ *
+ * An *unreadable* file is deliberately NOT overwritten with a seed — the data
+ * may be recoverable by hand, and the old localStorage store was once wiped by
+ * exactly that seed-over-what-you-can't-read behavior. The list just starts
+ * empty and the file is only rewritten when the user next edits a binding.
+ */
+export async function initHotkeys(): Promise<void> {
+  let stored: string | null = null;
+  try {
+    stored = await api.loadHotkeyBindings();
+  } catch {
+    // Backend unavailable (unit tests / plain browser) — fall through to the
+    // localStorage copy so the page still works.
+  }
+  if (stored !== null) {
+    hotkeys = parseBindings(stored) ?? [];
+    return;
+  }
+  const legacy = loadJson<Hotkey[] | null>(KEY, null);
+  hotkeys = legacy ?? [{ id: freshId(), mod: "ctrl-alt", key: "B", action: "bypass" }];
+  persist();
+}
+
+/** Write the list to hotkeys.json (source of truth) + localStorage (backup). */
+function persist(): void {
+  saveJson(KEY, hotkeys);
+  // A failed file write isn't surfaced here — the localStorage copy above still
+  // holds the list, and the next edit retries.
+  api.saveHotkeyBindings(JSON.stringify(hotkeys)).catch(() => {});
+}
 
 export function getHotkeys(): Hotkey[] {
   return hotkeys;
@@ -49,18 +95,18 @@ export function getHotkeys(): Hotkey[] {
 export function addHotkey(): string {
   const h: Hotkey = { id: freshId(), mod: "ctrl-alt", key: "", action: "preset" };
   hotkeys = [...hotkeys, h];
-  saveJson(KEY, hotkeys);
+  persist();
   return h.id;
 }
 
 export function updateHotkey(id: string, patch: Partial<Hotkey>): void {
   hotkeys = hotkeys.map((h) => (h.id === id ? { ...h, ...patch } : h));
-  saveJson(KEY, hotkeys);
+  persist();
 }
 
 export function removeHotkey(id: string): void {
   hotkeys = hotkeys.filter((h) => h.id !== id);
-  saveJson(KEY, hotkeys);
+  persist();
 }
 
 /** Reorder: move the entry at `from` to index `to`. No-op for out-of-range. */
@@ -70,7 +116,7 @@ export function moveHotkey(from: number, to: number): void {
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
   hotkeys = next;
-  saveJson(KEY, hotkeys);
+  persist();
 }
 
 /** A valid hotkey key is exactly one uppercase letter or digit. */

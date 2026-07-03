@@ -61,6 +61,12 @@ fn settings_path(data_dir: &Path) -> PathBuf {
     data_dir.join("settings.json")
 }
 
+/// The hotkey bindings live in their own file (not `settings.json`, and NOT the
+/// WebView's localStorage — see [`AppState::set_hotkey_bindings`]).
+fn hotkeys_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("hotkeys.json")
+}
+
 fn load_settings(data_dir: &Path) -> Settings {
     match std::fs::read_to_string(settings_path(data_dir)) {
         Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
@@ -789,5 +795,31 @@ impl AppState {
             .map_err(|e| e.to_string())?;
         self.invalidate_active();
         Ok(report)
+    }
+
+    // --- Hotkey bindings: an opaque JSON document owned by the frontend -------
+
+    /// The persisted hotkey bindings, or `None` when none have been saved yet.
+    /// The backend never interprets the document — the frontend owns the schema.
+    pub fn hotkey_bindings(&self) -> Option<String> {
+        std::fs::read_to_string(hotkeys_path(&self.data_dir)).ok()
+    }
+
+    /// Persist the hotkey bindings atomically to `hotkeys.json`.
+    ///
+    /// Bindings used to live only in the WebView's localStorage, which sits in a
+    /// browser profile shared by the installed app and any debug build run
+    /// directly, and which an unclean shutdown can silently discard — real user
+    /// data was lost that way once. A file in the app data dir survives all of
+    /// that. The document is opaque, but it must at least be a JSON array so a
+    /// confused caller can't replace the file with garbage.
+    pub fn set_hotkey_bindings(&self, json: &str) -> Result<(), String> {
+        let parsed: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| format!("invalid hotkeys JSON: {e}"))?;
+        if !parsed.is_array() {
+            return Err("hotkey bindings must be a JSON array".to_string());
+        }
+        fastpeq_core::apo::write_text_atomic(&hotkeys_path(&self.data_dir), json)
+            .map_err(|e| e.to_string())
     }
 }
