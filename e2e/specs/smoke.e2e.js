@@ -395,7 +395,7 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
     const slider = await $('.preamp input[type="range"]');
     const auto = await $(".preamp .switch"); // the only switch in the preamp row
 
-    // Normalize to Auto-off first (the setting persists in localStorage).
+    // Normalize to Auto-off first (the setting persists in prefs.json).
     if (!(await slider.isEnabled())) {
       await auto.click();
       await browser.waitUntil(async () => await slider.isEnabled(), { timeout: 5000 });

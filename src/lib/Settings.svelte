@@ -3,9 +3,10 @@
   // directly; App passes the bits only it owns (status, presets dir, busy, the
   // shared new-preset band count) and the file/folder actions as callbacks.
   import type { ApoStatus } from "./types";
-  import { ACCENTS, currentAccentId, applyAccent } from "./theme";
-  import { BAND_COUNTS, setDefaultBandCount } from "./starter";
+  import { ACCENTS, currentAccentId, setAccent } from "./theme";
+  import { BAND_COUNTS } from "./starter";
   import {
+    setDefaultBandCount,
     getFilterSet,
     setFilterSet,
     getFilterShapes,
@@ -72,7 +73,7 @@
             style="--sw: {a.accent}"
             onclick={() => {
               accentId = a.id;
-              applyAccent(a.id);
+              setAccent(a.id);
             }}
             title={a.name}
             aria-label={a.name}

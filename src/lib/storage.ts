@@ -2,6 +2,16 @@
 // storage, etc.) so callers don't each repeat the same try/catch. Persisted UI
 // preferences flow through here.
 
+/** The raw stored string, or `null` if absent/unavailable — lets migration code
+ *  tell "never set" apart from a stored default. */
+export function loadRaw(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 /** Read a string, or `fallback` if absent/unavailable. */
 export function loadString(key: string, fallback: string): string {
   try {

@@ -67,6 +67,57 @@ fn hotkeys_path(data_dir: &Path) -> PathBuf {
     data_dir.join("hotkeys.json")
 }
 
+/// Top-level JSON type a UI state document must have (see [`UI_STATE_DOCS`]).
+#[derive(Clone, Copy, PartialEq)]
+enum JsonShape {
+    Object,
+    Array,
+}
+
+/// The frontend-owned UI state documents, one `<key>.json` file each in the app
+/// data dir (like `hotkeys.json` — see [`AppState::set_ui_state`]). The backend
+/// never interprets them; the shape is the same coarse guard the hotkeys file
+/// has, so a confused caller can't replace a file with garbage.
+const UI_STATE_DOCS: &[(&str, JsonShape)] = &[
+    ("preset-view", JsonShape::Object), // per-preset editor view state + measurements
+    ("targets", JsonShape::Array),      // user-imported target curves
+    ("prefs", JsonShape::Object),       // UI preferences (filter set, tone step, …)
+    ("theme", JsonShape::Object),       // accent color
+];
+
+/// The expected shape for an allowlisted key, or an error for anything else
+/// (the key becomes a file name, so unknown keys are rejected outright).
+fn ui_state_shape(key: &str) -> Result<JsonShape, String> {
+    UI_STATE_DOCS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, shape)| *shape)
+        .ok_or_else(|| format!("unknown UI state key: {key}"))
+}
+
+fn ui_state_path(data_dir: &Path, key: &str) -> PathBuf {
+    data_dir.join(format!("{key}.json"))
+}
+
+/// Reject writes for unknown keys, non-JSON content, or the wrong top-level type.
+fn validate_ui_state(key: &str, json: &str) -> Result<(), String> {
+    let shape = ui_state_shape(key)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("invalid {key} JSON: {e}"))?;
+    let ok = match shape {
+        JsonShape::Object => parsed.is_object(),
+        JsonShape::Array => parsed.is_array(),
+    };
+    if !ok {
+        let expected = match shape {
+            JsonShape::Object => "object",
+            JsonShape::Array => "array",
+        };
+        return Err(format!("{key} must be a JSON {expected}"));
+    }
+    Ok(())
+}
+
 fn load_settings(data_dir: &Path) -> Settings {
     match std::fs::read_to_string(settings_path(data_dir)) {
         Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
@@ -805,6 +856,30 @@ impl AppState {
         std::fs::read_to_string(hotkeys_path(&self.data_dir)).ok()
     }
 
+    // --- UI state documents: opaque JSON owned by the frontend's stores -------
+
+    /// A persisted UI state document, or `None` when it has never been saved.
+    /// Like the hotkey bindings, the backend never interprets the content — it
+    /// only rejects keys outside the allowlist.
+    pub fn ui_state(&self, key: &str) -> Result<Option<String>, String> {
+        ui_state_shape(key)?;
+        Ok(std::fs::read_to_string(ui_state_path(&self.data_dir, key)).ok())
+    }
+
+    /// Persist a UI state document atomically to `<key>.json`.
+    ///
+    /// These documents used to live only in the WebView's localStorage, which an
+    /// unclean shutdown can silently discard (hotkey bindings were really lost
+    /// that way once — see [`AppState::set_hotkey_bindings`]). A file in the app
+    /// data dir survives that. The content is opaque, but each key's document
+    /// must at least have the right top-level JSON type so a confused caller
+    /// can't replace the file with garbage.
+    pub fn set_ui_state(&self, key: &str, json: &str) -> Result<(), String> {
+        validate_ui_state(key, json)?;
+        fastpeq_core::apo::write_text_atomic(&ui_state_path(&self.data_dir, key), json)
+            .map_err(|e| e.to_string())
+    }
+
     /// Persist the hotkey bindings atomically to `hotkeys.json`.
     ///
     /// Bindings used to live only in the WebView's localStorage, which sits in a
@@ -821,5 +896,35 @@ impl AppState {
         }
         fastpeq_core::apo::write_text_atomic(&hotkeys_path(&self.data_dir), json)
             .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_state_accepts_each_allowlisted_key_with_its_shape() {
+        assert!(validate_ui_state("preset-view", r#"{"A":{"targetId":"flat"}}"#).is_ok());
+        assert!(validate_ui_state("targets", r#"[{"id":"t1"}]"#).is_ok());
+        assert!(validate_ui_state("prefs", r#"{"toneStep":0.5}"#).is_ok());
+        assert!(validate_ui_state("theme", r#"{"accent":"rose"}"#).is_ok());
+    }
+
+    #[test]
+    fn ui_state_rejects_unknown_keys() {
+        // The key becomes a file name in the data dir, so nothing outside the
+        // allowlist (least of all a path) may pass.
+        assert!(validate_ui_state("hotkeys", "[]").is_err());
+        assert!(validate_ui_state("../evil", "{}").is_err());
+        assert!(validate_ui_state("settings", "{}").is_err());
+    }
+
+    #[test]
+    fn ui_state_rejects_garbage_and_wrong_shapes() {
+        assert!(validate_ui_state("prefs", "{not json").is_err());
+        assert!(validate_ui_state("prefs", "[]").is_err()); // object expected
+        assert!(validate_ui_state("targets", "{}").is_err()); // array expected
+        assert!(validate_ui_state("theme", "\"rose\"").is_err()); // bare scalar
     }
 }

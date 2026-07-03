@@ -9,11 +9,12 @@
   import HotkeysPage from "./lib/HotkeysPage.svelte";
   import TonePanel from "./lib/TonePanel.svelte";
   import PresetsPanel, { scrollCurrentIntoView } from "./lib/PresetsPanel.svelte";
-  import { starterConfig, defaultBandCount } from "./lib/starter";
-  import { addTarget } from "./lib/targets.svelte";
-  import { renamePresetView, clearPresetView } from "./lib/preset-view.svelte";
+  import { starterConfig } from "./lib/starter";
+  import { addTarget, initTargets } from "./lib/targets.svelte";
+  import { renamePresetView, clearPresetView, initPresetView } from "./lib/preset-view.svelte";
   import { parseRew, normalize, downsample } from "./lib/measurement";
-  import { getToneStep } from "./lib/prefs.svelte";
+  import { getToneStep, defaultBandCount, initPrefs } from "./lib/prefs.svelte";
+  import { initTheme } from "./lib/theme";
   import { createTrailingThrottle } from "./lib/throttle";
   import { getHotkeys, accelerators, initHotkeys } from "./lib/hotkeys.svelte";
   import { OSD_EVENT, payloadForHotkey } from "./lib/osd";
@@ -399,8 +400,15 @@
 
 
   onMount(() => {
-    reload().then(scrollCurrentIntoView); // on open, jump to the active preset
-    initHotkeys().catch(() => {}); // the accelerators() effect registers once loaded
+    // Load every backend-persisted store first (one local file read each), so
+    // the panels don't render defaults and then flip once the files resolve.
+    // initHotkeys feeds the accelerators() effect, which registers once loaded.
+    Promise.all([initHotkeys(), initPrefs(), initTargets(), initPresetView(), initTheme()])
+      .catch(() => {})
+      .then(() => {
+        bandCount = defaultBandCount(); // captured before initPrefs resolved
+        reload().then(scrollCurrentIntoView); // on open, jump to the active preset
+      });
     loadDevices();
     const unlisten = listen("fastpeq:changed", () => reload());
     const unlistenHotkey = listen<string>("hotkey-pressed", (e) => dispatchHotkey(e.payload));

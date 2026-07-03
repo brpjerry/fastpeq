@@ -42,6 +42,15 @@ export const loadHotkeyBindings = () => invoke<string | null>("load_hotkey_bindi
 export const saveHotkeyBindings = (json: string) =>
   invoke<void>("save_hotkey_bindings", { json });
 
+/** A frontend store's persisted UI state document (preset view state, targets,
+ *  prefs, theme) — a raw JSON document stored by the backend as `<key>.json` in
+ *  the app data dir (atomic writes), so it survives webview profile loss like
+ *  the hotkey bindings. `null` = never saved. Keys are allowlisted backend-side. */
+export type UiStateKey = "preset-view" | "targets" | "prefs" | "theme";
+export const loadUiState = (key: UiStateKey) => invoke<string | null>("load_ui_state", { key });
+export const saveUiState = (key: UiStateKey, json: string) =>
+  invoke<void>("save_ui_state", { key, json });
+
 /** An audio output device, for the "switch output device" hotkey principal. */
 export interface AudioDevice {
   id: string;

@@ -12,10 +12,9 @@
   import FilterList from "./FilterList.svelte";
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, type CurveFilter } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
-  import { getFilterShapes, getToneHeadroom } from "./prefs.svelte";
+  import { getFilterShapes, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
   import { createTrailingThrottle } from "./throttle";
-  import { loadBool, save as savePref } from "./storage";
   import {
     getTargetId,
     getCompensate,
@@ -110,12 +109,8 @@
   // Auto-preamp: when on, hold the preamp at the lowest value that keeps the
   // peak boost from clipping (the preamp slider is disabled, the EQ math drives
   // it). Uses the same bands + tone-overlay set as the clip warning, so with it
-  // on the warning never fires.
-  // (The key predates the "fastpeq." naming; kept so existing settings survive.)
-  let autoPreamp = $state(loadBool("fastpeq:autoPreamp"));
-  $effect(() => {
-    savePref("fastpeq:autoPreamp", autoPreamp);
-  });
+  // on the warning never fires. Persisted with the other UI prefs.
+  const autoPreamp = $derived(getAutoPreamp());
 
   // Auto Preamp is on either by the user's toggle or because hardware offload's
   // Min. APO preamp mode forces it. The forced state never overwrites the user's
@@ -163,7 +158,7 @@
       apoManual = computeAutoPreamp(softwareBands);
       hwManual = computeHwPregain();
     }
-    autoPreamp = v;
+    saveAutoPreamp(v);
     schedule();
   }
 

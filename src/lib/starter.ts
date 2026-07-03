@@ -6,7 +6,6 @@
 // share of the range regardless of band count; the step size adapts so the top
 // plateau always lands on Q 6.
 import type { Config, Line } from "./types";
-import { loadNumber, save } from "./storage";
 
 export const BAND_COUNTS = [10, 15, 20, 30];
 
@@ -52,13 +51,5 @@ export function starterConfig(n: number): Config {
   return { lines };
 }
 
-const KEY = "fastpeq.bandCount";
-
-export function defaultBandCount(): number {
-  const v = loadNumber(KEY, 10);
-  return BAND_COUNTS.includes(v) ? v : 10;
-}
-
-export function setDefaultBandCount(n: number): void {
-  save(KEY, n);
-}
+// The persisted default band count lives with the other UI prefs — see
+// defaultBandCount / setDefaultBandCount in prefs.svelte.ts.

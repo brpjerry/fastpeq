@@ -1,11 +1,13 @@
 import { mount } from "svelte";
 import "./osd.css";
 import Osd from "./Osd.svelte";
-import { applyAccent, currentAccentId } from "../lib/theme";
+import { applyAccent, currentAccentId, initTheme } from "../lib/theme";
 import { getCurrentWindow, currentMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 
-// Match the app's accent (shared via localStorage, same origin as the main window).
+// Match the app's accent: the localStorage cache synchronously (same origin as
+// the main window), then the authoritative theme.json once it loads.
 applyAccent(currentAccentId());
+initTheme().catch(() => {});
 
 const win = getCurrentWindow();
 // Click-through: the overlay must never intercept the pointer.

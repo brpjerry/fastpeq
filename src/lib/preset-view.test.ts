@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as api from "./api";
 import {
+  initPresetView,
   getTargetId,
   setTargetId,
   getCompensate,
@@ -20,7 +22,61 @@ import {
   setTargetAlignFreq,
 } from "./preset-view.svelte";
 
-beforeEach(() => localStorage.clear());
+vi.mock("./api", () => ({
+  loadUiState: vi.fn(() => Promise.resolve(null)),
+  saveUiState: vi.fn(() => Promise.resolve()),
+}));
+
+const KEY = "fastpeq.presetView";
+
+// Re-init from "no file, empty localStorage" so each test starts with an
+// empty store (the module state would otherwise leak between tests).
+beforeEach(async () => {
+  localStorage.clear();
+  vi.mocked(api.loadUiState).mockResolvedValue(null);
+  await initPresetView();
+  vi.mocked(api.saveUiState).mockClear();
+});
+
+describe("presetView persistence", () => {
+  it("loads the blob from the backend file when one exists", async () => {
+    vi.mocked(api.loadUiState).mockResolvedValue(JSON.stringify({ A: { targetId: "t9" } }));
+    await initPresetView();
+    expect(getTargetId("A")).toBe("t9");
+    // The file is authoritative — a plain load never writes anything back.
+    expect(api.saveUiState).not.toHaveBeenCalled();
+  });
+
+  it("migrates a pre-file localStorage blob into the file when none exists", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ B: { compensate: true } }));
+    await initPresetView();
+    expect(getCompensate("B")).toBe(true);
+    expect(api.saveUiState).toHaveBeenCalledWith(
+      "preset-view",
+      JSON.stringify({ B: { compensate: true } }),
+    );
+  });
+
+  it("never overwrites an unreadable file", async () => {
+    vi.mocked(api.loadUiState).mockResolvedValue("{corrupt");
+    await initPresetView();
+    expect(getTargetId("A")).toBe("flat"); // starts empty, but the file is left alone
+    expect(api.saveUiState).not.toHaveBeenCalled();
+  });
+
+  it("treats a wrong-shape document as unreadable", async () => {
+    vi.mocked(api.loadUiState).mockResolvedValue("[1,2]");
+    await initPresetView();
+    expect(getTargetId("A")).toBe("flat");
+    expect(api.saveUiState).not.toHaveBeenCalled();
+  });
+
+  it("persists every edit to the file and the localStorage backup", () => {
+    setTargetId("C", "t1");
+    expect(api.saveUiState).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ C: { targetId: "t1" } });
+  });
+});
 
 describe("presetView store", () => {
   it("defaults targetId to flat and remembers it per preset", () => {

@@ -221,6 +221,22 @@ pub fn save_hotkey_bindings(state: State<'_, AppState>, json: String) -> Result<
     state.set_hotkey_bindings(&json)
 }
 
+/// A persisted UI state document (an opaque JSON document owned by one of the
+/// frontend's stores — preset view state, targets, prefs, theme), or `null`
+/// when it has never been saved. Stored as `<key>.json` in the app data dir —
+/// a real file with atomic writes, not WebView localStorage, so the data
+/// survives webview profile loss (same rationale as the hotkey bindings).
+#[tauri::command]
+pub fn load_ui_state(state: State<'_, AppState>, key: String) -> Result<Option<String>, String> {
+    state.ui_state(&key)
+}
+
+/// Persist a UI state document (see [`load_ui_state`]).
+#[tauri::command]
+pub fn save_ui_state(state: State<'_, AppState>, key: String, json: String) -> Result<(), String> {
+    state.set_ui_state(&key, &json)
+}
+
 /// List the system's audio output devices (for the "switch output device" hotkey
 /// principal picker). Stateless OS query; doesn't touch [`AppState`].
 #[tauri::command]
