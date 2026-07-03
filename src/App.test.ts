@@ -92,6 +92,8 @@ vi.mock("./lib/api", () => {
     setDefaultAudioDevice: ok(),
     setOffloadMode: ok(),
     setHotkeys: vi.fn(() => Promise.resolve([])),
+    loadHotkeyBindings: vi.fn(() => Promise.resolve(null)),
+    saveHotkeyBindings: ok(),
     readTextFile: vi.fn(() => Promise.resolve("")),
     setPresetsDir: ok(),
     resetPresetsDir: ok(),

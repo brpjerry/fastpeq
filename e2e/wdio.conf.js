@@ -23,6 +23,13 @@ const tauriDriverBin = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver
 const nativeDriver =
   process.env.MSEDGEDRIVER || path.resolve(__dirname, "drivers", "msedgedriver.exe");
 
+// Isolate the test app's WebView2 profile (localStorage, IndexedDB, …) inside
+// the throwaway data dir. The test binary shares the bundle identifier with the
+// installed app, so without this override both use the SAME default profile
+// under %LOCALAPPDATA% — an E2E run could read or clobber real user state.
+// WebView2 honors WEBVIEW2_USER_DATA_FOLDER over the folder the host passes.
+const WEBVIEW_DIR = path.join(DATA_DIR, "webview");
+
 let tauriDriver;
 
 export const config = {
@@ -35,7 +42,7 @@ export const config = {
     {
       "tauri:options": {
         application,
-        env: { FASTPEQ_TEST_DATA_DIR: DATA_DIR },
+        env: { FASTPEQ_TEST_DATA_DIR: DATA_DIR, WEBVIEW2_USER_DATA_FOLDER: WEBVIEW_DIR },
       },
     },
   ],
@@ -57,6 +64,7 @@ export const config = {
       );
     }
     seed();
+    fs.mkdirSync(WEBVIEW_DIR, { recursive: true }); // seed() wiped DATA_DIR
   },
 
   beforeSession() {
@@ -64,7 +72,11 @@ export const config = {
     // app reliably picks up FASTPEQ_TEST_DATA_DIR here, regardless of whether
     // the tauri-driver build honors `tauri:options.env`.
     tauriDriver = spawn(tauriDriverBin, ["--native-driver", nativeDriver], {
-      env: { ...process.env, FASTPEQ_TEST_DATA_DIR: DATA_DIR },
+      env: {
+        ...process.env,
+        FASTPEQ_TEST_DATA_DIR: DATA_DIR,
+        WEBVIEW2_USER_DATA_FOLDER: WEBVIEW_DIR,
+      },
       stdio: [null, process.stdout, process.stderr],
     });
   },

@@ -10,10 +10,12 @@
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, balanceFromTrim, toneFilters, peakGainDb, type CurveFilter } from "./eq";
+  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, type CurveFilter } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
-    import { getFilterShapes } from "./prefs.svelte";
+  import { getFilterShapes, getToneHeadroom } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
+  import { createTrailingThrottle } from "./throttle";
+  import { loadBool, save as savePref } from "./storage";
   import {
     getTargetId,
     getCompensate,
@@ -28,7 +30,6 @@
     getTargetAlignFreq,
   } from "./preset-view.svelte";
   import { alignOffset } from "./curve";
-  import { getToneHeadroom } from "./prefs.svelte";
 
   let {
     name,
@@ -110,13 +111,10 @@
   // peak boost from clipping (the preamp slider is disabled, the EQ math drives
   // it). Uses the same bands + tone-overlay set as the clip warning, so with it
   // on the warning never fires.
-  let autoPreamp = $state(
-    typeof localStorage !== "undefined" ? localStorage.getItem("fastpeq:autoPreamp") === "true" : false,
-  );
+  // (The key predates the "fastpeq." naming; kept so existing settings survive.)
+  let autoPreamp = $state(loadBool("fastpeq:autoPreamp"));
   $effect(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("fastpeq:autoPreamp", String(autoPreamp));
-    }
+    savePref("fastpeq:autoPreamp", autoPreamp);
   });
 
   // Auto Preamp is on either by the user's toggle or because hardware offload's
@@ -157,6 +155,17 @@
   // The effective value of each offload stage (auto-computed or manual).
   const apoPreamp = $derived(effectiveAuto ? computeAutoPreamp(softwareBands) : apoManual);
   const hwPregain = $derived(effectiveAuto ? computeHwPregain() : hwManual);
+
+  // Turning Auto off while offloading seeds the manual sliders from the current
+  // auto values, so the two stages don't jump when the user takes over.
+  function setAutoPreamp(v: boolean) {
+    if (!v && offloadActive) {
+      apoManual = computeAutoPreamp(softwareBands);
+      hwManual = computeHwPregain();
+    }
+    autoPreamp = v;
+    schedule();
+  }
 
   // What the curve + clip check use: the single master preamp when offload is off,
   // or the combined attenuation of both stages when it's on (both reduce the final
@@ -214,11 +223,17 @@
   const canCompensate = $derived(showTarget && targetPoints.length > 0);
   const compensate = $derived(getCompensate(name) && canCompensate);
 
-  // Live-apply throttle: at most one write to config.txt per THROTTLE ms while
+  // Live-apply throttle: at most one write to config.txt per 75 ms while
   // dragging, with a guaranteed trailing write so the final value always lands.
-  const THROTTLE = 75;
-  let lastApply = 0;
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  const applyThrottle = createTrailingThrottle(() => {
+    api
+      .applyLive(buildConfig(false), livePregain) // live preview -> config.txt only
+      .then(() => {
+        err = "";
+        onApplied(name); // keep the active highlight on the preset being edited
+      })
+      .catch((e) => (err = String(e)));
+  }, 75);
 
   async function load(presetName: string) {
     err = "";
@@ -228,38 +243,14 @@
     manualPreamp = 0;
     balance = 0;
     hadPreamp = false;
-    const nextBands: Band[] = [];
-    const raw: string[] = [];
     try {
       const cfg = await api.getPreset(presetName);
-      for (const line of cfg.lines) {
-        if (line.kind === "Preamp") {
-          // A both-channel preamp is the master gain; a one-sided preamp is a
-          // balance trim, folded back into the balance slider.
-          const ch = line.value.channel;
-          if (ch.kind === "left" || ch.kind === "right") {
-            balance = balanceFromTrim(ch.kind, line.value.gain);
-          } else {
-            manualPreamp = line.value.gain;
-            hadPreamp = true;
-          }
-        } else if (line.kind === "Filter") {
-          const f = line.value;
-          nextBands.push({
-            id: nextId++,
-            enabled: f.enabled,
-            kind: f.kind,
-            freq: f.freq,
-            gain: f.gain ?? 0,
-            q: f.q ?? defaultQ(f.kind),
-            channel: f.channel,
-          });
-        } else {
-          raw.push(line.value);
-        }
-      }
-      bands = nextBands;
-      rawLines = raw;
+      const parsed = parseConfigEq(cfg); // shared with the A/B-compare ghost
+      manualPreamp = parsed.preamp;
+      balance = parsed.balance;
+      hadPreamp = parsed.hadPreamp;
+      bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
+      rawLines = parsed.raw;
       savedConfig = cfg; // the loaded file is the "saved" baseline (B) to compare against
     } catch (e) {
       err = String(e);
@@ -270,8 +261,10 @@
       loading = false;
       resetHistory(); // start a fresh undo history at the loaded state
       
-      // If Auto Preamp is enabled, pushing it to the live config doesn't dirty the preset
-      if (effectiveAuto && !comparing) {
+      // If Auto Preamp is enabled, pushing it to the live config doesn't dirty
+      // the preset. Skipped when the load failed: bands/rawLines were just reset,
+      // so applying would overwrite the live config with an empty one.
+      if (effectiveAuto && !comparing && !err) {
         api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
       }
     }
@@ -355,34 +348,11 @@
   let comparing = $state(false);
 
   const canCompare = $derived(dirty && savedConfig !== null);
-  const savedCurve = $derived(savedConfig ? configToCurve(savedConfig) : null);
+  // Graph-ready filters/preamp/balance of the saved version — parsed exactly
+  // like load(), via the shared parseConfigEq.
+  const savedCurve = $derived(savedConfig ? parseConfigEq(savedConfig) : null);
   // The faded ghost trace passed to the graphs — only while actually comparing.
   const compareRef = $derived(comparing ? savedCurve : null);
-
-  // A Config as graph-ready filters/preamp/balance (mirrors the parse in load()).
-  function configToCurve(cfg: Config): { filters: CurveFilter[]; preamp: number; balance: number } {
-    let p = 0;
-    let bal = 0;
-    const filters: CurveFilter[] = [];
-    for (const line of cfg.lines) {
-      if (line.kind === "Preamp") {
-        const ch = line.value.channel;
-        if (ch.kind === "left" || ch.kind === "right") bal = balanceFromTrim(ch.kind, line.value.gain);
-        else p = line.value.gain;
-      } else if (line.kind === "Filter") {
-        const f = line.value;
-        filters.push({
-          enabled: f.enabled,
-          kind: f.kind,
-          freq: f.freq,
-          gain: f.gain ?? 0,
-          q: f.q ?? defaultQ(f.kind),
-          channel: f.channel,
-        });
-      }
-    }
-    return { filters, preamp: p, balance: bal };
-  }
 
   function setCompare(on: boolean) {
     if (on === comparing || (on && !canCompare)) return;
@@ -461,32 +431,11 @@
     return { lines };
   }
 
-  async function commit() {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    lastApply = Date.now();
-    try {
-      await api.applyLive(buildConfig(false), livePregain); // live preview -> config.txt only
-      err = "";
-      onApplied(name); // keep the active highlight on the preset being edited
-    } catch (e) {
-      err = String(e);
-    }
-  }
-
-  // Throttle with a trailing call so the final position always gets written.
+  // Throttled with a trailing call so the final position always gets written.
   function schedule() {
     if (loading || comparing) return; // no live edits while auditioning the saved version
     dirty = true;
-    const elapsed = Date.now() - lastApply;
-    if (timer !== null) clearTimeout(timer);
-    if (elapsed >= THROTTLE) {
-      commit();
-    } else {
-      timer = setTimeout(commit, THROTTLE - elapsed);
-    }
+    applyThrottle.schedule();
   }
 
   // Auto Preamp's master gain has to account for the global tone overlay, but the
@@ -613,9 +562,7 @@
     clearSavedMeasurement(name);
   }
 
-  onDestroy(() => {
-    if (timer !== null) clearTimeout(timer);
-  });
+  onDestroy(() => applyThrottle.cancel());
 </script>
 
 <svelte:window
@@ -694,6 +641,35 @@
   </div>
 {/snippet}
 
+<!-- The preamp/balance row, band list, and band actions — identical in the
+     inline panel and the expanded overlay's side column. -->
+{#snippet eqControls()}
+  <PreampRow
+    bind:manualPreamp
+    autoPreamp={effectiveAuto}
+    lockedAuto={forceAutoPreamp}
+    bind:balance
+    {livePreamp}
+    offload={offloadActive}
+    {apoPreamp}
+    {hwPregain}
+    bind:apoManual
+    bind:hwManual
+    onSchedule={schedule}
+    onAutoPreampChange={setAutoPreamp}
+  />
+  <FilterList
+    bind:bands
+    bind:view
+    bind:hoveredId
+    offloadedIdx={hwBandIdx}
+    onSchedule={schedule}
+    onChangeKind={changeKind}
+    onRemoveBand={removeBand}
+  />
+  {@render bandActions()}
+{/snippet}
+
 {#if !expanded}
   <section class="panel" class:comparing>
     <div class="panel-head">
@@ -719,12 +695,7 @@
       </button>
     </div>
 
-    <PreampRow bind:manualPreamp autoPreamp={effectiveAuto} lockedAuto={forceAutoPreamp} bind:balance {livePreamp} offload={offloadActive} {apoPreamp} {hwPregain} bind:apoManual bind:hwManual onSchedule={schedule} onAutoPreampChange={(v) => { if (!v && offloadActive) { apoManual = computeAutoPreamp(softwareBands); hwManual = computeHwPregain(); } autoPreamp = v; schedule(); }} />
-
-    <FilterList bind:bands bind:view bind:hoveredId offloadedIdx={hwBandIdx} onSchedule={schedule} onChangeKind={changeKind} onRemoveBand={removeBand} />
-    
-
-    {@render bandActions()}
+    {@render eqControls()}
   </section>
 {/if}
 
@@ -751,18 +722,7 @@
 
     <div class="overlay-body">
       <aside class="overlay-side">
-        <PreampRow bind:manualPreamp autoPreamp={effectiveAuto} lockedAuto={forceAutoPreamp} bind:balance {livePreamp} offload={offloadActive} {apoPreamp} {hwPregain} bind:apoManual bind:hwManual onSchedule={schedule} onAutoPreampChange={(v) => { if (!v && offloadActive) { apoManual = computeAutoPreamp(softwareBands); hwManual = computeHwPregain(); } autoPreamp = v; schedule(); }} />
-        <FilterList
-          bind:bands
-          bind:view
-          bind:hoveredId
-          offloadedIdx={hwBandIdx}
-          onSchedule={schedule}
-          onChangeKind={changeKind}
-          onRemoveBand={removeBand}
-        />
-        
-        {@render bandActions()}
+        {@render eqControls()}
       </aside>
       <div class="overlay-graph">
         <GraphTools

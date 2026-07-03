@@ -13,6 +13,17 @@ only its own throwaway `config.txt` and preset library — never the machine's r
 APO install. The harness seeds that dir (`helpers/seed.js`) with a few presets +
 categories before launch, and asserts against the `config.txt` the backend writes.
 
+The WebView2 profile is isolated too: the harness sets `WEBVIEW2_USER_DATA_FOLDER`
+into the throwaway dir. In practice msedgedriver already hands the driven app a
+scoped temp profile, but that's an implementation detail — the test binary shares
+the installed app's bundle identifier, so its *default* profile (and localStorage:
+UI prefs, per-preset view state) is the user's real one. The override pins the
+isolation down rather than relying on driver behavior; don't remove it.
+
+**Close the installed fastpeq before running.** It usually sits in the tray; the
+single-instance plugin makes the test binary exit immediately, and every spec
+fails with `session not created: Chrome instance exited`.
+
 ## Layout
 
 - `wdio.conf.js` — boots `tauri-driver`, points it at the debug build, injects the

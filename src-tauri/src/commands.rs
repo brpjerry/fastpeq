@@ -206,6 +206,21 @@ pub fn set_hotkeys(app: AppHandle, bindings: Vec<crate::hotkeys::Binding>) -> Ve
     crate::hotkeys::set_hotkeys(&app, bindings)
 }
 
+/// The persisted hotkey bindings (an opaque JSON document owned by the
+/// frontend's hotkeys store), or `null` when none have been saved yet. Stored
+/// as `hotkeys.json` in the app data dir — a real file with atomic writes, not
+/// WebView localStorage, so the bindings survive webview profile loss.
+#[tauri::command]
+pub fn load_hotkey_bindings(state: State<'_, AppState>) -> Option<String> {
+    state.hotkey_bindings()
+}
+
+/// Persist the hotkey bindings JSON (see [`load_hotkey_bindings`]).
+#[tauri::command]
+pub fn save_hotkey_bindings(state: State<'_, AppState>, json: String) -> Result<(), String> {
+    state.set_hotkey_bindings(&json)
+}
+
 /// List the system's audio output devices (for the "switch output device" hotkey
 /// principal picker). Stateless OS query; doesn't touch [`AppState`].
 #[tauri::command]

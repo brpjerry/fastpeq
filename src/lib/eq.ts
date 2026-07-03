@@ -1,7 +1,7 @@
 // Biquad magnitude-response math (RBJ Audio EQ Cookbook) for the live curve,
 // plus metadata about each filter type. Computed on the client so dragging a
 // slider redraws instantly with no IPC round-trip.
-import type { Channel, FilterKind } from "./types";
+import type { Channel, Config, FilterKind } from "./types";
 
 export interface FilterTypeInfo {
   value: FilterKind;
@@ -91,9 +91,71 @@ export function balanceFromTrim(side: "left" | "right", trimDb: number): number 
   return side === "left" ? -cut : cut;
 }
 
-/** Magnitude (dB) of one biquad filter at `freq`. */
-function magnitudeDb(f: CurveFilter, freq: number, fs: number): number {
-  if (f.kind === "AllPass") return 0; // flat magnitude — phase only
+/** A Config split into the editor's shape (see [parseConfigEq]). */
+export interface ParsedConfigEq {
+  /** The `Filter:` lines, gain/q defaulted per type so they're plain numbers. */
+  filters: (CurveFilter & { gain: number; q: number })[];
+  /** The master (both-channel) preamp gain, 0 when absent. */
+  preamp: number;
+  /** Balance recovered from a one-sided preamp trim (see balanceFromTrim). */
+  balance: number;
+  /** Whether the config carried an explicit master preamp line. */
+  hadPreamp: boolean;
+  /** Unmodeled lines (comments, Device:, …), preserved verbatim in order. */
+  raw: string[];
+}
+
+/**
+ * Split a Config's lines into the parts the editor works with: master preamp,
+ * balance, graph-ready filters, and the raw lines carried along untouched.
+ * Shared by the editor's load and its A/B-compare ghost, so the two can never
+ * drift in how they read a preset.
+ */
+export function parseConfigEq(cfg: Config): ParsedConfigEq {
+  const out: ParsedConfigEq = { filters: [], preamp: 0, balance: 0, hadPreamp: false, raw: [] };
+  for (const line of cfg.lines) {
+    if (line.kind === "Preamp") {
+      // A both-channel preamp is the master gain; a one-sided preamp is a
+      // balance trim, folded back into the balance slider.
+      const ch = line.value.channel;
+      if (ch.kind === "left" || ch.kind === "right") {
+        out.balance = balanceFromTrim(ch.kind, line.value.gain);
+      } else {
+        out.preamp = line.value.gain;
+        out.hadPreamp = true;
+      }
+    } else if (line.kind === "Filter") {
+      const f = line.value;
+      out.filters.push({
+        enabled: f.enabled,
+        kind: f.kind,
+        freq: f.freq,
+        gain: f.gain ?? 0,
+        q: f.q ?? defaultQ(f.kind),
+        channel: f.channel,
+      });
+    } else {
+      out.raw.push(line.value);
+    }
+  }
+  return out;
+}
+
+/** Biquad coefficients for one filter (`a0` kept un-normalized; the evaluation
+ *  divides it out), computed once per filter — they don't depend on the probe
+ *  frequency. `null` for types with a flat magnitude (AllPass / unmodeled),
+ *  which contribute nothing to the response. */
+interface BiquadCoeffs {
+  b0: number;
+  b1: number;
+  b2: number;
+  a0: number;
+  a1: number;
+  a2: number;
+}
+
+function biquadCoeffs(f: CurveFilter, fs: number): BiquadCoeffs | null {
+  if (f.kind === "AllPass") return null; // flat magnitude — phase only
 
   const w0 = (2 * Math.PI * f.freq) / fs;
   const cw = Math.cos(w0);
@@ -175,35 +237,43 @@ function magnitudeDb(f: CurveFilter, freq: number, fs: number): number {
       a2 = 1 - alpha;
       break;
     default:
-      return 0;
+      return null;
   }
 
-  // |H(e^jw)| = |numerator| / |denominator| (the a0 stays in the denominator).
-  const w = (2 * Math.PI * freq) / fs;
-  const c1 = Math.cos(-w);
-  const s1 = Math.sin(-w);
-  const c2 = Math.cos(-2 * w);
-  const s2 = Math.sin(-2 * w);
-  const nr = b0 + b1 * c1 + b2 * c2;
-  const ni = b1 * s1 + b2 * s2;
-  const dr = a0 + a1 * c1 + a2 * c2;
-  const di = a1 * s1 + a2 * s2;
-  const den = Math.hypot(dr, di);
-  if (den === 0) return 0;
-  return 20 * Math.log10(Math.hypot(nr, ni) / den);
+  return { b0, b1, b2, a0, a1, a2 };
 }
 
-/** Combined response (dB) across `freqs`: preamp + sum of enabled filters. */
+/** Combined response (dB) across `freqs`: preamp + sum of enabled filters.
+ *  Coefficients are computed once per filter, and the per-frequency trig once
+ *  per point (shared by every filter) — this runs per drag frame over up to
+ *  ~1600 points, so no per-(filter, freq) transcendentals. */
 export function responseCurve(
   filters: CurveFilter[],
   preamp: number,
   freqs: number[] = FREQS,
   fs: number = SAMPLE_RATE,
 ): number[] {
+  const coeffs: BiquadCoeffs[] = [];
+  for (const f of filters) {
+    if (!f.enabled) continue;
+    const c = biquadCoeffs(f, fs);
+    if (c) coeffs.push(c);
+  }
   return freqs.map((freq) => {
+    const w = (2 * Math.PI * freq) / fs;
+    const c1 = Math.cos(-w);
+    const s1 = Math.sin(-w);
+    const c2 = Math.cos(-2 * w);
+    const s2 = Math.sin(-2 * w);
     let db = preamp;
-    for (const f of filters) {
-      if (f.enabled) db += magnitudeDb(f, freq, fs);
+    for (const c of coeffs) {
+      // |H(e^jw)| = |numerator| / |denominator| (the a0 stays in the denominator).
+      const nr = c.b0 + c.b1 * c1 + c.b2 * c2;
+      const ni = c.b1 * s1 + c.b2 * s2;
+      const dr = c.a0 + c.a1 * c1 + c.a2 * c2;
+      const di = c.a1 * s1 + c.a2 * s2;
+      const den = Math.hypot(dr, di);
+      if (den !== 0) db += 20 * Math.log10(Math.hypot(nr, ni) / den);
     }
     return db;
   });

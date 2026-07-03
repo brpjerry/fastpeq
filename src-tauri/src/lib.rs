@@ -186,6 +186,8 @@ pub fn run() {
             commands::reset_presets_dir,
             commands::open_presets_dir,
             commands::set_hotkeys,
+            commands::load_hotkey_bindings,
+            commands::save_hotkey_bindings,
             commands::list_audio_devices,
             commands::set_default_audio_device,
             commands::list_hardware_devices,

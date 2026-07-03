@@ -1,5 +1,16 @@
+<script module lang="ts">
+  // Scroll the active preset row into view. Module-scoped so App — which owns
+  // reload/open and the settings/hotkeys subpages — can call the same one
+  // definition instead of duplicating the query.
+  export function scrollCurrentIntoView() {
+    const el = document.querySelector(".presets .active") as HTMLElement | null;
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "center" });
+    }
+  }
+</script>
+
 <script lang="ts">
-  import { tick } from "svelte";
   import type { ApoStatus } from "./api";
   import CategoryIcon from "./CategoryIcon.svelte";
   import FloatingMenu from "./FloatingMenu.svelte";
@@ -26,7 +37,6 @@
     onNewPreset,
     onCapture,
     onRename,
-    presetListEl = $bindable(),
   }: {
     presets: string[];
     categories: Record<string, string>;
@@ -45,7 +55,6 @@
     onNewPreset: (name: string) => void;
     onCapture: (name: string) => void;
     onRename: (from: string, to: string) => void;
-    presetListEl?: HTMLUListElement | null;
   } = $props();
 
   let query = $state("");
@@ -172,13 +181,6 @@
     onRename(from, renameValue);
   }
 
-  // Scroll the currently active preset into view.
-  function scrollCurrentIntoView() {
-    const el = document.querySelector(".presets .active") as HTMLElement;
-    if (el && typeof el.scrollIntoView === "function") {
-      el.scrollIntoView({ block: "center" });
-    }
-  }
   let prevQuery = "";
   let prevFilter = "";
   $effect(() => {
@@ -262,7 +264,7 @@
     </div>
   </div>
 
-  <ul class="presets" bind:this={presetListEl}>
+  <ul class="presets">
     {#each filteredPresets as name (name)}
       <li class:active={name === active} class:selected={name === selected}>
         {#if renaming === name}

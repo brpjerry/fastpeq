@@ -61,6 +61,12 @@ fn settings_path(data_dir: &Path) -> PathBuf {
     data_dir.join("settings.json")
 }
 
+/// The hotkey bindings live in their own file (not `settings.json`, and NOT the
+/// WebView's localStorage — see [`AppState::set_hotkey_bindings`]).
+fn hotkeys_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("hotkeys.json")
+}
+
 fn load_settings(data_dir: &Path) -> Settings {
     match std::fs::read_to_string(settings_path(data_dir)) {
         Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
@@ -269,8 +275,8 @@ impl AppState {
         }
 
         match target {
-            Some(dev) => {
-                if let Ok(profile) = hardware::profile(&dev.id) {
+            Some(dev) => match hardware::profile(&dev.id) {
+                Ok(profile) => {
                     *self.hardware.lock().unwrap() = Some(HardwareSession::start(dev, profile));
                     // Push the current EQ to the new device (RAM only — following the
                     // output shouldn't wear the device's flash) and write the remainder.
@@ -280,7 +286,13 @@ impl AppState {
                         self.inner.lock().unwrap().last_full = Some(full.clone());
                     }
                 }
-            }
+                Err(_) => {
+                    // The device vanished (or HID glitched) between detection and
+                    // open. Clear the sync cache so the next reconcile retries,
+                    // instead of treating this output as already handled.
+                    *self.last_sync.lock().unwrap() = None;
+                }
+            },
             None => {
                 // No longer offloading: put the full EQ back into software.
                 if let Some(full) = &full {
@@ -443,7 +455,7 @@ impl AppState {
         if !offloaded {
             let tone = self.tone_cache();
             manager
-                .apply_preset(name, &tone)
+                .apply_loaded_preset(name, &config, &tone)
                 .map_err(|e| e.to_string())?;
         }
         let mut inner = self.inner.lock().unwrap();
@@ -612,10 +624,12 @@ impl AppState {
     /// cache. A change *between* offloading modes only re-splits, which is cheap, so
     /// we do it inline for an immediate result.
     pub fn set_offload_mode(&self, mode: OffloadMode) -> Result<(), String> {
-        *self.offload_mode.lock().unwrap() = mode;
+        // Persist first: if the settings write fails, the in-memory mode stays
+        // untouched, so the UI never shows a mode that won't survive a restart.
         let mut settings = load_settings(&self.data_dir);
         settings.offload_mode = Some(mode);
         save_settings(&self.data_dir, &settings).map_err(|e| e.to_string())?;
+        *self.offload_mode.lock().unwrap() = mode;
 
         // Force the background reconciler to re-evaluate on/off + device next tick.
         *self.last_sync.lock().unwrap() = None;
@@ -781,5 +795,31 @@ impl AppState {
             .map_err(|e| e.to_string())?;
         self.invalidate_active();
         Ok(report)
+    }
+
+    // --- Hotkey bindings: an opaque JSON document owned by the frontend -------
+
+    /// The persisted hotkey bindings, or `None` when none have been saved yet.
+    /// The backend never interprets the document — the frontend owns the schema.
+    pub fn hotkey_bindings(&self) -> Option<String> {
+        std::fs::read_to_string(hotkeys_path(&self.data_dir)).ok()
+    }
+
+    /// Persist the hotkey bindings atomically to `hotkeys.json`.
+    ///
+    /// Bindings used to live only in the WebView's localStorage, which sits in a
+    /// browser profile shared by the installed app and any debug build run
+    /// directly, and which an unclean shutdown can silently discard — real user
+    /// data was lost that way once. A file in the app data dir survives all of
+    /// that. The document is opaque, but it must at least be a JSON array so a
+    /// confused caller can't replace the file with garbage.
+    pub fn set_hotkey_bindings(&self, json: &str) -> Result<(), String> {
+        let parsed: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| format!("invalid hotkeys JSON: {e}"))?;
+        if !parsed.is_array() {
+            return Err("hotkey bindings must be a JSON array".to_string());
+        }
+        fastpeq_core::apo::write_text_atomic(&hotkeys_path(&self.data_dir), json)
+            .map_err(|e| e.to_string())
     }
 }
