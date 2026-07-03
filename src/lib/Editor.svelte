@@ -38,6 +38,7 @@
     bypassed = false,
     forceAutoPreamp = false,
     offloadActive = false,
+    hardwareOnly = false,
   }: {
     name: string;
     reloadToken: number;
@@ -49,6 +50,10 @@
     /** Whether EQ offload to a hardware device is currently on (drives the per-band
      * "→ hardware" indicator). */
     offloadActive?: boolean;
+    /** Hardware Only offload is engaged (implies `offloadActive`): APO is flat, so
+     * bands that don't fit on the device are muted — the curve, the clip check,
+     * and the APO preamp all exclude them (and the inert tone overlay). */
+    hardwareOnly?: boolean;
   } = $props();
 
   // Which band indices are currently sent to the hardware device. Queried from the
@@ -136,6 +141,20 @@
   const hwBands = $derived(bands.filter((_, i) => hwBandIdx.has(i)) as CurveFilter[]);
   const softwareBands = $derived(bands.filter((_, i) => !hwBandIdx.has(i)) as CurveFilter[]);
 
+  // Hardware Only: an enabled band the device didn't take is muted — nothing
+  // runs it (APO is flat). Ids feed the graphs and the band list so the muted
+  // bands read as inert everywhere.
+  const mutedIds = $derived(
+    hardwareOnly
+      ? new Set(bands.filter((b, i) => b.enabled && !hwBandIdx.has(i)).map((b) => b.id))
+      : new Set<number>(),
+  );
+  // What actually plays: with Hardware Only, muted bands drop out of the curve
+  // and the clip math exactly as they drop out of the sound.
+  const effectiveBands = $derived(
+    hardwareOnly ? bands.map((b) => (mutedIds.has(b.id) ? { ...b, enabled: false } : b)) : bands,
+  );
+
   // Manual (Auto-off) values for the two offload stages — runtime only, never saved
   // into the preset (which stays the full EQ). Seeded from the auto values when Auto
   // is switched off so the sliders don't jump.
@@ -147,8 +166,11 @@
     return Math.round(Math.min(0, -Math.max(0, peakGainDb(hwBands, 0, balance))) * 10) / 10;
   }
 
-  // The effective value of each offload stage (auto-computed or manual).
-  const apoPreamp = $derived(effectiveAuto ? computeAutoPreamp(softwareBands) : apoManual);
+  // The effective value of each offload stage (auto-computed or manual). In
+  // Hardware Only mode the APO stage doesn't exist — its preamp is pinned flat.
+  const apoPreamp = $derived(
+    hardwareOnly ? 0 : effectiveAuto ? computeAutoPreamp(softwareBands) : apoManual,
+  );
   const hwPregain = $derived(effectiveAuto ? computeHwPregain() : hwManual);
 
   // Turning Auto off while offloading seeds the manual sliders from the current
@@ -175,10 +197,14 @@
   // Possible clipping when the summed boost — the active bands plus the global
   // tone overlay, on whichever channel ends up louder — tops 0 dB. Past that the
   // signal can exceed full scale and Equalizer APO clips unless the preamp pulls
-  // it back. Balance only attenuates, so it never raises this peak.
+  // it back. Balance only attenuates, so it never raises this peak. In Hardware
+  // Only mode the muted bands and the inert tone overlay are excluded — only
+  // what the device actually runs can clip.
   const clipPeak = $derived(
     peakGainDb(
-      [...bands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
+      hardwareOnly
+        ? (effectiveBands as CurveFilter[])
+        : ([...bands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[]),
       livePreamp,
       balance,
     ),
@@ -200,7 +226,7 @@
   // Shift the target so its line meets the current response at the saved align
   // frequency — the standard "align at a reference frequency" for headphone EQ.
   function alignTarget() {
-    const off = alignOffset(bands as CurveFilter[], livePreamp, measurement, targetBase, getTargetAlignFreq(name));
+    const off = alignOffset(effectiveBands as CurveFilter[], livePreamp, measurement, targetBase, getTargetAlignFreq(name));
     setTargetOffset(name, Math.round(off * 10) / 10);
   }
 
@@ -658,6 +684,7 @@
     bind:view
     bind:hoveredId
     offloadedIdx={hwBandIdx}
+    {mutedIds}
     onSchedule={schedule}
     onChangeKind={changeKind}
     onRemoveBand={removeBand}
@@ -677,7 +704,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={bands} preamp={livePreamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
+      <ResponseCurve filters={effectiveBands} preamp={livePreamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -742,6 +769,7 @@
             {showMeas}
             {showTarget}
             {hoveredId}
+            {mutedIds}
             filterShapes={getFilterShapes()}
             reference={compareRef}
             onChange={schedule}

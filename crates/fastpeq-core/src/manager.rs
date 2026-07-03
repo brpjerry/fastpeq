@@ -135,12 +135,19 @@ impl Manager {
         }
     }
 
+    /// Persist new tone values WITHOUT touching the live config — for callers
+    /// that keep the overlay out of `config.txt` (hardware-only offload leaves
+    /// APO flat) but still want the knob values to survive for later.
+    pub fn save_tone(&self, tone: &Tone) -> io::Result<()> {
+        self.store.ensure_dir()?;
+        let text = serde_json::to_string_pretty(tone).unwrap_or_else(|_| "{}".to_string());
+        writer::write_text_atomic(&self.tone_path(), &text)
+    }
+
     /// Persist new tone values and re-lay the overlay over the current base EQ
     /// (preset or live edit), so changing a knob doesn't disturb the rest.
     pub fn set_tone(&self, tone: &Tone) -> io::Result<()> {
-        self.store.ensure_dir()?;
-        let text = serde_json::to_string_pretty(tone).unwrap_or_else(|_| "{}".to_string());
-        writer::write_text_atomic(&self.tone_path(), &text)?;
+        self.save_tone(tone)?;
         let composed = tone::compose(&self.current_config()?, tone);
         self.write_live(&composed)
     }

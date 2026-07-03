@@ -23,6 +23,7 @@
     band = $bindable(),
     hovered,
     offloaded = false,
+    muted = false,
     onChange,
     onChangeKind,
     onRemove,
@@ -32,6 +33,9 @@
     hovered: boolean;
     /** This band is currently sent to the hardware device (shows a "HW" chip). */
     offloaded?: boolean;
+    /** Enabled but running nowhere: Hardware Only offload left it off the device
+     * and Equalizer APO stays flat (shows a "MUTED" chip). */
+    muted?: boolean;
     onChange: () => void;
     onChangeKind: () => void;
     onRemove: () => void;
@@ -44,6 +48,7 @@
   class:off={!band.enabled}
   class:hover={hovered}
   class:offloaded
+  class:muted
   onmouseenter={() => onHover(true)}
   onmouseleave={() => onHover(false)}
   role="presentation"
@@ -88,6 +93,8 @@
   {/if}
   {#if offloaded}
     <span class="hw-chip" title="Sent to the hardware device">HW</span>
+  {:else if muted}
+    <span class="muted-chip" title="Doesn't fit on the device — muted while Hardware Only keeps Equalizer APO flat">MUTED</span>
   {/if}
   <button class="danger remove" onclick={onRemove} title="Remove band">
     &#10005;
@@ -180,5 +187,19 @@
   }
   .band.offloaded {
     box-shadow: inset -2px 0 0 var(--accent);
+  }
+  /* Enabled but silent: Hardware Only left it off the device and APO is flat. */
+  .muted-chip {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .band.muted {
+    opacity: 0.65;
   }
 </style>

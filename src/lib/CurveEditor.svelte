@@ -48,6 +48,7 @@
     showMeas = true,
     showTarget = true,
     hoveredId = null,
+    mutedIds = new Set<number>(),
     filterShapes = false,
     reference = null,
     onChange,
@@ -63,6 +64,9 @@
     showMeas?: boolean;
     showTarget?: boolean;
     hoveredId?: number | null;
+    /** Band ids muted by Hardware Only offload: still editable (dimmed handle),
+     * but excluded from the response traces — they run nowhere. */
+    mutedIds?: Set<number>;
     filterShapes?: boolean;
     // A second response (the saved version during A/B compare) drawn as a faded
     // ghost so the difference from the working edit is visible, not just audible.
@@ -118,7 +122,7 @@
 
   const pathFor = (curve: number[]) => pathFrom(curve, freqs, preamp, dbMax, box);
   const sideFilters = (side: "left" | "right"): CurveFilter[] =>
-    bands.filter((b) => inChannel(b.channel, side));
+    bands.filter((b) => !mutedIds.has(b.id) && inChannel(b.channel, side));
   // The imported measurement, sampled onto the plot grid. When present the
   // filter traces become "measurement + filters" — i.e. the corrected response.
   const measCurve = $derived(ready && measurement.length ? sampleAt(measurement, freqs) : null);
@@ -370,7 +374,7 @@
         {@const hy = handleY(band)}
         <g
           class="handle"
-          class:off={!band.enabled}
+          class:off={!band.enabled || mutedIds.has(band.id)}
           class:dragging={dragId === band.id}
           class:active={hoveredId === band.id}
           onpointerdown={(e) => onDown(e, band)}

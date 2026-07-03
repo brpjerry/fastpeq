@@ -8,6 +8,7 @@
     view = $bindable(),
     hoveredId = $bindable(),
     offloadedIdx = new Set<number>(),
+    mutedIds = new Set<number>(),
     onSchedule,
     onChangeKind,
     onRemoveBand,
@@ -17,6 +18,9 @@
     hoveredId: number | null;
     /** Band indices currently sent to the hardware device (shown with a chip). */
     offloadedIdx?: Set<number>;
+    /** Band ids muted by Hardware Only offload — enabled but running nowhere
+     * (they didn't fit on the device and APO stays flat). */
+    mutedIds?: Set<number>;
     onSchedule: () => void;
     onChangeKind: (band: EditorBand) => void;
     onRemoveBand: (id: number) => void;
@@ -63,6 +67,7 @@
         bind:band={bands[i]}
         hovered={hoveredId === band.id}
         offloaded={offloadedIdx.has(i)}
+        muted={mutedIds.has(band.id)}
         onChange={onSchedule}
         onChangeKind={() => onChangeKind(band)}
         onRemove={() => onRemoveBand(band.id)}

@@ -164,33 +164,34 @@ fn build_inner(data_dir: &Path, presets_dir: PathBuf) -> Inner {
     } else {
         env::detect()
     };
-    match detected {
-        Ok(install) => {
-            let store = PresetStore::new(&presets_dir);
-            let _ = store.ensure_dir();
-            let manager = CoreManager::new(install, store, backup_path);
-            let tone = manager.tone().unwrap_or_default(); // cache; sidecar is persistence
-            Inner {
-                manager: Some(manager),
-                apo_error: None,
-                presets_dir,
-                bypassed: false,
-                restore: None,
-                tone,
-                active: Active::Unknown,
-                last_full: None,
-            }
-        }
-        Err(e) => Inner {
-            manager: None,
-            apo_error: Some(e.to_string()),
-            presets_dir,
-            bypassed: false,
-            restore: None,
-            tone: Tone::default(),
-            active: Active::Unknown,
-            last_full: None,
-        },
+    // Without Equalizer APO the app still runs: the manager operates on a
+    // private config dir under app data (the E2E layout), so the preset
+    // library, tone sidecar, provenance stamps, and bypass all keep working.
+    // Nothing reads that config.txt, so software EQ is silent — the EQ reaches
+    // the ears only via hardware offload (Hardware Only mode on a supported
+    // device). `apo_error` keeps the UI informed.
+    let (install, apo_error) = match detected {
+        Ok(install) => (install, None),
+        Err(e) => (
+            env::ApoInstall {
+                config_path: data_dir.to_path_buf(),
+            },
+            Some(e.to_string()),
+        ),
+    };
+    let store = PresetStore::new(&presets_dir);
+    let _ = store.ensure_dir();
+    let manager = CoreManager::new(install, store, backup_path);
+    let tone = manager.tone().unwrap_or_default(); // cache; sidecar is persistence
+    Inner {
+        manager,
+        apo_error,
+        presets_dir,
+        bypassed: false,
+        restore: None,
+        tone,
+        active: Active::Unknown,
+        last_full: None,
     }
 }
 
@@ -215,8 +216,12 @@ pub struct AppState {
 }
 
 struct Inner {
-    /// `None` if Equalizer APO wasn't detected — the UI shows `apo_error`.
-    manager: Option<CoreManager>,
+    /// Always available. When Equalizer APO isn't detected it runs against a
+    /// private config dir under app data (see [`build_inner`]) — presets and
+    /// hardware offload still work; only software EQ is silent.
+    manager: CoreManager,
+    /// `Some` when Equalizer APO wasn't detected — the UI shows it and knows
+    /// software EQ won't be audible.
     apo_error: Option<String>,
     /// The directory presets are currently stored in.
     presets_dir: PathBuf,
@@ -348,9 +353,7 @@ impl AppState {
                 // No longer offloading: put the full EQ back into software.
                 if let Some(full) = &full {
                     let tone = self.tone_cache();
-                    if let Ok(m) = self.manager() {
-                        let _ = m.apply_config(full, &tone);
-                    }
+                    let _ = self.manager().apply_config(full, &tone);
                 }
                 self.inner.lock().unwrap().last_full = None;
             }
@@ -365,7 +368,7 @@ impl AppState {
         if let Some(full) = self.inner.lock().unwrap().last_full.clone() {
             return Some(full);
         }
-        let manager = self.manager().ok()?;
+        let manager = self.manager();
         if let Ok(Some(name)) = manager.active_preset_by_stamp()
             && let Ok(cfg) = manager.load_preset(&name)
         {
@@ -419,35 +422,31 @@ impl AppState {
         Ok(())
     }
 
-    /// A clone of the core manager, or an error message if APO isn't available.
-    fn manager(&self) -> Result<CoreManager, String> {
-        let inner = self.inner.lock().unwrap();
-        inner.manager.clone().ok_or_else(|| {
-            inner
-                .apo_error
-                .clone()
-                .unwrap_or_else(|| "Equalizer APO is not detected".to_string())
-        })
+    /// A clone of the core manager. Always available — without Equalizer APO it
+    /// operates on the private fallback config dir (see [`build_inner`]).
+    fn manager(&self) -> CoreManager {
+        self.inner.lock().unwrap().manager.clone()
     }
 
     pub fn status(&self) -> ApoStatus {
         let inner = self.inner.lock().unwrap();
-        match &inner.manager {
-            Some(m) => ApoStatus {
+        match &inner.apo_error {
+            None => ApoStatus {
                 installed: true,
-                config_path: Some(m.install().config_file().display().to_string()),
+                config_path: Some(inner.manager.install().config_file().display().to_string()),
                 error: None,
             },
-            None => ApoStatus {
+            // The fallback config path isn't APO's, so it isn't reported.
+            Some(e) => ApoStatus {
                 installed: false,
                 config_path: None,
-                error: inner.apo_error.clone(),
+                error: Some(e.clone()),
             },
         }
     }
 
     pub fn list_presets(&self) -> Result<Vec<String>, String> {
-        self.manager()?.list_presets().map_err(|e| e.to_string())
+        self.manager().list_presets().map_err(|e| e.to_string())
     }
 
     /// The active preset, served from the cache when known. Used by the tray
@@ -478,7 +477,7 @@ impl AppState {
     /// normal check. `sync_offload` keeps the session in step with the active output,
     /// so `hardware_active` accurately means "the live config is a remainder".
     fn derive_active(&self) -> Option<String> {
-        let manager = self.manager().ok()?;
+        let manager = self.manager();
         if self.hardware_active() {
             manager.active_preset_by_stamp().ok().flatten()
         } else {
@@ -498,7 +497,7 @@ impl AppState {
     }
 
     pub fn apply(&self, name: &str) -> Result<(), String> {
-        let manager = self.manager()?;
+        let manager = self.manager();
         let config = manager.load_preset(name).map_err(|e| e.to_string())?;
         // Offload the first X bands to hardware if active; otherwise full software.
         // Preset apply has no sliders → automatic pregain.
@@ -527,7 +526,7 @@ impl AppState {
     /// preset that was active when bypass began. Shared by the Bypass button,
     /// the tray item, and the global hotkey so all three stay consistent.
     pub fn toggle_bypass(&self) -> Result<(), String> {
-        let manager = self.manager()?;
+        let manager = self.manager();
         let (bypassed, restore) = {
             let inner = self.inner.lock().unwrap();
             (inner.bypassed, inner.restore.clone())
@@ -571,7 +570,7 @@ impl AppState {
     }
 
     pub fn capture(&self, name: &str) -> Result<(), String> {
-        self.manager()?
+        self.manager()
             .capture_current(name)
             .map_err(|e| e.to_string())?;
         self.invalidate_active(); // the captured preset may now match the live config
@@ -579,7 +578,7 @@ impl AppState {
     }
 
     pub fn delete(&self, name: &str) -> Result<(), String> {
-        self.manager()?
+        self.manager()
             .delete_preset(name)
             .map_err(|e| e.to_string())?;
         self.invalidate_active(); // a deleted preset can no longer be "active"
@@ -587,7 +586,7 @@ impl AppState {
     }
 
     pub fn rename(&self, from: &str, to: &str) -> Result<(), String> {
-        self.manager()?
+        self.manager()
             .rename_preset(from, to)
             .map_err(|e| e.to_string())?;
         self.invalidate_active(); // the active preset's name may have changed
@@ -596,12 +595,12 @@ impl AppState {
 
     /// Load a preset as a structured config (for the parametric editor).
     pub fn load_config(&self, name: &str) -> Result<Config, String> {
-        self.manager()?.load_preset(name).map_err(|e| e.to_string())
+        self.manager().load_preset(name).map_err(|e| e.to_string())
     }
 
     /// Save a structured config back to a preset.
     pub fn save_config(&self, name: &str, config: &Config) -> Result<(), String> {
-        self.manager()?
+        self.manager()
             .save_preset(name, config)
             .map_err(|e| e.to_string())?;
         self.invalidate_active(); // the saved preset may now match the live config
@@ -616,7 +615,7 @@ impl AppState {
         let offloaded = self.offload_apply(config, None, false, device_pregain)?;
         if !offloaded {
             let tone = self.tone_cache();
-            self.manager()?
+            self.manager()
                 .apply_config(config, &tone)
                 .map_err(|e| e.to_string())?;
         }
@@ -689,7 +688,7 @@ impl AppState {
             let cached = self.inner.lock().unwrap().last_full.clone();
             let full = match cached {
                 Some(f) => f,
-                None => self.manager()?.base_config().map_err(|e| e.to_string())?,
+                None => self.manager().base_config().map_err(|e| e.to_string())?,
             };
             if self.offload_apply(&full, None, true, None)? {
                 self.inner.lock().unwrap().last_full = Some(full);
@@ -764,7 +763,15 @@ impl AppState {
         };
         match software {
             Some(mut sw) => {
-                let tone = self.tone_cache();
+                // Hardware-only keeps APO a pass-through: the split already stripped
+                // every preamp/filter, and the tone overlay is withheld too (a flat
+                // tone composes to nothing) — the knobs' values stay persisted and
+                // return when the mode or output changes.
+                let tone = if mode == OffloadMode::HardwareOnly {
+                    Tone::default()
+                } else {
+                    self.tone_cache()
+                };
                 // Minimize-preamp mode: set APO's master preamp to the auto-preamp
                 // value over the remaining software bands *and* the tone overlay, so
                 // what's left to APO can't clip while its preamp stays near 0 (the
@@ -774,7 +781,7 @@ impl AppState {
                     let preamp = offload::auto_preamp(&sw, &tone);
                     offload::set_master_preamp(&mut sw, preamp);
                 }
-                self.manager()?
+                self.manager()
                     .apply_config(&sw, &tone)
                     .map_err(|e| e.to_string())?;
                 Ok(true)
@@ -807,11 +814,11 @@ impl AppState {
     }
 
     pub fn categories(&self) -> Result<BTreeMap<String, Category>, String> {
-        self.manager()?.categories().map_err(|e| e.to_string())
+        self.manager().categories().map_err(|e| e.to_string())
     }
 
     pub fn set_category(&self, name: &str, category: Option<Category>) -> Result<(), String> {
-        self.manager()?
+        self.manager()
             .set_category(name, category)
             .map_err(|e| e.to_string())
     }
@@ -823,15 +830,26 @@ impl AppState {
 
     /// Update the global tone overlay, persist it, re-apply it to the live
     /// config, and refresh the cache.
+    ///
+    /// While hardware-only offload is engaged the overlay is persisted but NOT
+    /// laid into the live config — `config.txt` stays flat (the UI disables the
+    /// knobs; this guard keeps a stray call, e.g. a hotkey racing a mode change,
+    /// from breaking the pass-through invariant). The values take effect again
+    /// when the mode or the active output changes.
     pub fn set_tone(&self, tone: &Tone) -> Result<(), String> {
-        self.manager()?.set_tone(tone).map_err(|e| e.to_string())?;
+        let manager = self.manager();
+        if self.hardware_active() && self.offload_mode() == OffloadMode::HardwareOnly {
+            manager.save_tone(tone).map_err(|e| e.to_string())?;
+        } else {
+            manager.set_tone(tone).map_err(|e| e.to_string())?;
+        }
         self.inner.lock().unwrap().tone = *tone;
         Ok(())
     }
 
     pub fn import_peace_presets(&self) -> Result<ImportReport, String> {
         let report = self
-            .manager()?
+            .manager()
             .import_presets_from_config_dir()
             .map_err(|e| e.to_string())?;
         self.invalidate_active();
@@ -841,7 +859,7 @@ impl AppState {
     pub fn import_peace_files(&self, paths: Vec<String>) -> Result<ImportReport, String> {
         let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
         let report = self
-            .manager()?
+            .manager()
             .import_peace_files(&paths)
             .map_err(|e| e.to_string())?;
         self.invalidate_active();

@@ -95,7 +95,7 @@
     disabled={lockedAuto}
     onChange={onAutoPreampChange}
     title={lockedAuto
-      ? "Auto Preamp is managed by hardware offload (Min. APO preamp mode)"
+      ? "Auto Preamp is managed by hardware offload"
       : "Automatically set the preamp so the EQ never clips"}
   />
   <div class="balance-wrap">

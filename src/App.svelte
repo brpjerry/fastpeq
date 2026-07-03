@@ -44,15 +44,21 @@
   const toneFlat = $derived(
     tone.bass === 0 && tone.mid === 0 && tone.treble === 0 && !tone.invert && !tone.swap,
   );
-  // In Min. APO preamp offload mode the editor's Auto Preamp is forced on, so APO
-  // carries no headroom (the device's pregain does) and the bands left to APO can't
-  // clip. Keyed on `active` (offload actually engaged), not the global toggle.
-  const forceAutoPreamp = $derived(!!offload?.active && offload.mode === "minimize-preamp");
+  // Hardware Only: everything runs on the device and Equalizer APO stays flat —
+  // tone is inert while it's engaged. Keyed on `active` (offload actually
+  // engaged): on any other output the EQ (and tone) runs in software as usual.
+  const hardwareOnly = $derived(!!offload?.active && offload.mode === "hardware-only");
+  // The editor's Auto Preamp is forced on while offload manages the preamp
+  // stage(s): Min. APO preamp (APO carries no headroom — the device's pregain
+  // does) and Hardware Only (APO carries nothing at all).
+  const forceAutoPreamp = $derived(
+    !!offload?.active && (offload.mode === "minimize-preamp" || offload.mode === "hardware-only"),
+  );
   const toneThrottle = createTrailingThrottle(() => {
     api.setTone(tone).catch((e) => flash(String(e)));
   }, 80);
   function pushTone() {
-    if (!status?.installed) return;
+    if (!status?.installed || hardwareOnly) return;
     toneThrottle.schedule();
   }
   function setKnob(which: "bass" | "mid" | "treble", v: number) {
@@ -71,6 +77,14 @@
   function dispatchHotkey(id: string) {
     const h = getHotkeys().find((x) => x.id === id);
     if (!h) return;
+    // Tone is inert while Hardware Only offload is engaged (APO stays flat) —
+    // a tone hotkey flashes why instead of silently changing a knob that
+    // wouldn't be applied.
+    const toneAction = h.action === "tone-up" || h.action === "tone-down" || h.action === "tone-reset";
+    if (toneAction && hardwareOnly) {
+      flash("Tone is off in Hardware Only mode");
+      return;
+    }
     if (h.action === "bypass") {
       toggleBypass();
     } else if (h.action === "preset") {
@@ -154,24 +168,25 @@
     status = st;
     presetsDirPath = dir;
     offload = hw;
-    if (st.installed) {
-      const [pres, cats, act, byp, tn] = await Promise.all([
-        api.listPresets(),
-        api.presetCategories(),
-        api.activePreset(),
-        api.bypassed(), // backend owns bypass state (tray/hotkey too)
-        api.getTone(),
-      ]);
-      presets = pres;
-      categories = cats;
-      active = act;
-      isBypassed = byp;
-      tone = tn;
-      if (selected && !presets.includes(selected)) selected = null;
-      // Default the editor to the active preset when nothing is selected
-      // (e.g. on startup), so it opens in the right panel automatically.
-      if (!selected && active) selected = active;
-    }
+    // The backend works with or without Equalizer APO (without it, presets run
+    // against a private config dir and only hardware offload is audible), so
+    // the library always loads — the banner explains the difference.
+    const [pres, cats, act, byp, tn] = await Promise.all([
+      api.listPresets(),
+      api.presetCategories(),
+      api.activePreset(),
+      api.bypassed(), // backend owns bypass state (tray/hotkey too)
+      api.getTone(),
+    ]);
+    presets = pres;
+    categories = cats;
+    active = act;
+    isBypassed = byp;
+    tone = tn;
+    if (selected && !presets.includes(selected)) selected = null;
+    // Default the editor to the active preset when nothing is selected
+    // (e.g. on startup), so it opens in the right panel automatically.
+    if (!selected && active) selected = active;
   }
 
   async function refresh() {
@@ -490,8 +505,9 @@
   {#if !showSettings && !showHotkeys}
     {#if status && !status.installed}
       <div class="banner error">
-        <strong>Equalizer APO not detected.</strong>
-        {status.error ?? "Install Equalizer APO, then restart fastpeq."}
+        <strong>Equalizer APO not detected — software EQ is off.</strong>
+        Presets still work on a supported hardware device in Hardware Only mode.
+        For software EQ, install Equalizer APO and restart fastpeq.
       </div>
     {/if}
   {/if}
@@ -514,7 +530,7 @@
     <HotkeysPage {presets} {categories} {devices} failedIds={failedHotkeys} />
   {:else}
   <div class="workspace">
-  <TonePanel bind:tone {status} {toneFlat} onPushTone={pushTone} onResetTone={resetTone} />
+  <TonePanel bind:tone {status} {toneFlat} disabled={hardwareOnly} onPushTone={pushTone} onResetTone={resetTone} />
   <div class="grid">
     <PresetsPanel
       {presets}
@@ -543,6 +559,7 @@
         bypassed={isBypassed}
         {forceAutoPreamp}
         offloadActive={!!offload?.active}
+        {hardwareOnly}
         reloadToken={editorReloadToken}
         onApplied={(n) => {
           active = n;

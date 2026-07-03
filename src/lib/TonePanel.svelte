@@ -8,17 +8,24 @@
     tone = $bindable(),
     status,
     toneFlat,
+    disabled = false,
     onPushTone,
     onResetTone,
   }: {
     tone: Tone;
     status: ApoStatus | null;
     toneFlat: boolean;
+    /** Tone is inert (hardware-only offload keeps Equalizer APO flat, so the
+     * overlay has nowhere to run). Values stay visible for when it returns. */
+    disabled?: boolean;
     onPushTone: () => void;
     onResetTone: () => void;
   } = $props();
 
+  const inert = $derived(disabled || !status?.installed);
+
   function setKnob(which: "bass" | "mid" | "treble", v: number) {
+    if (inert) return;
     tone[which] = v;
     onPushTone();
   }
@@ -28,20 +35,23 @@
   <div class="tone-head">
     <h2>Tone</h2>
     <span class="tone-sub">Global · layered over the active preset</span>
-    <button class="tone-reset" onclick={onResetTone} disabled={toneFlat || !status?.installed}>
+    <button class="tone-reset" onclick={onResetTone} disabled={toneFlat || inert}>
       Reset
     </button>
   </div>
+  {#if disabled}
+    <p class="tone-off-hint">Off in Hardware Only mode — Equalizer APO stays flat.</p>
+  {/if}
   <div class="tone-body">
     <div class="knobs">
-      <Knob label="Bass" value={tone.bass} step={getToneStep()} onInput={(v) => setKnob("bass", v)} />
-      <Knob label="Mids" value={tone.mid} step={getToneStep()} onInput={(v) => setKnob("mid", v)} />
-      <Knob label="Treble" value={tone.treble} step={getToneStep()} onInput={(v) => setKnob("treble", v)} />
+      <Knob label="Bass" value={tone.bass} step={getToneStep()} disabled={inert} onInput={(v) => setKnob("bass", v)} />
+      <Knob label="Mids" value={tone.mid} step={getToneStep()} disabled={inert} onInput={(v) => setKnob("mid", v)} />
+      <Knob label="Treble" value={tone.treble} step={getToneStep()} disabled={inert} onInput={(v) => setKnob("treble", v)} />
     </div>
     <div class="switches">
       <Switch
         label="Invert polarity"
-        disabled={!status?.installed}
+        disabled={inert}
         checked={tone.invert}
         onChange={(v) => {
           tone.invert = v;
@@ -50,7 +60,7 @@
       />
       <Switch
         label="Switch L / R"
-        disabled={!status?.installed}
+        disabled={inert}
         checked={tone.swap}
         onChange={(v) => {
           tone.swap = v;
@@ -84,6 +94,11 @@
   }
   .tone-reset {
     padding: 3px 10px;
+    font-size: 12px;
+  }
+  .tone-off-hint {
+    margin: 0 0 6px;
+    color: var(--muted);
     font-size: 12px;
   }
   .tone-body {

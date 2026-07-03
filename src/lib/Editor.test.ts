@@ -87,6 +87,44 @@ describe("Editor", () => {
     expect(container.querySelectorAll(".hw-chip").length).toBe(1);
   });
 
+  it("mutes enabled bands that don't fit the device in Hardware Only mode", async () => {
+    vi.mocked(api.offloadSelection).mockResolvedValue([0]); // only the first band fits
+    const { container } = renderEditor(cfg(0, [[100, 3, 1], [1000, 3, 1]]), {
+      offloadActive: true,
+      hardwareOnly: true,
+      forceAutoPreamp: true,
+    });
+    await waitFor(() => expect(bandCount(container)).toBe(2));
+    // Wait for the debounced backend selection to land (until then every band
+    // transiently reads as muted, since nothing is on the device yet).
+    await waitFor(() => expect(container.querySelector(".hw-chip")).toBeTruthy());
+
+    // The fitting band runs on the device; the other is enabled but silent —
+    // APO stays flat, so it runs nowhere and reads as muted.
+    const bandRows = container.querySelectorAll(".band");
+    expect(bandRows[0].querySelector(".hw-chip")).toBeTruthy();
+    expect(bandRows[0].querySelector(".muted-chip")).toBeNull();
+    expect(bandRows[1].querySelector(".muted-chip")).toBeTruthy();
+    expect(bandRows[1].classList.contains("muted")).toBe(true);
+  });
+
+  it("pins the APO preamp to 0 in Hardware Only mode", async () => {
+    vi.mocked(api.offloadSelection).mockResolvedValue([0]);
+    // The preset carries a -6 dB preamp, but the APO stage doesn't exist in this
+    // mode — only the device pregain (covering the +6 boost) attenuates.
+    const { container } = renderEditor(cfg(-6, [[1000, 6, 1]]), {
+      offloadActive: true,
+      hardwareOnly: true,
+      forceAutoPreamp: true,
+    });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await waitFor(() => expect(container.querySelector(".hw-chip")).toBeTruthy());
+
+    const vals = [...container.querySelectorAll(".pval")].map((e) => e.textContent!.trim());
+    expect(vals[0]).toBe("0.0 dB"); // APO — flat
+    expect(parseFloat(vals[1])).toBeLessThan(0); // Device — carries the headroom
+  });
+
   it("shows no hardware chips when offload is inactive", async () => {
     vi.mocked(api.offloadSelection).mockResolvedValue([0]);
     const { container } = renderEditor(cfg(0, [[100, 3, 1]]), { offloadActive: false });
