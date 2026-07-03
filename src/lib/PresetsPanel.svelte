@@ -201,7 +201,7 @@
       <button
         class="refresh"
         onclick={onRefresh}
-        disabled={refreshing || !status?.installed}
+        disabled={refreshing || !status}
         title="Refresh preset list"
         aria-label="Refresh preset list"
       >
@@ -214,7 +214,7 @@
         class="ghost"
         class:on={isBypassed}
         onclick={onToggleBypass}
-        disabled={busy || !status?.installed}
+        disabled={busy || !status}
         title="Drop the EQ filters (keeps the preamp) — click again to restore"
       >
         {isBypassed ? "Bypassed" : "Bypass"}
@@ -234,7 +234,7 @@
           query = "";
         }
       }}
-      disabled={!status?.installed}
+      disabled={!status}
     />
     <div class="type-dd">
       <button
@@ -242,7 +242,7 @@
         class="type-trigger"
         class:open={!!typeMenu}
         onclick={toggleTypeMenu}
-        disabled={!status?.installed}
+        disabled={!status}
         aria-haspopup="listbox"
         aria-expanded={!!typeMenu}
         aria-label="Filter by device type"
@@ -326,13 +326,13 @@
           if (e.key === "Enter") submitCreate();
           else if (e.key === "Escape") cancelCreate();
         }}
-        disabled={busy || !status?.installed}
+        disabled={busy || !status}
       />
       <div class="create-actions">
         <button
           class="primary"
           onclick={submitCreate}
-          disabled={busy || !status?.installed}
+          disabled={busy || !status}
           title="Start from {bandCount} empty bands (set the count in Settings)"
         >
           From scratch
@@ -340,7 +340,7 @@
         <button
           class="capture-btn"
           onclick={submitCapture}
-          disabled={busy || !status?.installed}
+          disabled={busy || !status}
           title="Save the current live Equalizer APO config as this preset"
         >
           Save current
@@ -352,7 +352,7 @@
     <button
       class="primary new-btn"
       onclick={startCreate}
-      disabled={busy || !status?.installed}
+      disabled={busy || !status}
     >
       + New preset
     </button>

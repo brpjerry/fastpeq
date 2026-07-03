@@ -9,6 +9,7 @@
     step = 0.5,
     label,
     unit = "dB",
+    disabled = false,
     onInput,
   }: {
     value: number;
@@ -17,6 +18,8 @@
     step?: number;
     label: string;
     unit?: string;
+    /** Inert: still shows its value, but ignores all input (dimmed). */
+    disabled?: boolean;
     onInput: (v: number) => void;
   } = $props();
 
@@ -51,11 +54,13 @@
   const display = $derived((value > 0 ? "+" : "") + value.toFixed(1));
 
   function commit(v: number) {
+    if (disabled) return;
     const nv = clamp(snap(v));
     if (nv !== value) onInput(nv);
   }
   function onDown(e: PointerEvent) {
     e.preventDefault();
+    if (disabled) return;
     dragging = true;
     startY = e.clientY;
     startVal = value;
@@ -85,17 +90,18 @@
   }
 </script>
 
-<div class="knob">
+<div class="knob" class:disabled>
   <svg
     viewBox="0 0 80 80"
     class="dial"
     class:dragging
     role="slider"
-    tabindex="0"
+    tabindex={disabled ? -1 : 0}
     aria-label={label}
     aria-valuenow={value}
     aria-valuemin={min}
     aria-valuemax={max}
+    aria-disabled={disabled}
     onpointerdown={onDown}
     onpointermove={onMove}
     onpointerup={onUp}
@@ -133,6 +139,12 @@
     cursor: ns-resize;
     touch-action: none;
     outline: none;
+  }
+  .knob.disabled {
+    opacity: 0.45;
+  }
+  .knob.disabled .dial {
+    cursor: default;
   }
   .dial:focus-visible {
     border-radius: 50%;

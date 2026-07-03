@@ -211,9 +211,10 @@
         PEACE saves presets as <code>.peace</code> files in the Equalizer APO config folder.
       </p>
       <div class="settings-actions">
-        <button class="primary" onclick={onImportFiles} disabled={busy || !status?.installed}>
+        <button class="primary" onclick={onImportFiles} disabled={busy || !status}>
           Choose .peace file(s)…
         </button>
+        <!-- Scanning the config folder needs an actual APO install (PEACE lives there). -->
         <button onclick={onImportPeace} disabled={busy || !status?.installed}>
           Import all from config folder
         </button>
@@ -229,13 +230,16 @@
         <button onclick={onResetPresetsDir} disabled={busy}>Use default</button>
       </div>
     </section>
-    <HardwarePanel onChanged={onHardwareChanged} />
+    <HardwarePanel apoInstalled={status?.installed ?? true} onChanged={onHardwareChanged} />
     <section class="settings-section">
       <h3>Equalizer APO</h3>
       {#if status?.installed}
         <p class="hint">Config file: <code>{status.config_path}</code></p>
       {:else}
-        <p class="hint">Not detected — install Equalizer APO and restart fastpeq.</p>
+        <p class="hint">
+          Not detected — software EQ is off; presets still run on a supported hardware device
+          in Hardware Only mode. Install Equalizer APO and restart fastpeq for software EQ.
+        </p>
       {/if}
     </section>
   </div>

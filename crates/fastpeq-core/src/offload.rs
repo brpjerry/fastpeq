@@ -41,8 +41,12 @@ pub enum OffloadMode {
     /// move to the device (whose pregain absorbs the headroom), so the software
     /// side needs little or no attenuation. Also recomputes the software preamp.
     MinimizePreamp,
-    /// Run everything possible on the device. (Band-selection semantics are still
-    /// being finalized; for now this behaves like [`FirstX`](Self::FirstX).)
+    /// The EQ runs entirely on the device and Equalizer APO stays flat: the
+    /// software side keeps no preamp and no filters at all. Every candidate goes
+    /// to hardware when it fits; past the budget the most impactful bands win
+    /// (the [`LargestChange`](Self::LargestChange) ranking) and the rest are
+    /// dropped — muted, not run in software. The tone overlay is also withheld
+    /// while this mode is engaged (the shell's responsibility).
     HardwareOnly,
 }
 
@@ -136,6 +140,11 @@ pub struct Split {
 /// candidates, per-channel bands, disabled or unsupported-type bands, the preamp,
 /// comments, and the tone block — stays in `software`, untouched and in order.
 ///
+/// [`OffloadMode::HardwareOnly`] is the exception: its software side is *flat* —
+/// every `Preamp:` and `Filter:` line is removed (whatever didn't make the device
+/// is dropped, not kept), and only non-EQ lines (comments, `Device:`/`Include:`
+/// raw lines) survive. Equalizer APO becomes a pass-through.
+///
 /// See [`OffloadMode`] for the selection strategies. For
 /// [`OffloadMode::MinimizePreamp`] the caller is expected to set the software
 /// master preamp via [`auto_preamp`] / [`set_master_preamp`] — that step needs the
@@ -169,7 +178,12 @@ pub fn split(config: &Config, profile: &HardwareProfile, mode: OffloadMode) -> S
             .lines
             .iter()
             .enumerate()
-            .filter(|(i, _)| !chosen.contains(i))
+            .filter(|(i, line)| match mode {
+                // Hardware-only leaves APO flat: no preamp, no filters — offloaded
+                // or not. Only non-EQ lines pass through.
+                OffloadMode::HardwareOnly => !matches!(line, Line::Filter(_) | Line::Preamp { .. }),
+                _ => !chosen.contains(i),
+            })
             .map(|(_, line)| line.clone())
             .collect(),
     };
@@ -217,12 +231,12 @@ pub fn selected_filter_positions(
 fn select(candidates: &[(usize, HwBand)], max: usize, fs: f64, mode: OffloadMode) -> Vec<usize> {
     match mode {
         // ApoOnly offloads nothing (a session normally isn't even open for it).
-        // HardwareOnly is a placeholder that currently mirrors FirstX.
         OffloadMode::ApoOnly => Vec::new(),
-        OffloadMode::FirstX | OffloadMode::HardwareOnly => {
-            candidates.iter().take(max).map(|(i, _)| *i).collect()
-        }
-        OffloadMode::LargestChange => {
+        OffloadMode::FirstX => candidates.iter().take(max).map(|(i, _)| *i).collect(),
+        // HardwareOnly shares the impact ranking: when the whole set fits it takes
+        // everything, and past the budget dropping the least impactful bands (they
+        // are muted, not kept in software) loses the least sound.
+        OffloadMode::LargestChange | OffloadMode::HardwareOnly => {
             // Area computed once per candidate, not inside the comparator.
             let mut ranked: Vec<(usize, f64)> = candidates
                 .iter()
@@ -677,6 +691,82 @@ mod tests {
         // The small narrow peak is the one left in software.
         assert_eq!(split.software.filters().count(), 1);
         assert_eq!(split.software.filters().next().unwrap().freq, 1000.0);
+    }
+
+    #[test]
+    fn hardware_only_leaves_software_flat() {
+        // A preamp, a comment, 2 both-channel bands, a left-only band, and a
+        // disabled band. Hardware gets the candidates; software keeps ONLY the
+        // comment — no preamp, no filters of any kind.
+        let config = Config {
+            lines: vec![
+                Line::Preamp {
+                    gain: -6.0,
+                    channel: Channel::Both,
+                },
+                Line::Raw("# a comment".to_string()),
+                peak_filter(100.0, 3.0, 1.0),
+                peak_filter(1000.0, -2.0, 2.0),
+                Line::Filter(Filter {
+                    channel: Channel::Left,
+                    ..Filter::peak(2000.0, 2.0, 1.0)
+                }),
+                Line::Filter(Filter {
+                    enabled: false,
+                    ..Filter::peak(4000.0, 2.0, 1.0)
+                }),
+            ],
+        };
+        let split = split(&config, &profile(), OffloadMode::HardwareOnly);
+
+        assert_eq!(split.hw.len(), 2); // the two both-channel candidates
+        assert_eq!(
+            split.software.lines,
+            vec![Line::Raw("# a comment".to_string())],
+            "APO must be a pass-through: no preamp, no filters"
+        );
+    }
+
+    #[test]
+    fn hardware_only_overflow_drops_the_least_impactful() {
+        // Two device slots, three candidates: the tiny narrow peak is the one
+        // dropped (largest-change ranking), and it does NOT fall back to software.
+        let p = HardwareProfile {
+            max_filters: 2,
+            ..profile()
+        };
+        let config = Config {
+            lines: vec![
+                peak_filter(1000.0, 1.0, 4.0), // tiny, narrow → dropped
+                low_shelf(120.0, 6.0),
+                peak_filter(2000.0, 8.0, 1.0),
+            ],
+        };
+        let split = split(&config, &p, OffloadMode::HardwareOnly);
+
+        let hw_freqs: Vec<f64> = split.hw.iter().map(|b| b.freq).collect();
+        assert_eq!(hw_freqs, vec![120.0, 2000.0]); // document order preserved
+        assert!(
+            split.software.lines.is_empty(),
+            "the overflow band is muted"
+        );
+    }
+
+    #[test]
+    fn hardware_only_positions_match_the_impact_ranking() {
+        let p = HardwareProfile {
+            max_filters: 2,
+            ..profile()
+        };
+        let config = Config {
+            lines: vec![
+                peak_filter(1000.0, 1.0, 4.0), // pos 0 — least impactful
+                low_shelf(120.0, 6.0),         // pos 1
+                peak_filter(2000.0, 8.0, 1.0), // pos 2
+            ],
+        };
+        let pos = selected_filter_positions(&config, &p, OffloadMode::HardwareOnly);
+        assert_eq!(pos, vec![1, 2]);
     }
 
     #[test]

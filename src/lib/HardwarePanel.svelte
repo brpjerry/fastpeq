@@ -7,7 +7,16 @@
   import { onMount } from "svelte";
   import * as api from "./api";
 
-  let { onChanged }: { onChanged?: () => void } = $props();
+  let {
+    apoInstalled = true,
+    onChanged,
+  }: {
+    /** Whether Equalizer APO is actually installed. Without it the split modes
+     * (which run their software half in APO) can't produce sound — only APO Only
+     * (EQ off) and Hardware Only (everything on the device) stay selectable. */
+    apoInstalled?: boolean;
+    onChanged?: () => void;
+  } = $props();
 
   let devices = $state<api.HardwareDevice[]>([]);
   let status = $state<api.HardwareStatus | null>(null);
@@ -40,27 +49,32 @@
   const activeId = $derived(active ? (status?.device?.id ?? null) : null);
   const mode = $derived<api.OffloadMode>(status?.mode ?? "apo-only");
   const bandCount = $derived(status?.max_filters ?? devices[0]?.max_filters ?? 8);
-  const MODES: { id: api.OffloadMode; label: string; desc: string }[] = $derived([
+  // `needsApo`: the mode runs (part of) the EQ in Equalizer APO, so without an
+  // install it can't make sound and its button is disabled.
+  const MODES: { id: api.OffloadMode; label: string; desc: string; needsApo?: boolean }[] = $derived([
     { id: "apo-only", label: "APO Only", desc: "Every band stays in Equalizer APO — nothing is offloaded." },
     {
       id: "first-x",
       label: `First ${bandCount}`,
       desc: "The first bands in the preset, in order.",
+      needsApo: true,
     },
     {
       id: "largest-change",
       label: "Biggest effect",
       desc: "The bands that change the sound the most (largest area under the bell/shelf).",
+      needsApo: true,
     },
     {
       id: "minimize-preamp",
       label: "Min. APO Preamp",
       desc: "The boosts — so Equalizer APO's preamp stays near 0 and the device handles the headroom.",
+      needsApo: true,
     },
     {
       id: "hardware-only",
       label: "Hardware Only",
-      desc: "Everything runs on the device where it fits (Equalizer APO stays flat).",
+      desc: "The most impactful bands that fit run on the device; the rest are muted. Equalizer APO stays flat and tone controls are off.",
     },
   ]);
   const modeDesc = $derived(MODES.find((m) => m.id === mode)?.desc ?? "");
@@ -107,12 +121,21 @@
       <button
         class="seg-btn"
         class:sel={mode === m.id}
-        disabled={busy}
+        disabled={busy || (m.needsApo && !apoInstalled)}
+        title={m.needsApo && !apoInstalled
+          ? "Needs Equalizer APO — this mode runs part of the EQ in software"
+          : undefined}
         onclick={() => changeMode(m.id)}>{m.label}</button
       >
     {/each}
   </div>
   <p class="hint mode-desc">{modeDesc}</p>
+  {#if !apoInstalled}
+    <p class="hint mode-desc">
+      Equalizer APO isn't installed, so only Hardware Only routes the full EQ (on a supported
+      device); the split modes are unavailable.
+    </p>
+  {/if}
 
   <p class="hint status-line">
     {#if !enabled}

@@ -75,6 +75,24 @@ describe("HardwarePanel", () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
+  it("disables the split modes without Equalizer APO; Hardware Only stays available", async () => {
+    const { container, getByText } = render(HardwarePanel, { props: { apoInstalled: false } });
+    await waitFor(() => getByText("Moondrop DHA15"));
+
+    const btn = (label: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>(".seg-btn")].find(
+        (b) => b.textContent?.trim() === label,
+      )!;
+    // The split modes run their software half in APO — dead without an install.
+    expect(btn("First 8").disabled).toBe(true);
+    expect(btn("Biggest effect").disabled).toBe(true);
+    expect(btn("Min. APO Preamp").disabled).toBe(true);
+    // Off and all-on-device remain the two honest choices.
+    expect(btn("APO Only").disabled).toBe(false);
+    expect(btn("Hardware Only").disabled).toBe(false);
+    getByText(/only Hardware Only routes the full EQ/);
+  });
+
   it("explains when offload is on but the active output isn't supported", async () => {
     vi.mocked(api.refreshHardware).mockResolvedValue(
       status({ enabled: true, active: false, mode: "first-x" }),

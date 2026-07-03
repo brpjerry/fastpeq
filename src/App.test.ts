@@ -118,6 +118,16 @@ beforeEach(() => {
   vi.mocked(api.activePreset).mockResolvedValue(null); // no active preset → no Editor rendered
   vi.mocked(api.listPresets).mockResolvedValue([]);
   vi.mocked(api.presetCategories).mockResolvedValue({});
+  // Offload off by default; tests that engage it override this per-test.
+  vi.mocked(api.hardwareStatus).mockResolvedValue({
+    enabled: false,
+    active: false,
+    device: null,
+    version: null,
+    error: null,
+    max_filters: null,
+    mode: "apo-only",
+  });
 });
 afterEach(cleanup);
 
@@ -281,6 +291,30 @@ describe("App settings", () => {
   });
 });
 
+describe("App without Equalizer APO", () => {
+  it("still lists and applies presets, for the hardware-only path", async () => {
+    withLibrary();
+    vi.mocked(api.apoStatus).mockResolvedValue({
+      installed: false,
+      config_path: null,
+      error: "Equalizer APO registry key not found",
+    });
+    const { container, getByText } = render(App);
+
+    // The banner explains the situation, but the app is not a brick: the
+    // library loads and a preset can be applied (audible via a hardware device
+    // in Hardware Only mode).
+    await waitFor(() => getByText(/software EQ is off/i));
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    const search = container.querySelector<HTMLInputElement>(".search")!;
+    expect(search.disabled).toBe(false); // gates are backend-ready, not APO-installed
+    await fireEvent.input(search, { target: { value: "Senn" } });
+    await fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD600"));
+  });
+});
+
 describe("App global hotkeys", () => {
   it("switches to the bound preset when a hotkey fires", async () => {
     withLibrary(); // includes "Sennheiser HD600"
@@ -330,6 +364,33 @@ describe("App global hotkeys", () => {
       invert: false,
       swap: false,
     });
+    removeHotkey(id);
+  });
+
+  it("ignores tone hotkeys and disables the tone panel while Hardware Only is engaged", async () => {
+    withLibrary();
+    vi.mocked(api.hardwareStatus).mockResolvedValue({
+      enabled: true,
+      active: true,
+      device: null,
+      version: null,
+      error: null,
+      max_filters: 8,
+      mode: "hardware-only",
+    });
+    const { container, getByText } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    // The tone panel says why it's inert (APO stays flat in this mode).
+    await waitFor(() => getByText(/Off in Hardware Only mode/));
+
+    const id = addHotkey();
+    updateHotkey(id, { key: "3", action: "tone-up", tone: "bass" });
+    vi.mocked(api.setTone).mockClear();
+    listeners["hotkey-pressed"]({ payload: id });
+
+    // The hotkey flashes why instead of writing a tone that wouldn't apply.
+    await waitFor(() => getByText("Tone is off in Hardware Only mode"));
+    expect(api.setTone).not.toHaveBeenCalled();
     removeHotkey(id);
   });
 

@@ -74,6 +74,40 @@ fn store_save_load_list_delete() {
 }
 
 #[test]
+fn save_tone_persists_without_touching_live_config() {
+    let apo_dir = TempDir::new("savetone-apo");
+    let presets_dir = TempDir::new("savetone-presets");
+    let config_file = apo_dir.path().join("config.txt");
+    let install = ApoInstall {
+        config_path: apo_dir.path().to_path_buf(),
+    };
+    let manager = Manager::new(
+        install,
+        PresetStore::new(presets_dir.path()),
+        apo_dir.path().join("backup.txt"),
+    );
+
+    manager.save_preset("HP", &sample_config()).unwrap();
+    manager.apply_preset("HP", &Tone::default()).unwrap();
+    let before = fs::read_to_string(&config_file).unwrap();
+
+    // save_tone (used while hardware-only offload keeps APO flat) records the
+    // knobs for later but must not lay the overlay into the live config.
+    let tone = Tone {
+        bass: 6.0,
+        ..Tone::default()
+    };
+    manager.save_tone(&tone).unwrap();
+    assert_eq!(fs::read_to_string(&config_file).unwrap(), before);
+    assert_eq!(manager.tone().unwrap(), tone); // ...but the sidecar has it
+
+    // set_tone does both: persists and re-lays the overlay.
+    manager.set_tone(&tone).unwrap();
+    let after = fs::read_to_string(&config_file).unwrap();
+    assert!(after.contains("fastpeq tone overlay"), "{after}");
+}
+
+#[test]
 fn bypass_keeps_preamp_but_drops_filters() {
     let apo_dir = TempDir::new("bypass-apo");
     let presets_dir = TempDir::new("bypass-presets");
