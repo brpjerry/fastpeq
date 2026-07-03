@@ -188,6 +188,8 @@ pub fn run() {
             commands::set_hotkeys,
             commands::load_hotkey_bindings,
             commands::save_hotkey_bindings,
+            commands::load_ui_state,
+            commands::save_ui_state,
             commands::list_audio_devices,
             commands::set_default_audio_device,
             commands::list_hardware_devices,

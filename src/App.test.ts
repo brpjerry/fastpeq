@@ -94,6 +94,8 @@ vi.mock("./lib/api", () => {
     setHotkeys: vi.fn(() => Promise.resolve([])),
     loadHotkeyBindings: vi.fn(() => Promise.resolve(null)),
     saveHotkeyBindings: ok(),
+    loadUiState: vi.fn(() => Promise.resolve(null)),
+    saveUiState: ok(),
     readTextFile: vi.fn(() => Promise.resolve("")),
     setPresetsDir: ok(),
     resetPresetsDir: ok(),

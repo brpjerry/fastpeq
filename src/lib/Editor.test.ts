@@ -5,6 +5,7 @@ import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Config } from "./types";
 import * as api from "./api";
+import { setAutoPreamp } from "./prefs.svelte";
 import { addTarget, removeTarget } from "./targets.svelte";
 import {
   getTargetId,
@@ -18,14 +19,17 @@ import {
 } from "./preset-view.svelte";
 import Editor from "./Editor.svelte";
 
-// The Editor only touches these four IPC calls; an explicit mock is clearer than
-// auto-mock and resolves the mutations to void by default.
+// The IPC calls the Editor (and the stores it persists through — prefs,
+// preset-view, targets) touches; an explicit mock is clearer than auto-mock
+// and resolves the mutations to void by default.
 vi.mock("./api", () => ({
   getPreset: vi.fn(),
   applyLive: vi.fn(() => Promise.resolve()),
   savePreset: vi.fn(() => Promise.resolve()),
   readTextFile: vi.fn(() => Promise.resolve("")),
   offloadSelection: vi.fn(() => Promise.resolve([])),
+  loadUiState: vi.fn(() => Promise.resolve(null)),
+  saveUiState: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -459,7 +463,7 @@ describe("Editor", () => {
     // Auto on with flat tone → preamp sits at 0; a louder tone arriving from the
     // global controls (a prop change, not an editor edit) must push a fresh config
     // so config.txt's preamp tracks it instead of going stale until the next edit.
-    localStorage.setItem("fastpeq:autoPreamp", "false"); // start from a known state, then toggle on
+    setAutoPreamp(false); // start from a known state, then toggle on
     const props = { name: "Test", bypassed: false, reloadToken: 0, onApplied: vi.fn() };
     const { container, rerender } = renderEditor(cfg(0, [[1000, 0, 1]]), { ...props, tone: FLAT_TONE });
     await waitFor(() => expect(bandCount(container)).toBe(1));
@@ -483,7 +487,7 @@ describe("Editor", () => {
   });
 
   it("does not re-apply on tone changes while Auto Preamp is off", async () => {
-    localStorage.setItem("fastpeq:autoPreamp", "false"); // the persisted switch can leak between tests
+    setAutoPreamp(false); // the persisted switch can leak between tests
     const props = { name: "Test", bypassed: false, reloadToken: 0, onApplied: vi.fn() };
     const { container, rerender } = renderEditor(cfg(-10, [[1000, 0, 1]]), { ...props, tone: FLAT_TONE });
     await waitFor(() => expect(bandCount(container)).toBe(1));

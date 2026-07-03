@@ -1,8 +1,65 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach } from "vitest";
-import { getTargets, getTarget, addTarget, removeTarget, FLAT_TARGET } from "./targets.svelte";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as api from "./api";
+import {
+  initTargets,
+  getTargets,
+  getTarget,
+  addTarget,
+  removeTarget,
+  FLAT_TARGET,
+} from "./targets.svelte";
 
-beforeEach(() => localStorage.clear());
+vi.mock("./api", () => ({
+  loadUiState: vi.fn(() => Promise.resolve(null)),
+  saveUiState: vi.fn(() => Promise.resolve()),
+}));
+
+const KEY = "fastpeq.targets";
+
+// Re-init from "no file, empty localStorage" so each test starts with just
+// Flat (the module state would otherwise leak between tests).
+beforeEach(async () => {
+  localStorage.clear();
+  vi.mocked(api.loadUiState).mockResolvedValue(null);
+  await initTargets();
+  vi.mocked(api.saveUiState).mockClear();
+});
+
+describe("targets persistence", () => {
+  it("loads the list from the backend file when one exists", async () => {
+    const stored = [{ id: "t1", name: "Harman", points: [{ freq: 100, spl: 1 }] }];
+    vi.mocked(api.loadUiState).mockResolvedValue(JSON.stringify(stored));
+    await initTargets();
+    expect(getTarget("t1").name).toBe("Harman");
+    // The file is authoritative — a plain load never writes anything back.
+    expect(api.saveUiState).not.toHaveBeenCalled();
+  });
+
+  it("migrates a pre-file localStorage list into the file when none exists", async () => {
+    const legacy = [{ id: "t2", name: "Diffuse", points: [] }];
+    localStorage.setItem(KEY, JSON.stringify(legacy));
+    await initTargets();
+    expect(getTarget("t2").name).toBe("Diffuse");
+    expect(api.saveUiState).toHaveBeenCalledWith("targets", JSON.stringify(legacy));
+  });
+
+  it("never overwrites an unreadable file", async () => {
+    vi.mocked(api.loadUiState).mockResolvedValue("{corrupt");
+    await initTargets();
+    expect(getTargets()).toEqual([FLAT_TARGET]); // starts empty, but the file is left alone
+    expect(api.saveUiState).not.toHaveBeenCalled();
+  });
+
+  it("persists every edit to the file and the localStorage backup", () => {
+    const id = addTarget("Harman", [{ freq: 100, spl: 1 }]);
+    expect(api.saveUiState).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual([
+      { id, name: "Harman", points: [{ freq: 100, spl: 1 }] },
+    ]);
+    removeTarget(id);
+  });
+});
 
 describe("targets store", () => {
   it("always offers the built-in Flat target first", () => {
