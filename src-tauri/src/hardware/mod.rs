@@ -78,6 +78,7 @@ pub fn device_for_output(output_name: &str) -> Option<DetectedDevice> {
 /// Internal view of one enumerated HID interface/collection. `pub(crate)` so the
 /// sibling driver modules can match against it.
 #[cfg(windows)]
+#[derive(Clone)]
 pub(crate) struct DeviceInfo {
     pub vendor_id: u16,
     pub product_id: u16,

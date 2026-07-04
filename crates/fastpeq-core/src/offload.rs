@@ -263,9 +263,12 @@ fn band_area(band: &HwBand, fs: f64) -> f64 {
 }
 
 /// Greedily move the band whose removal most lowers the combined software boost
-/// peak, until that peak can't drop below 0 (preamp already ~0) or the budget runs
-/// out; then spend any leftover budget on the largest-area remaining bands (moving
-/// cuts to hardware can't raise the already-≤0 software peak).
+/// peak, until that peak can't drop further or the budget runs out; then spend any
+/// leftover budget on the largest-area remaining *boosts*. Only boosts are ever
+/// offloaded — they're what consumes APO headroom, so moving them to the device
+/// lets APO's preamp sit at just the cut + tone level. Cuts stay in software: they
+/// need no headroom, and offloading one could re-expose a boost that didn't fit
+/// (raising the very preamp this mode minimizes).
 ///
 /// Each candidate's magnitude response over the probe grid is computed once up
 /// front, so every trial in the greedy loop is a vector sum rather than a fresh
@@ -324,11 +327,14 @@ fn select_min_preamp(candidates: &[(usize, HwBand)], max: usize, fs: f64) -> Vec
     }
 
     if chosen.len() < max {
-        // Reuses the precomputed responses for the area ranking (see `select`).
+        // Leftover budget takes only the remaining boosts (gain > 0): a boost on
+        // the device can't raise the software peak, whereas offloading a cut both
+        // wastes headroom-free slots and can strand a boost in APO. Reuses the
+        // precomputed responses for the area ranking (see `select`).
         let mut rest: Vec<(usize, f64)> = candidates
             .iter()
             .enumerate()
-            .filter(|&(pos, _)| !taken[pos])
+            .filter(|&(pos, _)| !taken[pos] && candidates[pos].1.gain > 0.0)
             .map(|(pos, (i, _))| (*i, responses[pos].iter().map(|m| m.abs()).sum()))
             .collect();
         rest.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
@@ -798,6 +804,39 @@ mod tests {
         assert!(split.hw_pregain < 0.0);
         assert_eq!(split.software.filters().count(), 1);
         assert_eq!(split.software.filters().next().unwrap().freq, 5000.0);
+    }
+
+    #[test]
+    fn minimize_preamp_gives_leftover_budget_to_boosts_not_cuts() {
+        // Budget 2. The greedy takes the dominant boost (pos 0), dropping the peak
+        // to ~0 — but a masked boost (pos 1, buried under the pos-2 cut) is still in
+        // software. The leftover slot must go to that boost, not the larger-area
+        // cut: otherwise a positive filter is stranded in APO (inflating its preamp)
+        // while a cut needlessly lands on the device — the reported bug.
+        let p = HardwareProfile {
+            max_filters: 2,
+            ..profile()
+        };
+        let config = Config {
+            lines: vec![
+                peak_filter(1000.0, 8.0, 1.0),  // pos 0: dominant boost
+                peak_filter(5000.0, 2.0, 1.0),  // pos 1: boost, masked by the cut ↓
+                peak_filter(5000.0, -8.0, 1.0), // pos 2: cut (larger area than pos 1)
+            ],
+        };
+        let split = split(&config, &p, OffloadMode::MinimizePreamp);
+
+        // Both boosts go to the device; the cut stays in APO (needs no headroom).
+        assert_eq!(split.hw.len(), 2);
+        assert!(
+            split.hw.iter().all(|b| b.gain > 0.0),
+            "only boosts should be offloaded, got {:?}",
+            split.hw
+        );
+        let hw_freqs: Vec<f64> = split.hw.iter().map(|b| b.freq).collect();
+        assert!(hw_freqs.contains(&1000.0) && hw_freqs.contains(&5000.0));
+        assert_eq!(split.software.filters().count(), 1);
+        assert_eq!(split.software.filters().next().unwrap().gain, Some(-8.0));
     }
 
     #[test]

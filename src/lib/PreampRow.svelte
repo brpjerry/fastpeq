@@ -42,6 +42,10 @@
   const BAL_MAX = 30;
   const PRE_MIN = -30;
   const PRE_MAX = 6;
+  /* The device pregain is input headroom only — it may attenuate the offloaded
+     bands but never boost, regardless of any headroom the device reserves. So
+     its slider/field cap at 0, unlike the software preamp (which allows +boost). */
+  const DEV_PRE_MAX = 0;
   let showBalance = $state(false);
   let chanBtn = $state<HTMLButtonElement | null>(null);
 
@@ -64,9 +68,9 @@
     onSchedule();
   }
   function setDeviceDb(v: string) {
-    const db = preampDb(v);
-    if (db === null) return;
-    hwManual = db;
+    const db = Number(v);
+    if (v.trim() === "" || !Number.isFinite(db)) return;
+    hwManual = Math.max(PRE_MIN, Math.min(DEV_PRE_MAX, db));
     onSchedule();
   }
   /** One-decimal display value (sums of rounded stages can carry float dust). */
@@ -152,12 +156,12 @@
       <div class="preamp device">
         <span
           class="plabel"
-          title="Hardware device pregain — applied to the bands offloaded to the device">Device</span
+          title="Hardware device pregain — headroom for the offloaded bands (attenuation only, never boosts)">Device</span
         >
         <input
           type="range"
-          min="-30"
-          max="6"
+          min={PRE_MIN}
+          max={DEV_PRE_MAX}
           step="0.1"
           value={hwPregain}
           oninput={(e) => {
@@ -170,7 +174,7 @@
           <input
             type="number"
             min={PRE_MIN}
-            max={PRE_MAX}
+            max={DEV_PRE_MAX}
             step="0.1"
             value={r1(hwPregain)}
             disabled={autoPreamp}
