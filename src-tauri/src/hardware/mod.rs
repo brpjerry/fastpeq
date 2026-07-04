@@ -25,6 +25,10 @@ pub struct DetectedDevice {
     pub model: String,
     /// Band budget — how many of a preset's filters this device runs.
     pub max_filters: usize,
+    /// Whether the device's pregain is host-adjustable (see
+    /// [`HardwareProfile::user_pregain`]). The UI hides the Device preamp
+    /// slider when it isn't.
+    pub user_pregain: bool,
 }
 
 /// A connected hardware-EQ device that EQ bands can be pushed to. Implemented per
@@ -133,6 +137,7 @@ pub fn detect() -> Result<Vec<DetectedDevice>, String> {
             manufacturer,
             model,
             max_filters: profile.max_filters,
+            user_pregain: profile.user_pregain,
         });
     }
     Ok(out)

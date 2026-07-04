@@ -68,6 +68,9 @@ export interface HardwareDevice {
   manufacturer: string;
   model: string;
   max_filters: number;
+  /** Whether the device's pregain is host-adjustable; false = it headrooms
+   *  itself and the Device preamp slider is hidden. */
+  user_pregain: boolean;
 }
 /** EQ routing: offload off (`apo-only`), or which bands go to hardware. */
 export type OffloadMode =

@@ -9,6 +9,7 @@
     lockedAuto = false,
     balance = $bindable(),
     offload = false,
+    userPregain = true,
     apoPreamp = 0,
     hwPregain = 0,
     apoManual = $bindable(0),
@@ -25,6 +26,9 @@
     balance: number;
     /** Hardware offload active → split the preamp into APO + device sliders. */
     offload?: boolean;
+    /** Whether the offload device's pregain is host-adjustable; when it isn't
+     * (the device headrooms itself), the Device row is hidden. */
+    userPregain?: boolean;
     /** Effective APO-stage preamp / device pregain shown on the two sliders. */
     apoPreamp?: number;
     hwPregain?: number;
@@ -144,7 +148,7 @@
         </span>
       {/if}
     </div>
-    {#if offload}
+    {#if offload && userPregain}
       <div class="preamp device">
         <span
           class="plabel"

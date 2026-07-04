@@ -175,6 +175,17 @@ describe("Editor", () => {
     expect(container.querySelectorAll(".preamp").length).toBe(2);
   });
 
+  it("hides the Device slider when the device's pregain isn't user-adjustable", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 6, 1]]), {
+      offloadActive: true,
+      hwUserPregain: false,
+    });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    const labels = [...container.querySelectorAll(".plabel")].map((e) => e.textContent?.trim());
+    expect(labels).toEqual(["APO"]); // the device headrooms itself — no Device row
+    expect(container.querySelectorAll(".preamp").length).toBe(1);
+  });
+
   it("shows a single preamp slider when offload is off", async () => {
     const { container } = renderEditor(cfg(-6, [[1000, 6, 1]]), { offloadActive: false });
     await waitFor(() => expect(bandCount(container)).toBe(1));

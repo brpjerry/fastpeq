@@ -116,7 +116,9 @@ offloaded:
 The band editor marks each offloaded band with a **HW** chip, so you can see exactly which bands
 the device is running versus Equalizer APO. While offload is on, the preamp control splits into two
 sliders — **APO** (the software remainder) and **Device** (the hardware pregain) — so each gain
-stage can be set independently (Auto sizes both to avoid clipping).
+stage can be set independently (Auto sizes both to avoid clipping). Devices whose pregain isn't
+host-adjustable (the DHA15 computes its own headroom from the written bands; its pregain register
+ignores writes) show only the APO slider.
 
 The split logic and the device biquad math are pure and live in `fastpeq_core::offload`; the
 USB/HID I/O lives in the shell (`src-tauri/src/hardware/`), mirroring how Windows output-device
