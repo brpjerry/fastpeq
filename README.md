@@ -127,12 +127,13 @@ hardware means adding a driver and registering it. A dedicated worker thread **r
 coalesces updates, since devices can't be rewritten as fast as APO's file reload; live edits go to
 volatile RAM and an applied preset is committed to the device's flash.
 
-> Supported devices: **Moondrop DHA15** (`hardware/moondrop.rs`) and **Tanchjim Space Pro**
-> (`hardware/walkplay.rs` — the Walkplay-platform protocol, scheme No16, 10 bands ±10 dB). Both
-> protocols are community **reverse-engineered** (no official spec). Set `FASTPEQ_HW_DRYRUN=1` to
-> log device packets without sending them. Each driver is validated against real hardware by
-> ignored tests: `cargo test -p fastpeq -- --ignored dha15` /
-> `cargo test -p fastpeq -- --ignored space_pro` (writes to RAM only).
+> Supported devices: **Moondrop DHA15** (`hardware/moondrop.rs`), **Tanchjim Space Pro**
+> (`hardware/walkplay.rs` — the Walkplay-platform protocol, scheme No16, 10 bands ±10 dB), and
+> **FiiO KA17** (`hardware/fiio.rs` — FiiO's parameter protocol, 10 bands ±12 dB in the USER1–3
+> preset slots). All protocols are community **reverse-engineered** (no official spec). Set
+> `FASTPEQ_HW_DRYRUN=1` to log device packets without sending them. Each driver is validated
+> against real hardware by ignored tests: `cargo test -p fastpeq -- --ignored dha15` /
+> `-- --ignored space_pro` / `-- --ignored ka17` (writes to RAM only).
 
 ## Roadmap
 

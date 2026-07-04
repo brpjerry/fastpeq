@@ -51,6 +51,8 @@ pub trait HardwareEq {
 }
 
 #[cfg(windows)]
+mod fiio;
+#[cfg(windows)]
 mod hid;
 #[cfg(windows)]
 mod moondrop;
@@ -103,6 +105,10 @@ fn drivers() -> &'static [Driver] {
         Driver {
             identify: walkplay::identify,
             open: walkplay::open,
+        },
+        Driver {
+            identify: fiio::identify,
+            open: fiio::open,
         },
     ]
 }
