@@ -50,6 +50,23 @@ export const kindHasGain = (k: FilterKind) => GAIN_KINDS.has(k);
 export const kindHasQ = (k: FilterKind) => Q_KINDS.has(k);
 export const defaultQ = (k: FilterKind) => (k === "Peak" ? 1 : Math.SQRT1_2);
 
+/** The band-list views: the plain channel lists, plus — while a hybrid offload
+ * mode is on — the L+R list split by where each band runs ("apo" / "hw"). */
+export type BandView = "both" | "apo" | "hw" | "left" | "right";
+
+/** Whether a band belongs to a band-list view. `offloaded` is whether the band
+ * currently runs on the hardware device — callers pass the backend's selection
+ * verbatim (the UI never derives membership itself: today it's mode-driven, but
+ * it may become user-assigned, non-contiguous, or otherwise arbitrary). */
+export function bandInView(c: Channel, offloaded: boolean, v: BandView): boolean {
+  if (v === "left") return c.kind === "left";
+  if (v === "right") return c.kind === "right";
+  const both = c.kind === "both" || c.kind === "other"; // unmodeled specs ride along
+  if (v === "apo") return both && !offloaded;
+  if (v === "hw") return both && offloaded;
+  return both;
+}
+
 export const SAMPLE_RATE = 48000;
 
 /** Log-spaced frequencies from 20 Hz to 20 kHz for plotting. */

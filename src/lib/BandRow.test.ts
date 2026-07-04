@@ -112,4 +112,57 @@ describe("BandRow", () => {
     expect(row.classList.contains("off")).toBe(true);
     expect(row.classList.contains("hover")).toBe(true);
   });
+
+  const statusOf = (root: ParentNode) => root.querySelector<HTMLButtonElement>(".status")!;
+
+  it("labels the status toggle ON/OFF outside a hybrid split", () => {
+    const on = render(BandRow, { props: { band: band(), hovered: false, ...cbs() } });
+    expect(statusOf(on.container).textContent!.trim()).toBe("ON");
+
+    const off = render(BandRow, {
+      props: { band: band({ enabled: false }), hovered: false, ...cbs() },
+    });
+    expect(statusOf(off.container).textContent!.trim()).toBe("OFF");
+  });
+
+  it("labels the status toggle APO/HW per the backend's placement in hybrid mode", () => {
+    // Placement arrives via the `offloaded` prop — the row itself must not infer
+    // it (selection may be mode-driven or, in the future, user-assigned).
+    const apo = render(BandRow, {
+      props: { band: band(), hovered: false, hybrid: true, offloaded: false, ...cbs() },
+    });
+    expect(statusOf(apo.container).textContent!.trim()).toBe("APO");
+    expect(statusOf(apo.container).classList.contains("hw")).toBe(false);
+
+    const hw = render(BandRow, {
+      props: { band: band(), hovered: false, hybrid: true, offloaded: true, ...cbs() },
+    });
+    expect(statusOf(hw.container).textContent!.trim()).toBe("HW");
+    expect(statusOf(hw.container).classList.contains("hw")).toBe(true);
+  });
+
+  it("shows OFF over APO/HW for a disabled band even in hybrid mode", () => {
+    const { container } = render(BandRow, {
+      props: { band: band({ enabled: false }), hovered: false, hybrid: true, offloaded: true, ...cbs() },
+    });
+    expect(statusOf(container).textContent!.trim()).toBe("OFF");
+  });
+
+  it("toggles enabled from the status button and fires onChange", async () => {
+    const b = band();
+    const c = cbs();
+    const { container } = render(BandRow, { props: { band: b, hovered: false, ...c } });
+    await fireEvent.click(statusOf(container));
+    expect(b.enabled).toBe(false);
+    expect(c.onChange).toHaveBeenCalled();
+  });
+
+  it("marks a Hardware Only muted band as silent (still ON, hollow)", () => {
+    const { container } = render(BandRow, {
+      props: { band: band(), hovered: false, muted: true, ...cbs() },
+    });
+    expect(statusOf(container).textContent!.trim()).toBe("ON");
+    expect(statusOf(container).classList.contains("silent")).toBe(true);
+    expect(container.querySelector(".band")!.classList.contains("muted")).toBe(true);
+  });
 });

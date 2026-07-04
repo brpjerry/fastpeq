@@ -10,7 +10,7 @@
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, type CurveFilter } from "./eq";
+  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type CurveFilter } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { getFilterShapes, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
@@ -102,7 +102,7 @@
   let balance = $state(0); // dB: <0 left louder, 0 centered, >0 right louder
   let hadPreamp = $state(false);
   let expanded = $state(false); // full-window graph + handle editing
-  let view = $state<"both" | "left" | "right">("both"); // which channel list is shown
+  let view = $state<BandView>("both"); // which band list is shown
   let hoveredId = $state<number | null>(null); // graph handle under the cursor → row highlight
   let rawLines = $state<string[]>([]); // preserved verbatim (comments, Device:, etc.)
   let err = $state("");
@@ -134,6 +134,17 @@
     const requiredPeak = Math.max(bandsPeak + getToneHeadroom(), combinedPeak);
     return Math.round(Math.min(0, -requiredPeak) * 10) / 10;
   }
+
+  // Hybrid offload: some bands run on the device and the rest in APO, so the
+  // band list splits into "L+R APO" / "L+R HW" views and rows label their engine.
+  // (Hardware Only and no-offload each have a single engine — no split.)
+  const hybrid = $derived(offloadActive && !hardwareOnly);
+  // Keep the view valid across mode changes: the merged L+R list only exists
+  // outside hybrid, the split views only within it. L / R views survive both.
+  $effect(() => {
+    if (hybrid && view === "both") view = "apo";
+    else if (!hybrid && (view === "apo" || view === "hw")) view = "both";
+  });
 
   // Hardware offload splits the preamp into two stages: APO (the software remainder)
   // and the device's pregain (the offloaded bands). `hwBandIdx` (from the backend)
@@ -485,16 +496,14 @@
     schedule();
   }
 
-  // Filters are grouped into three lists — both / left / right — selected by the
-  // view toggle. The graph always uses the full set, so it shows the real
-  // per-channel response no matter which list is on screen.
-  function inView(c: Channel, v: "both" | "left" | "right"): boolean {
-    if (v === "left") return c.kind === "left";
-    if (v === "right") return c.kind === "right";
-    return c.kind === "both" || c.kind === "other"; // unmodeled specs ride along here
-  }
-  const shown = $derived(bands.filter((b) => inView(b.channel, view)));
-  function channelForView(v: "both" | "left" | "right"): Channel {
+  // Filters are grouped into lists — both (split into APO / HW while a hybrid
+  // offload is on) / left / right — selected by the view toggle. The graph always
+  // uses the full set, so it shows the real per-channel response no matter which
+  // list is on screen. Device membership comes from `hwBandIdx` (the backend's
+  // selection) — never re-derived here.
+  const inView = (b: Band, i: number, v: BandView) => bandInView(b.channel, hwBandIdx.has(i), v);
+  const shown = $derived(bands.filter((b, i) => inView(b, i, view)));
+  function channelForView(v: BandView): Channel {
     if (v === "left") return { kind: "left" };
     if (v === "right") return { kind: "right" };
     return { kind: "both" };
@@ -529,10 +538,11 @@
   }
 
   function sortBands() {
-    // Sort only the bands in the current list, leaving the other channels put.
+    // Sort only the bands in the current list, leaving the others put (their
+    // positions — and thus any order-sensitive offload selection — unchanged).
     const sorted = [...shown].sort((a, b) => a.freq - b.freq);
-    let i = 0;
-    bands = bands.map((b) => (inView(b.channel, view) ? sorted[i++] : b));
+    let j = 0;
+    bands = bands.map((b, i) => (inView(b, i, view) ? sorted[j++] : b));
     schedule();
   }
 
@@ -685,6 +695,7 @@
     bind:hoveredId
     offloadedIdx={hwBandIdx}
     {mutedIds}
+    {hybrid}
     onSchedule={schedule}
     onChangeKind={changeKind}
     onRemoveBand={removeBand}
