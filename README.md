@@ -127,10 +127,12 @@ hardware means adding a driver and registering it. A dedicated worker thread **r
 coalesces updates, since devices can't be rewritten as fast as APO's file reload; live edits go to
 volatile RAM and an applied preset is committed to the device's flash.
 
-> The Moondrop protocol is community **reverse-engineered** (no official spec); see the driver in
-> `src-tauri/src/hardware/moondrop.rs`. Set `FASTPEQ_HW_DRYRUN=1` to log device packets without
-> sending them. The DHA15 driver is validated against real hardware by an ignored test:
-> `cargo test -p fastpeq -- --ignored dha15` (writes to RAM only).
+> Supported devices: **Moondrop DHA15** (`hardware/moondrop.rs`) and **Tanchjim Space Pro**
+> (`hardware/walkplay.rs` — the Walkplay-platform protocol, scheme No16, 10 bands ±10 dB). Both
+> protocols are community **reverse-engineered** (no official spec). Set `FASTPEQ_HW_DRYRUN=1` to
+> log device packets without sending them. Each driver is validated against real hardware by
+> ignored tests: `cargo test -p fastpeq -- --ignored dha15` /
+> `cargo test -p fastpeq -- --ignored space_pro` (writes to RAM only).
 
 ## Roadmap
 
