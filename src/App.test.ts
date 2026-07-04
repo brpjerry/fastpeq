@@ -60,6 +60,7 @@ vi.mock("./lib/api", () => {
       Promise.resolve({
         enabled: false,
         active: false,
+        reconciled: true,
         device: null,
         version: null,
         error: null,
@@ -71,6 +72,7 @@ vi.mock("./lib/api", () => {
       Promise.resolve({
         enabled: false,
         active: false,
+        reconciled: true,
         device: null,
         version: null,
         error: null,
@@ -122,6 +124,7 @@ beforeEach(() => {
   vi.mocked(api.hardwareStatus).mockResolvedValue({
     enabled: false,
     active: false,
+    reconciled: true,
     device: null,
     version: null,
     error: null,
@@ -372,6 +375,7 @@ describe("App global hotkeys", () => {
     vi.mocked(api.hardwareStatus).mockResolvedValue({
       enabled: true,
       active: true,
+      reconciled: true,
       device: null,
       version: null,
       error: null,
@@ -505,5 +509,58 @@ describe("App scroll-to-active", () => {
     await fireEvent.click(container.querySelector(".gear")!); // enter settings
     await fireEvent.click(container.querySelector(".gear")!); // exit settings
     await waitFor(() => expect(scrollSpy).toHaveBeenCalledWith({ block: "center" }));
+  });
+});
+
+describe("startup offload detection", () => {
+  it("shows the active preset immediately with a non-blocking hardware-connecting hint", async () => {
+    withLibrary();
+    // The active preset resolves from its provenance stamp right away, so it shows
+    // immediately — even though the HID reconcile that (re)connects the device is
+    // still running.
+    vi.mocked(api.activePreset).mockResolvedValue("Sennheiser HD600");
+    vi.mocked(api.hardwareStatus).mockResolvedValueOnce({
+      enabled: true,
+      active: false,
+      reconciled: false,
+      device: null,
+      version: null,
+      error: null,
+      max_filters: 8,
+      mode: "first-x",
+    });
+    // After the reconcile finishes (backend fires fastpeq:changed): device engaged.
+    vi.mocked(api.hardwareStatus).mockResolvedValue({
+      enabled: true,
+      active: true,
+      reconciled: true,
+      device: null,
+      version: null,
+      error: null,
+      max_filters: 8,
+      mode: "first-x",
+    });
+
+    const { container, getByText, queryByText } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    // The active preset is shown right away (its row is highlighted) — not hidden.
+    await waitFor(() => expect(container.querySelector(".presets li.active")).toBeTruthy());
+    // …alongside a non-blocking hint that the device is still connecting.
+    getByText(/Connecting to your hardware/);
+    expect(container.querySelector(".spinner")).toBeTruthy();
+
+    // Reconcile done → the hint clears, and the preset stays put.
+    listeners["fastpeq:changed"]({ payload: undefined });
+    await waitFor(() => expect(queryByText(/Connecting to your hardware/)).toBeNull());
+    expect(container.querySelector(".presets li.active")).toBeTruthy();
+  });
+
+  it("shows no connecting hint when offload is disabled", async () => {
+    withLibrary();
+    // Default mock: offload off, reconciled — a plain software-EQ startup.
+    const { container, queryByText } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    expect(queryByText(/Connecting to your hardware/)).toBeNull();
+    expect(container.querySelector(".spinner")).toBeNull();
   });
 });

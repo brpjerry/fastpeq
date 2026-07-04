@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
 
 /// Reported to the UI so it can show APO status / errors.
@@ -32,6 +33,12 @@ pub struct HardwareStatus {
     /// device and the toggle is on). `false` when the toggle is on but the active
     /// output isn't a device we can offload to.
     pub active: bool,
+    /// Whether the one-time startup offload reconcile has finished. `false` only
+    /// during the brief window at launch while the ~1 s HID enumeration (re)connects
+    /// the device. The active preset itself resolves immediately from its stamp; this
+    /// just tells the UI whether the device session is up yet, so it can show a
+    /// non-blocking "connecting to hardware" hint until this flips true.
+    pub reconciled: bool,
     /// The device currently being offloaded to (when `active`).
     pub device: Option<DetectedDevice>,
     /// Device firmware version, once read.
@@ -213,6 +220,10 @@ pub struct AppState {
     /// requested from several places at once (focus, mode change, …); this makes an
     /// overlapping request a no-op instead of racing the session open/close.
     sync_guard: Mutex<()>,
+    /// Set true once the startup reconcile thread has finished its first
+    /// [`sync_offload`]. Surfaced via [`HardwareStatus::reconciled`] so the UI knows
+    /// when the device session is up and can drop its "connecting to hardware" hint.
+    initial_synced: AtomicBool,
 }
 
 struct Inner {
@@ -267,6 +278,7 @@ impl AppState {
             offload_mode: Mutex::new(offload_mode),
             last_sync: Mutex::new(None),
             sync_guard: Mutex::new(()),
+            initial_synced: AtomicBool::new(false),
         };
         Ok(state)
     }
@@ -369,7 +381,7 @@ impl AppState {
             return Some(full);
         }
         let manager = self.manager();
-        if let Ok(Some(name)) = manager.active_preset_by_stamp()
+        if let Ok(Some(name)) = manager.active_preset()
             && let Ok(cfg) = manager.load_preset(&name)
         {
             return Some(provenance::set(&cfg, &name));
@@ -471,18 +483,19 @@ impl AppState {
         derived
     }
 
-    /// Compute the active preset from the live config — by provenance stamp alone
-    /// while a session is offloading (the offloaded bands are gone from `config.txt`,
-    /// so the stricter equivalence check can't match the full preset), otherwise the
-    /// normal check. `sync_offload` keeps the session in step with the active output,
-    /// so `hardware_active` accurately means "the live config is a remainder".
+    /// Compute the active preset from the live config's provenance stamp alone: a
+    /// preset the app applied stays "active" while its stamp is present and the
+    /// preset still exists (bypass strips the stamp, so a bypassed config reads as
+    /// none).
+    ///
+    /// The stamp, not a content re-scan, is the source of truth. This resolves an
+    /// offloaded remainder — whose bands live on the device, not in `config.txt` —
+    /// immediately, without waiting for the HID session to engage at startup, and
+    /// makes software and hardware-offload output behave identically. Divergence
+    /// from the saved preset (an unsaved live edit) is surfaced by the editor's own
+    /// dirty state ("Save" / "● live"), not by dropping the active-preset link.
     fn derive_active(&self) -> Option<String> {
-        let manager = self.manager();
-        if self.hardware_active() {
-            manager.active_preset_by_stamp().ok().flatten()
-        } else {
-            manager.active_preset().ok().flatten()
-        }
+        self.manager().active_preset().ok().flatten()
     }
 
     /// The cached tone overlay (kept in sync by `set_tone`).
@@ -630,12 +643,20 @@ impl AppState {
 
     // --- Hardware EQ offload ---------------------------------------------------
 
+    /// Mark the one-time startup offload reconcile as finished, so the UI can drop
+    /// its "connecting to hardware" hint. Called once, from the startup thread after
+    /// its [`sync_offload`].
+    pub fn mark_initial_synced(&self) {
+        self.initial_synced.store(true, Ordering::Release);
+    }
+
     /// The current offload status for the UI's hardware panel. A cheap read — the
     /// session is reconciled with the active output by the background reconciler, not
     /// here (this is polled from the UI thread).
     pub fn hardware_status(&self) -> HardwareStatus {
         let enabled = self.offload_enabled();
         let mode = self.offload_mode();
+        let reconciled = self.initial_synced.load(Ordering::Acquire);
         let hw = self.hardware.lock().unwrap();
         match hw.as_ref() {
             Some(session) => {
@@ -645,6 +666,7 @@ impl AppState {
                     // A session can briefly outlive a turn-off until the reconciler
                     // closes it — it's only "active" while offload is still enabled.
                     active: enabled,
+                    reconciled,
                     device: Some(session.descriptor.clone()),
                     version: rt.version,
                     error: rt.error,
@@ -655,6 +677,7 @@ impl AppState {
             None => HardwareStatus {
                 enabled,
                 active: false,
+                reconciled,
                 mode,
                 ..Default::default()
             },

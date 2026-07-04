@@ -11,14 +11,18 @@
 //! [`Line::Raw`], so the stamp round-trips a parse/serialize cycle and survives a
 //! restart. [`Manager::active_preset`](crate::Manager::active_preset) reads it
 //! back in O(1) — and, crucially, it *disambiguates* presets that are otherwise
-//! indistinguishable once Auto Preamp has rewritten the master gain (the inherent
-//! limitation of the content-only [`Config::is_equivalent`](crate::Config) match).
+//! indistinguishable by content once Auto Preamp has rewritten the master gain (the
+//! inherent limit of a content-only match).
 //!
-//! The stamp is **advisory**: `active_preset` trusts it only while the live base
-//! EQ is still equivalent to the named preset, so a stale stamp — left by a
-//! divergent edit, or pointing at a since-deleted preset — never yields a wrong
-//! match; detection falls back to the content scan. Preset files never contain a
-//! stamp: [`PresetStore::save`](crate::PresetStore) strips it on the way to disk.
+//! The stamp is **authoritative**: a preset is active iff the live config carries
+//! its stamp and that preset still exists. A [`bypass`](crate::Manager::bypass)
+//! strips the stamp (so a bypassed config is never active), and a stamp naming a
+//! since-deleted preset resolves to nothing. An unsaved edit keeps the stamp, so
+//! the config stays pinned to the preset it was applied from — divergence from the
+//! saved EQ is surfaced in the UI's dirty state, not by dropping the link. There is
+//! no content scan: a config produced *outside* fastpeq has no stamp and is, by
+//! design, not detected. Preset files never contain a stamp:
+//! [`PresetStore::save`](crate::PresetStore) strips it on the way to disk.
 
 use crate::apo::model::{Config, Line};
 

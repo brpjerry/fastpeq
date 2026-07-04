@@ -141,7 +141,14 @@ pub fn run() {
             std::thread::spawn(move || {
                 if let Some(state) = startup_handle.try_state::<AppState>() {
                     state.sync_offload();
+                    state.mark_initial_synced();
                 }
+                // Tell the UI the startup reconcile finished so it drops the "connecting
+                // to hardware" hint and picks up the engaged session (offload.active →
+                // the editor's per-band hardware indicators). The active preset already
+                // showed immediately from its provenance stamp — this isn't what unblocks
+                // it.
+                tray::notify_changed(&startup_handle);
             });
 
             // System tray with live preset switching.
