@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "fastpeq"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "fastpeq-core",
  "hidapi",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "fastpeq-core"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "serde",
  "serde_json",
