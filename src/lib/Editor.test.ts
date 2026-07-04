@@ -73,29 +73,34 @@ describe("Editor", () => {
     expect(bandCount(container)).toBe(2);
   });
 
-  it("splits the L+R list into APO and HW views in a hybrid offload mode", async () => {
+  it("filters the full L+R list with the APO/HW-only buttons in a hybrid offload mode", async () => {
     vi.mocked(api.offloadSelection).mockResolvedValue([0]); // only the first band
     const { container } = renderEditor(cfg(0, [[100, 3, 1], [1000, 3, 1]]), {
       offloadActive: true,
     });
-    // Hybrid replaces the merged L+R tab with APO/HW views; the APO view is the
-    // default, and it holds only the band the device didn't take.
-    const tabs = () => [...container.querySelectorAll<HTMLButtonElement>(".view-seg button")];
-    await waitFor(() => expect(tabs().map((b) => b.textContent!.trim())).toEqual([
-      "L+R APO · 1",
-      "L+R HW · 1",
-      "L",
-      "R",
-    ]));
-    expect(bandCount(container)).toBe(1);
-    expect(container.querySelector(".band .status")!.textContent!.trim()).toBe("APO");
+    // The tabs stay the plain channel lists; the full L+R list shows both bands
+    // with their engine statuses once the backend selection lands.
+    await waitFor(() => expect(bandCount(container)).toBe(2));
+    await waitFor(() => expect(container.querySelector(".status.hw")).toBeTruthy());
+    const tabLabels = [...container.querySelectorAll(".view-seg button")].map((b) =>
+      b.textContent!.trim(),
+    );
+    expect(tabLabels).toEqual(["L+R · 2", "L", "R"]);
+    const statuses = () =>
+      [...container.querySelectorAll(".band .status")].map((s) => s.textContent!.trim());
+    expect(statuses()).toEqual(["HW", "APO"]);
 
-    // The HW view holds the offloaded band, its status marked accordingly.
-    await fireEvent.click(tabs()[1]);
-    expect(bandCount(container)).toBe(1);
-    const status = container.querySelector(".band .status")!;
-    expect(status.textContent!.trim()).toBe("HW");
-    expect(status.classList.contains("hw")).toBe(true);
+    // "HW only" narrows the list to the offloaded band; clicking it again
+    // restores the full list; "APO only" shows the software remainder.
+    const engineBtns = () => [...container.querySelectorAll<HTMLButtonElement>(".engine-seg button")];
+    expect(engineBtns().map((b) => b.textContent!.trim())).toEqual(["APO only", "HW only"]);
+    await fireEvent.click(engineBtns()[1]);
+    expect(statuses()).toEqual(["HW"]);
+    expect(engineBtns()[1].classList.contains("sel")).toBe(true);
+    await fireEvent.click(engineBtns()[1]);
+    expect(statuses()).toEqual(["HW", "APO"]);
+    await fireEvent.click(engineBtns()[0]);
+    expect(statuses()).toEqual(["APO"]);
   });
 
   it("mutes enabled bands that don't fit the device in Hardware Only mode", async () => {
@@ -105,8 +110,8 @@ describe("Editor", () => {
       hardwareOnly: true,
       forceAutoPreamp: true,
     });
-    // Hardware Only keeps the single merged L+R list (no APO/HW split — there is
-    // only one engine) and binary ON/OFF statuses.
+    // Hardware Only keeps binary ON/OFF statuses and offers no engine filter —
+    // there is only one engine.
     await waitFor(() => expect(bandCount(container)).toBe(2));
     // Wait for the debounced backend selection to land (until then every band
     // transiently reads as muted, since nothing is on the device yet).
@@ -122,10 +127,7 @@ describe("Editor", () => {
     expect(bandRows[1].querySelector(".status")!.textContent!.trim()).toBe("ON");
     expect(bandRows[1].querySelector(".status.silent")).toBeTruthy();
     expect(bandRows[1].classList.contains("muted")).toBe(true);
-    const tabLabels = [...container.querySelectorAll(".view-seg button")].map((b) =>
-      b.textContent!.trim(),
-    );
-    expect(tabLabels[0]).toBe("L+R · 2");
+    expect(container.querySelector(".engine-seg")).toBeNull();
   });
 
   it("pins the APO preamp to 0 in Hardware Only mode", async () => {
@@ -148,13 +150,14 @@ describe("Editor", () => {
     expect(parseFloat(vals[1])).toBeLessThan(0); // Device — carries the headroom
   });
 
-  it("shows plain ON/OFF statuses and no split views when offload is inactive", async () => {
+  it("shows plain ON/OFF statuses and no engine filter when offload is inactive", async () => {
     vi.mocked(api.offloadSelection).mockResolvedValue([0]);
     const { container } = renderEditor(cfg(0, [[100, 3, 1]]), { offloadActive: false });
     await waitFor(() => expect(bandCount(container)).toBe(1));
     // Offload is off, so the effect short-circuits and no band is marked.
     expect(container.querySelector(".status.hw")).toBeNull();
     expect(container.querySelector(".band .status")!.textContent!.trim()).toBe("ON");
+    expect(container.querySelector(".engine-seg")).toBeNull();
     const tabLabels = [...container.querySelectorAll(".view-seg button")].map((b) =>
       b.textContent!.trim(),
     );

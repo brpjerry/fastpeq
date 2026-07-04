@@ -10,7 +10,7 @@
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type CurveFilter } from "./eq";
+  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { getFilterShapes, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
@@ -135,15 +135,16 @@
     return Math.round(Math.min(0, -requiredPeak) * 10) / 10;
   }
 
-  // Hybrid offload: some bands run on the device and the rest in APO, so the
-  // band list splits into "L+R APO" / "L+R HW" views and rows label their engine.
-  // (Hardware Only and no-offload each have a single engine — no split.)
+  // Hybrid offload: some bands run on the device and the rest in APO, so rows
+  // label their engine and the list offers APO-only / HW-only display filters.
+  // (Hardware Only and no-offload each have a single engine — neither applies.)
   const hybrid = $derived(offloadActive && !hardwareOnly);
-  // Keep the view valid across mode changes: the merged L+R list only exists
-  // outside hybrid, the split views only within it. L / R views survive both.
+  // The engine display filter (the "APO only" / "HW only" buttons under the
+  // list). Cleared when hybrid ends — its buttons disappear with it, and a stale
+  // filter would silently hide bands.
+  let engine = $state<EngineFilter>("all");
   $effect(() => {
-    if (hybrid && view === "both") view = "apo";
-    else if (!hybrid && (view === "apo" || view === "hw")) view = "both";
+    if (!hybrid) engine = "all";
   });
 
   // Hardware offload splits the preamp into two stages: APO (the software remainder)
@@ -496,12 +497,13 @@
     schedule();
   }
 
-  // Filters are grouped into lists — both (split into APO / HW while a hybrid
-  // offload is on) / left / right — selected by the view toggle. The graph always
-  // uses the full set, so it shows the real per-channel response no matter which
-  // list is on screen. Device membership comes from `hwBandIdx` (the backend's
-  // selection) — never re-derived here.
-  const inView = (b: Band, i: number, v: BandView) => bandInView(b.channel, hwBandIdx.has(i), v);
+  // Filters are grouped into three lists — both / left / right — selected by the
+  // view toggle, optionally narrowed by the engine display filter while a hybrid
+  // offload is on. The graph always uses the full set, so it shows the real
+  // per-channel response no matter which list is on screen. Device membership
+  // comes from `hwBandIdx` (the backend's selection) — never re-derived here.
+  const inView = (b: Band, i: number, v: BandView) =>
+    bandInView(b.channel, hwBandIdx.has(i), v, engine);
   const shown = $derived(bands.filter((b, i) => inView(b, i, view)));
   function channelForView(v: BandView): Channel {
     if (v === "left") return { kind: "left" };
@@ -669,6 +671,26 @@
     >
       Remove 0 dB{flatCount ? ` · ${flatCount}` : ""}
     </button>
+    {#if hybrid}
+      <!-- Engine display filter: narrow the list to one offload stage. Click the
+           active button again to show everything. -->
+      <div class="seg engine-seg" role="group" aria-label="Filter by engine">
+        <button
+          class:sel={engine === "apo"}
+          onclick={() => (engine = engine === "apo" ? "all" : "apo")}
+          title="Show only the bands running in Equalizer APO (click again to show all)"
+        >
+          APO only
+        </button>
+        <button
+          class:sel={engine === "hw"}
+          onclick={() => (engine = engine === "hw" ? "all" : "hw")}
+          title="Show only the bands running on the hardware device (click again to show all)"
+        >
+          HW only
+        </button>
+      </div>
+    {/if}
   </div>
 {/snippet}
 
@@ -696,6 +718,7 @@
     offloadedIdx={hwBandIdx}
     {mutedIds}
     {hybrid}
+    {engine}
     onSchedule={schedule}
     onChangeKind={changeKind}
     onRemoveBand={removeBand}
@@ -949,6 +972,35 @@
   }
   .add {
     align-self: flex-start;
+  }
+  /* Engine display filter, bottom-right of the band pane (hybrid offload only). */
+  .engine-seg {
+    margin-left: auto;
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .engine-seg button {
+    border: none;
+    border-right: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .engine-seg button:last-child {
+    border-right: none;
+  }
+  .engine-seg button:hover:not(.sel) {
+    background: var(--panel-2);
+    color: var(--text);
+  }
+  .engine-seg button.sel {
+    background: var(--accent);
+    color: #fff;
   }
 
   /* In the stacked layout the page scrolls, so the list shows all bands

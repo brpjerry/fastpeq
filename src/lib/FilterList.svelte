@@ -1,6 +1,6 @@
 <script lang="ts">
   import BandRow from "./BandRow.svelte";
-  import { bandInView, type BandView } from "./eq";
+  import { bandInView, type BandView, type EngineFilter } from "./eq";
   import type { EditorBand } from "./history.svelte";
 
   let {
@@ -10,6 +10,7 @@
     offloadedIdx = new Set<number>(),
     mutedIds = new Set<number>(),
     hybrid = false,
+    engine = "all",
     onSchedule,
     onChangeKind,
     onRemoveBand,
@@ -24,23 +25,24 @@
     /** Band ids muted by Hardware Only offload — enabled but running nowhere
      * (they didn't fit on the device and APO stays flat). */
     mutedIds?: Set<number>;
-    /** A hybrid offload mode is on: the L+R list splits into APO and HW views,
-     * and rows label where they run. */
+    /** A hybrid offload mode is on: rows label where they run (APO / HW). */
     hybrid?: boolean;
+    /** Display filter over the list while hybrid: only the APO bands, only the
+     * device bands, or everything (the Editor's APO/HW-only buttons drive it). */
+    engine?: EngineFilter;
     onSchedule: () => void;
     onChangeKind: (band: EditorBand) => void;
     onRemoveBand: (id: number) => void;
   } = $props();
 
   const inView = (b: EditorBand, i: number, v: BandView) =>
-    bandInView(b.channel, offloadedIdx.has(i), v);
+    bandInView(b.channel, offloadedIdx.has(i), v, engine);
 
   const shown = $derived(bands.filter((b, i) => inView(b, i, view)));
-  const count = (v: BandView) => bands.filter((b, i) => inView(b, i, v)).length;
+  // Tab counts ignore the engine filter — they name each channel list's full size.
+  const count = (v: BandView) => bands.filter((b) => bandInView(b.channel, false, v)).length;
   const counts = $derived({
     both: count("both"),
-    apo: count("apo"),
-    hw: count("hw"),
     left: count("left"),
     right: count("right"),
   });
@@ -48,29 +50,20 @@
   // Tab caption: the view name plus its band count when nonzero.
   const label = (name: string, n: number) => (n ? `${name} · ${n}` : name);
 
-  function emptyMsg(v: BandView): string {
+  function emptyMsg(v: BandView, e: EngineFilter): string {
+    if (e === "apo") return "No filters running in Equalizer APO in this list.";
+    if (e === "hw") return "No filters on the hardware device in this list.";
     if (v === "left") return "No left-only filters yet.";
     if (v === "right") return "No right-only filters yet.";
-    if (v === "apo") return "No filters in Equalizer APO — they all fit on the device.";
-    if (v === "hw") return "No filters on the hardware device yet.";
     return "No filters yet — add a band to start shaping the curve.";
   }
 </script>
 
 <div class="bands-head">
   <div class="seg view-seg" role="group" aria-label="Channel filter list">
-    {#if hybrid}
-      <button class:sel={view === "apo"} onclick={() => (view = "apo")} title="Both-channel filters running in Equalizer APO">
-        {label("L+R APO", counts.apo)}
-      </button>
-      <button class:sel={view === "hw"} onclick={() => (view = "hw")} title="Both-channel filters running on the hardware device">
-        {label("L+R HW", counts.hw)}
-      </button>
-    {:else}
-      <button class:sel={view === "both"} onclick={() => (view = "both")} title="Filters applied to both channels">
-        {label("L+R", counts.both)}
-      </button>
-    {/if}
+    <button class:sel={view === "both"} onclick={() => (view = "both")} title="Filters applied to both channels">
+      {label("L+R", counts.both)}
+    </button>
     <button class:sel={view === "left"} onclick={() => (view = "left")} title="Left-channel-only filters">
       {label("L", counts.left)}
     </button>
@@ -97,7 +90,7 @@
     {/if}
   {/each}
   {#if !shown.length}
-    <div class="none">{emptyMsg(view)}</div>
+    <div class="none">{emptyMsg(view, engine)}</div>
   {/if}
 </div>
 

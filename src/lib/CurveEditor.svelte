@@ -78,8 +78,8 @@
 
   // Handles are limited to the channel list in view; the curve traces below
   // still use every band, so the graph reflects the real per-channel response.
-  // The hybrid APO/HW split views both map to the both-channel handles — where a
-  // band runs shouldn't gate dragging it on the graph.
+  // (The Editor's APO/HW engine filter deliberately doesn't reach here — where a
+  // band runs shouldn't gate dragging it on the graph.)
   const inView = (c: Channel) =>
     view === "left" ? c.kind === "left" : view === "right" ? c.kind === "right" : c.kind === "both" || c.kind === "other";
   const handleBands = $derived(bands.filter((b) => inView(b.channel)));
