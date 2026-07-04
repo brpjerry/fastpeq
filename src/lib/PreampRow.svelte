@@ -56,126 +56,148 @@
   }
 </script>
 
-<div class="preamp">
-  {#if offload}
-    <span class="plabel" title="Equalizer APO preamp — applied to the bands kept in software">APO</span>
-    <input
-      type="range"
-      min="-30"
-      max="6"
-      step="0.1"
-      value={apoPreamp}
-      oninput={(e) => {
-        apoManual = Number(e.currentTarget.value);
-        onSchedule();
-      }}
-      disabled={autoPreamp}
-    />
-    <span class="pval">{apoPreamp.toFixed(1)} dB</span>
-  {:else}
-    <span class="plabel">Preamp</span>
-    <input
-      type="range"
-      min="-30"
-      max="6"
-      step="0.1"
-      value={livePreamp}
-      oninput={(e) => {
-        manualPreamp = Number(e.currentTarget.value);
-        onSchedule();
-      }}
-      disabled={autoPreamp}
-    />
-    <span class="pval">{livePreamp.toFixed(1)} dB</span>
-  {/if}
-  <Switch
-    compact
-    label="Auto"
-    checked={autoPreamp}
-    disabled={lockedAuto}
-    onChange={onAutoPreampChange}
-    title={lockedAuto
-      ? "Auto Preamp is managed by hardware offload"
-      : "Automatically set the preamp so the EQ never clips"}
-  />
-  <div class="balance-wrap">
-    <button
-      bind:this={chanBtn}
-      class="chan"
-      class:on={balance !== 0}
-      onclick={() => (showBalance = !showBalance)}
-      title="Channel balance">{balanceLabel(balance)}</button
-    >
-    {#if showBalance}
-      <div class="bal-pop" use:dismissable={{ onDismiss: () => (showBalance = false), ignore: chanBtn }}>
-        <div class="bal-slider">
-          <small>L</small>
-          <input
-            type="range"
-            min={-BAL_MAX}
-            max={BAL_MAX}
-            step="0.5"
-            bind:value={balance}
-            oninput={onSchedule}
-            oncontextmenu={centerBalance}
-            title="Right-click to reset to center"
-          />
-          <small>R</small>
-        </div>
-        <div class="bal-foot">
-          <label class="bal-input" title="Balance: + right louder, − left louder">
-            <input
-              type="number"
-              min={-BAL_MAX}
-              max={BAL_MAX}
-              step="0.5"
-              value={balance}
-              onchange={(e) => setBalanceDb(e.currentTarget.value)}
-            />
-            <small>dB</small>
-          </label>
-          <span class="bal-hint">+R&nbsp;/&nbsp;−L</span>
-          <button class="bal-center" onclick={centerBalance} disabled={balance === 0}>Center</button>
-        </div>
+<div class="preamp-block">
+  <div class="prows">
+    <div class="preamp">
+      {#if offload}
+        <span class="plabel" title="Equalizer APO preamp — applied to the bands kept in software">APO</span>
+        <input
+          type="range"
+          min="-30"
+          max="6"
+          step="0.1"
+          value={apoPreamp}
+          oninput={(e) => {
+            apoManual = Number(e.currentTarget.value);
+            onSchedule();
+          }}
+          disabled={autoPreamp}
+        />
+        <span class="pval">{apoPreamp.toFixed(1)} dB</span>
+      {:else}
+        <span class="plabel">Preamp</span>
+        <input
+          type="range"
+          min="-30"
+          max="6"
+          step="0.1"
+          value={livePreamp}
+          oninput={(e) => {
+            manualPreamp = Number(e.currentTarget.value);
+            onSchedule();
+          }}
+          disabled={autoPreamp}
+        />
+        <span class="pval">{livePreamp.toFixed(1)} dB</span>
+      {/if}
+    </div>
+    {#if offload}
+      <div class="preamp device">
+        <span
+          class="plabel"
+          title="Hardware device pregain — applied to the bands offloaded to the device">Device</span
+        >
+        <input
+          type="range"
+          min="-30"
+          max="6"
+          step="0.1"
+          value={hwPregain}
+          oninput={(e) => {
+            hwManual = Number(e.currentTarget.value);
+            onSchedule();
+          }}
+          disabled={autoPreamp}
+        />
+        <span class="pval">{hwPregain.toFixed(1)} dB</span>
       </div>
     {/if}
   </div>
-</div>
-{#if offload}
-  <div class="preamp device">
-    <span
-      class="plabel"
-      title="Hardware device pregain — applied to the bands offloaded to the device">Device</span
-    >
-    <input
-      type="range"
-      min="-30"
-      max="6"
-      step="0.1"
-      value={hwPregain}
-      oninput={(e) => {
-        hwManual = Number(e.currentTarget.value);
-        onSchedule();
-      }}
-      disabled={autoPreamp}
+  <div class="pside">
+    <Switch
+      compact
+      label="Auto"
+      checked={autoPreamp}
+      disabled={lockedAuto}
+      onChange={onAutoPreampChange}
+      title={lockedAuto
+        ? "Auto Preamp is managed by hardware offload"
+        : "Automatically set the preamp so the EQ never clips"}
     />
-    <span class="pval">{hwPregain.toFixed(1)} dB</span>
+    <div class="balance-wrap">
+      <button
+        bind:this={chanBtn}
+        class="chan"
+        class:on={balance !== 0}
+        onclick={() => (showBalance = !showBalance)}
+        title="Channel balance">{balanceLabel(balance)}</button
+      >
+      {#if showBalance}
+        <div class="bal-pop" use:dismissable={{ onDismiss: () => (showBalance = false), ignore: chanBtn }}>
+          <div class="bal-slider">
+            <small>L</small>
+            <input
+              type="range"
+              min={-BAL_MAX}
+              max={BAL_MAX}
+              step="0.5"
+              bind:value={balance}
+              oninput={onSchedule}
+              oncontextmenu={centerBalance}
+              title="Right-click to reset to center"
+            />
+            <small>R</small>
+          </div>
+          <div class="bal-foot">
+            <label class="bal-input" title="Balance: + right louder, − left louder">
+              <input
+                type="number"
+                min={-BAL_MAX}
+                max={BAL_MAX}
+                step="0.5"
+                value={balance}
+                onchange={(e) => setBalanceDb(e.currentTarget.value)}
+              />
+              <small>dB</small>
+            </label>
+            <span class="bal-hint">+R&nbsp;/&nbsp;−L</span>
+            <button class="bal-center" onclick={centerBalance} disabled={balance === 0}>Center</button>
+          </div>
+        </div>
+      {/if}
+    </div>
   </div>
-{/if}
+</div>
 
 <style>
-  .preamp {
+  /* Slider rows in one column, with the Auto/balance controls beside them —
+     centered on the column, i.e. on the midline between the two offload rows. */
+  .preamp-block {
     display: flex;
     align-items: center;
     gap: 10px;
     margin: 8px 0 6px;
   }
-  /* The second (device) row sits snug under the APO row. */
-  .preamp.device {
-    margin-top: 0;
+  .prows {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .preamp {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
   .preamp input[type="range"] {
     flex: 1;
+  }
+  .pside {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
   .plabel {
     color: var(--muted);
