@@ -58,8 +58,11 @@ pub(super) fn identify(info: &DeviceInfo) -> Option<(String, HardwareProfile)> {
 }
 
 /// The DHA15's capabilities (from the reverse-engineered `peq8Band12dBFullShelves`
-/// constraints): 8 bands, ±12 dB, Q 0.1–10, peaking + low/high shelf, host-managed
-/// pregain, biquads computed at 96 kHz.
+/// constraints): 8 bands, ±12 dB, Q 0.1–10, peaking + low/high shelf, biquads
+/// computed at 96 kHz. No user pregain: the `0x23` register accepts writes but
+/// ignores them (probed on real hardware — see `dha15_pregain_probe`; `0x23` isn't
+/// even readable, and neither it nor the DAC offset at `0x03` moves after a write),
+/// so the device manages its own input headroom from the written biquads.
 fn dha15_profile() -> HardwareProfile {
     HardwareProfile {
         max_filters: 8,
@@ -69,6 +72,7 @@ fn dha15_profile() -> HardwareProfile {
         freq_range: (20.0, 20_000.0),
         supports_low_shelf: true,
         supports_high_shelf: true,
+        user_pregain: false,
     }
 }
 
@@ -91,8 +95,11 @@ impl HardwareEq for MoondropDevice {
             self.send(&write_packet(i as u8, &band, self.profile.sample_rate))?;
             self.send(&enable_packet(i as u8))?;
         }
-        // DHA15 expects the host to supply input headroom (deviceHandlesPregain:false).
-        self.send(&pregain_packet(pregain))?;
+        // Only devices with a working pregain register get one; the DHA15's `0x23`
+        // ignores writes (it headrooms itself from the biquads), so skip it there.
+        if self.profile.user_pregain {
+            self.send(&pregain_packet(pregain))?;
+        }
         if commit {
             self.send(&[CMD_WRITE, CMD_SAVE_TO_FLASH])?;
         }
@@ -365,6 +372,82 @@ mod tests {
             super::super::device_for_output("Headphones (FIIO Air Link)").is_none(),
             "an unrelated output must not offload"
         );
+    }
+
+    /// Probe: is the DHA15's pregain (`0x23`) actually user-controllable?
+    ///
+    /// The Device preamp slider appears dead on the DHA15. Upstream devicePEQ
+    /// *reads* "pregain" from register `0x03` (DAC offset) but *writes* it to
+    /// `0x23`, and comments that Moondrop devices auto-compute headroom from the
+    /// written biquads. This probe (RAM only, no flash):
+    ///   1. reads `0x03` and `0x23` baselines,
+    ///   2. writes a boosted band (no pregain) → does `0x03` move by itself?
+    ///   3. writes pregain −6 dB via `0x23` → does `0x03` or `0x23` move?
+    ///
+    /// then restores a flat band and 0 pregain.
+    /// Run with: `cargo test -p fastpeq -- --ignored dha15_pregain_probe --nocapture`.
+    ///
+    /// Result (firmware V0.1): `0x23` never replies to reads, and `0x03` stays
+    /// at 0 through band writes and pregain writes alike → not user-modifiable,
+    /// hence `user_pregain: false` in [`dha15_profile`].
+    #[test]
+    #[ignore]
+    fn dha15_pregain_probe() {
+        const CMD_DAC_OFFSET: u8 = 0x03;
+        let devices = super::super::detect().expect("enumeration should succeed");
+        let dha = devices
+            .iter()
+            .find(|d| d.model.contains("DHA15"))
+            .expect("a DHA15 should be connected");
+        let dev = MoondropDevice {
+            device: super::super::hid::open(&dha.id).expect("open DHA15"),
+            profile: dha15_profile(),
+        };
+
+        let read_reg = |cmd: u8, label: &str| {
+            if dev.send(&[CMD_READ, cmd]).is_err() {
+                println!("{label}: send failed");
+                return;
+            }
+            match dev.read_reply(CMD_READ, cmd) {
+                Ok(p) => {
+                    let head = &p[..p.len().min(10)];
+                    let fixed = i16::from_le_bytes([p[3], p[4]]) as f64 / 256.0;
+                    println!("{label}: {head:02x?}  (bytes3..5 as 8.8 fixed: {fixed} dB)");
+                }
+                Err(e) => println!("{label}: no reply ({e})"),
+            }
+        };
+
+        read_reg(CMD_DAC_OFFSET, "baseline 0x03 (DAC offset)");
+        read_reg(CMD_PRE_GAIN, "baseline 0x23 (pre-gain)");
+
+        // A +6 dB band, no pregain write: does the device pull 0x03 down itself?
+        let boosted = HwBand {
+            kind: HwFilterType::Peak,
+            freq: 1000.0,
+            gain: 6.0,
+            q: 1.0,
+        };
+        dev.send(&write_packet(0, &boosted, 96_000.0)).unwrap();
+        dev.send(&enable_packet(0)).unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        read_reg(CMD_DAC_OFFSET, "0x03 after +6 dB band (no pregain write)");
+        read_reg(CMD_PRE_GAIN, "0x23 after +6 dB band (no pregain write)");
+
+        // Now write pregain −6 dB the way push() does.
+        dev.send(&pregain_packet(-6.0)).unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        read_reg(CMD_DAC_OFFSET, "0x03 after pregain −6 via 0x23");
+        read_reg(CMD_PRE_GAIN, "0x23 after pregain −6 via 0x23");
+
+        // Restore: flat band, 0 pregain.
+        dev.send(&write_packet(0, &FLAT_BAND, 96_000.0)).unwrap();
+        dev.send(&enable_packet(0)).unwrap();
+        dev.send(&pregain_packet(0.0)).unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        read_reg(CMD_DAC_OFFSET, "0x03 after restore");
+        read_reg(CMD_PRE_GAIN, "0x23 after restore");
     }
 
     /// Real-hardware smoke test. Ignored by default (needs a connected DHA15);

@@ -17,6 +17,7 @@ const dha15: api.HardwareDevice = {
   manufacturer: "SPACETOUCH",
   model: "DHA15",
   max_filters: 8,
+  user_pregain: false,
 };
 
 function status(over: Partial<api.HardwareStatus> = {}): api.HardwareStatus {

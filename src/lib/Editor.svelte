@@ -39,6 +39,7 @@
     forceAutoPreamp = false,
     offloadActive = false,
     hardwareOnly = false,
+    hwUserPregain = true,
   }: {
     name: string;
     reloadToken: number;
@@ -54,6 +55,10 @@
      * bands that don't fit on the device are muted — the curve, the clip check,
      * and the APO preamp all exclude them (and the inert tone overlay). */
     hardwareOnly?: boolean;
+    /** Whether the offload device's pregain is host-adjustable. When it isn't
+     * (the device headrooms itself), the Device preamp slider is hidden and the
+     * device stage always shows the auto value. */
+    hwUserPregain?: boolean;
   } = $props();
 
   // Which band indices are currently sent to the hardware device. Queried from the
@@ -183,7 +188,11 @@
   const apoPreamp = $derived(
     hardwareOnly ? 0 : effectiveAuto ? computeAutoPreamp(softwareBands) : apoManual,
   );
-  const hwPregain = $derived(effectiveAuto ? computeHwPregain() : hwManual);
+  // A device that headrooms itself (no user pregain) always shows the auto value —
+  // there's no slider to write hwManual, so never fall back to it.
+  const hwPregain = $derived(
+    effectiveAuto || !hwUserPregain ? computeHwPregain() : hwManual,
+  );
 
   // Turning Auto off while offloading seeds the manual sliders from the current
   // auto values, so the two stages don't jump when the user takes over.
@@ -704,6 +713,7 @@
     bind:balance
     {livePreamp}
     offload={offloadActive}
+    userPregain={hwUserPregain}
     {apoPreamp}
     {hwPregain}
     bind:apoManual

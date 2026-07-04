@@ -560,6 +560,7 @@
         {forceAutoPreamp}
         offloadActive={!!offload?.active}
         {hardwareOnly}
+        hwUserPregain={offload?.device?.user_pregain ?? true}
         reloadToken={editorReloadToken}
         onApplied={(n) => {
           active = n;
