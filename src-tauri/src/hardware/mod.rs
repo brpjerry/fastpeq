@@ -54,6 +54,8 @@ pub trait HardwareEq {
 mod hid;
 #[cfg(windows)]
 mod moondrop;
+#[cfg(windows)]
+mod walkplay;
 mod worker;
 
 pub use worker::HardwareSession;
@@ -93,10 +95,16 @@ struct Driver {
 /// The registry. Add a device family by adding a module and an entry here.
 #[cfg(windows)]
 fn drivers() -> &'static [Driver] {
-    &[Driver {
-        identify: moondrop::identify,
-        open: moondrop::open,
-    }]
+    &[
+        Driver {
+            identify: moondrop::identify,
+            open: moondrop::open,
+        },
+        Driver {
+            identify: walkplay::identify,
+            open: walkplay::open,
+        },
+    ]
 }
 
 #[cfg(windows)]
