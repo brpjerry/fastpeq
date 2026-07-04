@@ -145,8 +145,10 @@ describe("Editor", () => {
       expect(container.querySelector(".band")!.classList.contains("muted")).toBe(false),
     );
 
-    const vals = [...container.querySelectorAll(".pval")].map((e) => e.textContent!.trim());
-    expect(vals[0]).toBe("0.0 dB"); // APO — flat
+    const vals = [...container.querySelectorAll<HTMLInputElement>(".pval input")].map(
+      (e) => e.value,
+    );
+    expect(parseFloat(vals[0])).toBe(0); // APO — flat
     expect(parseFloat(vals[1])).toBeLessThan(0); // Device — carries the headroom
   });
 
@@ -506,8 +508,26 @@ describe("Editor", () => {
 
     // Preamp pulled to ~-10 dB, the clip warning clears, and the slider locks.
     await waitFor(() => expect(container.querySelector(".clip")).toBeNull());
-    expect(container.querySelector(".pval")!.textContent).toContain("-10");
+    expect(container.querySelector<HTMLInputElement>(".pval input")!.value).toContain("-10");
     expect(container.querySelector<HTMLInputElement>(".preamp input[type='range']")!.disabled).toBe(true);
+  });
+
+  it("applies a preamp typed into the dB textbox", async () => {
+    setAutoPreamp(false); // the textbox is editable only with Auto off
+    const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    vi.mocked(api.applyLive).mockClear();
+
+    const box = container.querySelector<HTMLInputElement>(".pval input")!;
+    expect(box.disabled).toBe(false);
+    await fireEvent.change(box, { target: { value: "-12.5" } });
+
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    const preamp = applied.lines.find(
+      (l) => l.kind === "Preamp" && l.value.channel.kind === "both",
+    );
+    expect((preamp!.value as { gain: number }).gain).toBe(-12.5);
   });
 
   it("auto-preamp accounts for the global tone overlay", async () => {
@@ -525,7 +545,11 @@ describe("Editor", () => {
     await fireEvent.change(cb);
 
     // Bands-only would leave preamp at 0; counting the tone pulls it negative.
-    await waitFor(() => expect(parseFloat(container.querySelector(".pval")!.textContent!)).toBeLessThan(0));
+    await waitFor(() =>
+      expect(
+        parseFloat(container.querySelector<HTMLInputElement>(".pval input")!.value),
+      ).toBeLessThan(0),
+    );
   });
 
   it("re-applies the auto preamp to config.txt when the global tone overlay changes", async () => {

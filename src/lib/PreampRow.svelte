@@ -36,8 +36,39 @@
   } = $props();
 
   const BAL_MAX = 30;
+  const PRE_MIN = -30;
+  const PRE_MAX = 6;
   let showBalance = $state(false);
   let chanBtn = $state<HTMLButtonElement | null>(null);
+
+  /* Typed dB values land on the same manual state the sliders write. */
+  function preampDb(v: string): number | null {
+    const db = Number(v);
+    if (v.trim() === "" || !Number.isFinite(db)) return null;
+    return Math.max(PRE_MIN, Math.min(PRE_MAX, db));
+  }
+  function setApoDb(v: string) {
+    const db = preampDb(v);
+    if (db === null) return;
+    apoManual = db;
+    onSchedule();
+  }
+  function setManualDb(v: string) {
+    const db = preampDb(v);
+    if (db === null) return;
+    manualPreamp = db;
+    onSchedule();
+  }
+  function setDeviceDb(v: string) {
+    const db = preampDb(v);
+    if (db === null) return;
+    hwManual = db;
+    onSchedule();
+  }
+  /** One-decimal display value (sums of rounded stages can carry float dust). */
+  function r1(v: number): number {
+    return Math.round(v * 10) / 10;
+  }
 
   function setBalanceDb(v: string) {
     const db = Number(v);
@@ -73,7 +104,18 @@
           }}
           disabled={autoPreamp}
         />
-        <span class="pval">{apoPreamp.toFixed(1)} dB</span>
+        <span class="pval">
+          <input
+            type="number"
+            min={PRE_MIN}
+            max={PRE_MAX}
+            step="0.1"
+            value={r1(apoPreamp)}
+            disabled={autoPreamp}
+            onchange={(e) => setApoDb(e.currentTarget.value)}
+          />
+          <small>dB</small>
+        </span>
       {:else}
         <span class="plabel">Preamp</span>
         <input
@@ -88,7 +130,18 @@
           }}
           disabled={autoPreamp}
         />
-        <span class="pval">{livePreamp.toFixed(1)} dB</span>
+        <span class="pval">
+          <input
+            type="number"
+            min={PRE_MIN}
+            max={PRE_MAX}
+            step="0.1"
+            value={r1(livePreamp)}
+            disabled={autoPreamp}
+            onchange={(e) => setManualDb(e.currentTarget.value)}
+          />
+          <small>dB</small>
+        </span>
       {/if}
     </div>
     {#if offload}
@@ -109,7 +162,18 @@
           }}
           disabled={autoPreamp}
         />
-        <span class="pval">{hwPregain.toFixed(1)} dB</span>
+        <span class="pval">
+          <input
+            type="number"
+            min={PRE_MIN}
+            max={PRE_MAX}
+            step="0.1"
+            value={r1(hwPregain)}
+            disabled={autoPreamp}
+            onchange={(e) => setDeviceDb(e.currentTarget.value)}
+          />
+          <small>dB</small>
+        </span>
       </div>
     {/if}
   </div>
@@ -204,11 +268,21 @@
     width: 54px;
     font-size: 12px;
   }
+  /* Editable dB value, same idiom as a band row's gain field. */
   .pval {
-    width: 60px;
-    text-align: right;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .pval input[type="number"] {
+    width: 46px; /* e.g. -12.3 */
+    flex: none;
+  }
+  .pval small {
+    white-space: nowrap;
     font-variant-numeric: tabular-nums;
-    font-size: 12px;
   }
 
   .chan {
