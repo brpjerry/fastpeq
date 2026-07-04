@@ -54,6 +54,13 @@
   const forceAutoPreamp = $derived(
     !!offload?.active && (offload.mode === "minimize-preamp" || offload.mode === "hardware-only"),
   );
+  // Startup offload reconcile: the active preset resolves immediately from its
+  // provenance stamp (so the preset and its filters show right away), but the
+  // ~1 s HID enumeration to (re)connect the device runs in the background. Show a
+  // non-blocking "connecting" hint until the backend reports it finished
+  // (`reconciled`); `fastpeq:changed` → reload() then clears it. Latches once at
+  // startup — `reconciled` never flips back to false.
+  const connectingHardware = $derived(!!offload?.enabled && !offload.reconciled);
   const toneThrottle = createTrailingThrottle(() => {
     api.setTone(tone).catch((e) => flash(String(e)));
   }, 80);
@@ -510,6 +517,12 @@
         For software EQ, install Equalizer APO and restart fastpeq.
       </div>
     {/if}
+    {#if connectingHardware}
+      <div class="banner info connecting">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>Connecting to your hardware EQ device — the preset is already applied.</span>
+      </div>
+    {/if}
   {/if}
 
   {#if showSettings}
@@ -655,6 +668,28 @@
   .banner.error {
     background: #2a1c1c;
     border-color: #5a2d2a;
+  }
+
+  /* Startup: a non-blocking hint that the hardware device is still connecting
+     (the preset itself is already shown and applied). */
+  .banner.info {
+    background: var(--panel-2);
+    justify-content: flex-start;
+    color: var(--muted);
+  }
+  .spinner {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .workspace {

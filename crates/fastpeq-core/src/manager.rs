@@ -231,51 +231,20 @@ impl Manager {
     }
 
     /// The active preset, if any — identified purely by the live `config.txt`'s
-    /// [provenance] stamp.
+    /// [provenance] stamp: active iff the stamp names a preset that still exists.
     ///
-    /// Derived from disk rather than tracked in memory, so it stays correct
-    /// across restarts. The stamp is written on apply, so this is O(1): the live
-    /// config is "active" iff it carries a stamp whose preset still exists and
-    /// still matches the live EQ — exactly, or equivalently after Auto Preamp has
-    /// rewritten the master gain (see [`Config::is_equivalent`]). There is no
-    /// content scan: a config produced *outside* fastpeq has no stamp and is, by
-    /// design, not detected. Returns `None` for a bypassed config (no preamp or
-    /// filters), a missing/stale stamp, or an EQ that has diverged from its preset.
+    /// Derived from disk rather than tracked in memory, so it stays correct across
+    /// restarts, and O(1) — there is no content scan over the library. The stamp is
+    /// written on apply and carried through live edits, so an unsaved edit keeps the
+    /// config pinned to its source preset (the editor surfaces "modified" on its
+    /// own). A [`bypass`](Self::bypass) strips the stamp, and a stamp naming a
+    /// since-deleted preset resolves to `None`; an unstamped or foreign config is
+    /// never detected. Hardware offload's software remainder (its offloaded bands
+    /// gone from `config.txt`) still resolves, because the stamp — not the EQ
+    /// content — is what's checked.
     ///
     /// [provenance]: crate::provenance
     pub fn active_preset(&self) -> io::Result<Option<String>> {
-        let current = self.current_config()?;
-        // The base EQ: tone overlay and provenance stamp removed, so neither the
-        // global tone controls nor the stamp itself can break the equivalence check.
-        let live = provenance::strip(&tone::strip(&current));
-        if live.preamp().is_none() && live.filters().next().is_none() {
-            return Ok(None);
-        }
-
-        // Trust the stamp, but only while the live EQ still matches the named
-        // preset (`is_equivalent` also covers exact equality, and tolerates the
-        // master gain Auto Preamp rewrites). A divergent edit or a since-deleted
-        // preset therefore reads as "not active" rather than guessing by content.
-        if let Some(name) = provenance::name(&current)
-            && let Ok(preset) = self.store.load(&name)
-            && preset.is_equivalent(&live)
-        {
-            return Ok(Some(name));
-        }
-
-        Ok(None)
-    }
-
-    /// The active preset identified by the provenance stamp alone, *without* the
-    /// content-equivalence check of [`active_preset`].
-    ///
-    /// Used when hardware EQ offload is active: the offloaded bands are removed
-    /// from `config.txt` (they live on the device), so the live EQ deliberately no
-    /// longer matches the full stored preset and the equivalence check would fail.
-    /// The stamp still names which preset produced this state, so we trust it as
-    /// long as that preset still exists. A bypassed config (stamp stripped) and an
-    /// unstamped/foreign config both read as not active.
-    pub fn active_preset_by_stamp(&self) -> io::Result<Option<String>> {
         let current = self.current_config()?;
         match provenance::name(&current) {
             Some(name) if self.store.exists(&name) => Ok(Some(name)),

@@ -24,6 +24,7 @@ function status(over: Partial<api.HardwareStatus> = {}): api.HardwareStatus {
   return {
     enabled: false,
     active: false,
+    reconciled: true,
     device: null,
     version: null,
     error: null,

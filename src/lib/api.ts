@@ -85,6 +85,10 @@ export type OffloadMode =
 export interface HardwareStatus {
   enabled: boolean;
   active: boolean;
+  /** False only during the brief startup window while the offload reconcile
+   *  (~1 s HID enumeration) runs — the active preset can't be detected until
+   *  offload engages, so the UI shows a loading indicator until this is true. */
+  reconciled: boolean;
   device: HardwareDevice | null;
   version: string | null;
   error: string | null;
