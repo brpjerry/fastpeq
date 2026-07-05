@@ -104,10 +104,11 @@ pub struct HardwareProfile {
     pub supports_low_shelf: bool,
     /// Whether the device can represent high-shelf bands.
     pub supports_high_shelf: bool,
-    /// Whether the device's input headroom (pregain) is host-adjustable. `false`
-    /// when the device computes it internally from the written bands (e.g. the
-    /// DHA15, whose pregain register ignores writes) — the UI then hides the
-    /// Device preamp slider and the driver sends no pregain.
+    /// Whether the device's input headroom (pregain) is host-adjustable — i.e. the
+    /// UI shows a Device preamp slider the user can turn. `false` when the value
+    /// isn't usefully adjustable (e.g. the DHA15, which needs a pregain present to
+    /// avoid clipping but disregards changes to it); such a device is still sent an
+    /// auto-computed value by its driver, just without exposing the slider.
     pub user_pregain: bool,
 }
 

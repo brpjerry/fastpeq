@@ -81,7 +81,27 @@
       api
         .offloadSelection(cfg)
         .then((idx) => {
-          if (!cancelled) hwBandIdx = new Set(idx);
+          if (cancelled) return;
+          const next = new Set(idx);
+          // A fresh Set is built each query, so compare contents, not identity.
+          // Bail when unchanged: reassigning a new reference re-runs everything
+          // downstream, and because `apoPreamp` feeds the config this same effect
+          // re-reads, that self-retriggers into a perpetual ~120 ms poll.
+          if (next.size === hwBandIdx.size && [...next].every((i) => hwBandIdx.has(i))) {
+            return;
+          }
+          hwBandIdx = next;
+          // Re-assert the live config once the split is known so the split-aware
+          // APO preamp / device pregain land. On a remount (e.g. returning from
+          // Settings) `hwBandIdx` starts empty, so the on-load apply writes the
+          // whole-preset preamp — the value the preset would carry with offload
+          // off — instead of the reduced APO stage, even with Auto Preamp on. This
+          // corrects it as soon as the real selection arrives. Auto only (manual
+          // slider values don't derive from the split), and direct (not schedule)
+          // so it never dirties the preset — like the on-load / tone re-applies.
+          if (effectiveAuto && !loading && !comparing) {
+            api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
+          }
         })
         .catch(() => {});
     }, 120);
@@ -508,12 +528,17 @@
 
   // Filters are grouped into three lists — both / left / right — selected by the
   // view toggle, optionally narrowed by the engine display filter while a hybrid
-  // offload is on. The graph always uses the full set, so it shows the real
-  // per-channel response no matter which list is on screen. Device membership
-  // comes from `hwBandIdx` (the backend's selection) — never re-derived here.
+  // offload is on. The graph tracks that same selection (see `graphBands`), so it
+  // plots exactly the filters currently listed. Device membership comes from
+  // `hwBandIdx` (the backend's selection) — never re-derived here.
   const inView = (b: Band, i: number, v: BandView) =>
     bandInView(b.channel, hwBandIdx.has(i), v, engine);
   const shown = $derived(bands.filter((b, i) => inView(b, i, view)));
+  // The graphs mirror the on-screen list: only the bands passing the current
+  // channel view + engine filter feed the traces, so the L / R tabs and the
+  // APO-only / HW-only buttons each redraw the curve to match what's listed.
+  // Uses `effectiveBands` so Hardware Only's muted bands stay excluded.
+  const graphBands = $derived(effectiveBands.filter((b, i) => inView(b, i, view)));
   function channelForView(v: BandView): Channel {
     if (v === "left") return { kind: "left" };
     if (v === "right") return { kind: "right" };
@@ -748,7 +773,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={effectiveBands} preamp={livePreamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
+      <ResponseCurve filters={graphBands} preamp={livePreamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -803,7 +828,7 @@
         />
         <div class="graph-fit">
           <CurveEditor
-            {bands}
+            bands={shown}
             preamp={livePreamp}
             {balance}
             {view}
@@ -977,8 +1002,21 @@
 
   .band-actions {
     display: flex;
+    /* Wrap whole buttons to a new line when the row can't fit; without this the
+       shrinkable engine filter (overflow: hidden) collapses to nothing instead
+       of dropping to the next line. */
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 8px;
+  }
+  /* Smaller than the default button, with single-line labels, so the row stays
+     compact and the labels don't wrap at the narrowest window width. Buttons
+     hold their natural width (flex: none) and the row wraps them as whole units. */
+  .band-actions button {
+    flex: none;
+    font-size: 11px;
+    padding: 5px 9px;
+    white-space: nowrap;
   }
   .add {
     align-self: flex-start;
@@ -986,6 +1024,9 @@
   /* Engine display filter, bottom-right of the band pane (hybrid offload only). */
   .engine-seg {
     margin-left: auto;
+    /* Never shrink: keep the segment (and its clipped inner buttons) at full
+       width so it stays fully visible, wrapping to the next line if need be. */
+    flex: none;
     display: inline-flex;
     border: 1px solid var(--border);
     border-radius: 7px;
@@ -996,8 +1037,10 @@
     border-right: 1px solid var(--border);
     border-radius: 0;
     background: transparent;
-    padding: 4px 10px;
-    font-size: 12px;
+    /* Match the reduced band-action buttons; a hair less vertical padding since
+       the segment sits inside its own 1px border. */
+    padding: 3px 8px;
+    font-size: 11px;
     color: var(--muted);
     white-space: nowrap;
   }

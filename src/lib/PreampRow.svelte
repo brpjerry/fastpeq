@@ -287,6 +287,10 @@
   .pval input[type="number"] {
     width: 46px; /* e.g. -12.3 */
     flex: none;
+    /* Match a band row's gain/freq field height (BandRow's `.band input`), so the
+       preamp fields don't tower over the filter list below them. */
+    padding: 2px 5px;
+    font-size: 12px;
   }
   .pval small {
     white-space: nowrap;

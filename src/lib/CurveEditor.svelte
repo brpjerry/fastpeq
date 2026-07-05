@@ -76,10 +76,10 @@
     onHover?: (id: number | null) => void;
   } = $props();
 
-  // Handles are limited to the channel list in view; the curve traces below
-  // still use every band, so the graph reflects the real per-channel response.
-  // (The Editor's APO/HW engine filter deliberately doesn't reach here — where a
-  // band runs shouldn't gate dragging it on the graph.)
+  // `bands` is already the display-filtered set the parent lists (current channel
+  // view + any APO/HW engine filter), so both the handles and the traces below
+  // reflect exactly what's on screen. The view filter here is a harmless
+  // belt-and-braces narrowing in case an unfiltered set is ever passed.
   const inView = (c: Channel) =>
     view === "left" ? c.kind === "left" : view === "right" ? c.kind === "right" : c.kind === "both" || c.kind === "other";
   const handleBands = $derived(bands.filter((b) => inView(b.channel)));

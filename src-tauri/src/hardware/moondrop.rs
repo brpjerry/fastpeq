@@ -59,10 +59,14 @@ pub(super) fn identify(info: &DeviceInfo) -> Option<(String, HardwareProfile)> {
 
 /// The DHA15's capabilities (from the reverse-engineered `peq8Band12dBFullShelves`
 /// constraints): 8 bands, ±12 dB, Q 0.1–10, peaking + low/high shelf, biquads
-/// computed at 96 kHz. No user pregain: the `0x23` register accepts writes but
-/// ignores them (probed on real hardware — see `dha15_pregain_probe`; `0x23` isn't
-/// even readable, and neither it nor the DAC offset at `0x03` moves after a write),
-/// so the device manages its own input headroom from the written biquads.
+/// computed at 96 kHz. The device needs a pregain value (`0x23`) sent alongside
+/// every filter write or the boosts overdrive its EQ — audible clipping, and at
+/// worst the DSP faults and it drops off USB. But the value isn't host-adjustable:
+/// a USB capture (and repeated testing) shows the device disregards changes to it
+/// live — only a flash-backed "Write Cfg" moves the needle, and even that's
+/// unreliable. So we always send an auto-computed pregain to keep it from clipping
+/// (see [`MoondropDevice::push`]) but mark `user_pregain: false` to hide the Device
+/// slider — there's nothing useful for the user to turn.
 fn dha15_profile() -> HardwareProfile {
     HardwareProfile {
         max_filters: 8,
@@ -95,11 +99,12 @@ impl HardwareEq for MoondropDevice {
             self.send(&write_packet(i as u8, &band, self.profile.sample_rate))?;
             self.send(&enable_packet(i as u8))?;
         }
-        // Only devices with a working pregain register get one; the DHA15's `0x23`
-        // ignores writes (it headrooms itself from the biquads), so skip it there.
-        if self.profile.user_pregain {
-            self.send(&pregain_packet(pregain))?;
-        }
+        // Always send a pregain alongside the filters: the DHA15 clips (and can fault
+        // off USB) if it writes boosts with no pregain packet. The device disregards
+        // *changes* to the value live — so it isn't user-adjustable (the profile marks
+        // `user_pregain: false`, hiding the Device slider) — but it still needs a
+        // sane auto-computed value present to keep the boosts from overdriving its EQ.
+        self.send(&pregain_packet(pregain))?;
         if commit {
             self.send(&[CMD_WRITE, CMD_SAVE_TO_FLASH])?;
         }
@@ -387,9 +392,12 @@ mod tests {
     /// then restores a flat band and 0 pregain.
     /// Run with: `cargo test -p fastpeq -- --ignored dha15_pregain_probe --nocapture`.
     ///
-    /// Result (firmware V0.1): `0x23` never replies to reads, and `0x03` stays
-    /// at 0 through band writes and pregain writes alike → not user-modifiable,
-    /// hence `user_pregain: false` in [`dha15_profile`].
+    /// Result (firmware V0.1): `0x23` never replies to reads, and `0x03` stays at 0
+    /// through band writes and pregain writes alike. Follow-up testing showed the
+    /// device does need a pregain packet present (boosts clip and it can fault off USB
+    /// without one), but disregards *changes* to the value live — so we always send an
+    /// auto value ([`MoondropDevice::push`]) yet mark `user_pregain: false` (the value
+    /// isn't host-adjustable, so the Device slider is hidden).
     #[test]
     #[ignore]
     fn dha15_pregain_probe() {
