@@ -155,8 +155,13 @@ the offloaded bands + pregain in two tiers:
 - **Flash** (`push_commit`): deliberate actions — applying a preset, changing
   the routing mode, clearing on bypass — so the EQ survives the device being
   unplugged or used with another source (the point of Hardware Only mode).
-  The worker coalesces rapid pushes but a requested commit sticks until the
-  next successful flush, so a flash save is never dropped.
+  The worker coalesces rapid pushes and a requested commit sticks until it is
+  written (even across shutdown), so a flash save is never dropped. On
+  commit-to-apply devices (the DHA15) the flash is written inline — RAM
+  writes never reach the audio there. On devices that apply RAM writes live
+  (KA17, Space Pro) the state is applied volatile immediately and the flash
+  is **debounced** (~2 s of quiet), so cycling presets from the tray wears
+  the flash once per burst, not once per press.
 
 fastpeq never *reads* state back from the device except the firmware version;
 the app's own files are always the source of truth for what to push.

@@ -4,7 +4,9 @@
 //! Hardware can't take updates as fast as Equalizer APO's file reload, so the
 //! worker *coalesces* rapid updates (only the latest desired state matters) and
 //! *throttles* writes to at most one push per [`MIN_INTERVAL`]. Live edits are
-//! volatile (RAM); an explicit commit also saves to the device's flash.
+//! volatile (RAM); an explicit commit also saves to the device's flash — inline
+//! on commit-to-apply devices, otherwise *debounced* so a burst of deliberate
+//! actions wears the flash once, not once per action (see [`CommitPolicy`]).
 //!
 //! The device is opened on the worker thread (HID handles are thread-affine) and
 //! released when the worker stops, so nothing non-`Send` ever crosses threads.
@@ -20,6 +22,29 @@ use std::time::{Duration, Instant};
 /// ms (many small reports), so together with that this caps the live update rate
 /// to something the device's MCU keeps up with.
 const MIN_INTERVAL: Duration = Duration::from_millis(60);
+
+/// How long the device must stay quiet before a debounced flash commit is
+/// written (see [`CommitPolicy::Debounced`]). Long enough that cycling presets
+/// from the tray or toggling bypass coalesces into one flash at the end;
+/// short enough that unplugging the device seconds later still finds the EQ
+/// persisted.
+const FLASH_DEBOUNCE: Duration = Duration::from_secs(2);
+
+/// How a device's flash commits are scheduled.
+#[derive(Clone, Copy, PartialEq)]
+enum CommitPolicy {
+    /// Write the commit inline with the push. For commit-to-apply devices
+    /// (the DHA15): RAM writes never reach the audio, so deferring the flash
+    /// would defer the change itself.
+    Immediate,
+    /// Apply every push volatile immediately, and write one flash commit once
+    /// the device has been quiet for the given interval. For devices that
+    /// apply RAM writes live (KA17, Space Pro): the sound is right instantly,
+    /// and the flash — only needed so the EQ survives a power cycle — is
+    /// written once per burst of activity instead of once per preset click
+    /// (flash wear, and the KA17's save has faulted the device before).
+    Debounced(Duration),
+}
 
 enum Command {
     Push {
@@ -58,9 +83,14 @@ impl HardwareSession {
         let status = Arc::new(Mutex::new(RuntimeStatus::default()));
         let id = descriptor.id.clone();
         let st = status.clone();
+        let policy = if profile.commit_to_apply {
+            CommitPolicy::Immediate
+        } else {
+            CommitPolicy::Debounced(FLASH_DEBOUNCE)
+        };
         let join = std::thread::Builder::new()
             .name("fastpeq-hw".into())
-            .spawn(move || run(id, rx, st))
+            .spawn(move || run(id, rx, st, policy))
             .ok();
         HardwareSession {
             descriptor,
@@ -133,7 +163,7 @@ impl Drop for DisconnectOnExit<'_> {
     }
 }
 
-fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
+fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>, policy: CommitPolicy) {
     let mut dev = match open(&id) {
         Ok(d) => d,
         Err(e) => {
@@ -153,24 +183,40 @@ fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
     if let Ok(v) = dev.version() {
         set_status(&status, |s| s.version = Some(v));
     }
-    run_loop(dev.as_mut(), &rx, &status);
+    run_loop(dev.as_mut(), &rx, &status, policy);
 }
 
 /// The coalesce/throttle loop, on a device that's already open. Split from
 /// [`run`] so it can be driven by a mock [`HardwareEq`] in tests.
-fn run_loop(dev: &mut dyn HardwareEq, rx: &Receiver<Command>, status: &Arc<Mutex<RuntimeStatus>>) {
+fn run_loop(
+    dev: &mut dyn HardwareEq,
+    rx: &Receiver<Command>,
+    status: &Arc<Mutex<RuntimeStatus>>,
+    policy: CommitPolicy,
+) {
+    // Desired state not yet written (coalesced; a requested commit sticks).
     let mut pending: Option<(Vec<HwBand>, f64, bool)> = None;
     let mut last_write = Instant::now() - MIN_INTERVAL;
-    // The last state actually written, so an unchanged push can be skipped — chiefly
-    // to avoid re-flashing an identical config (the editor debounces a commit that may
-    // repeat the current bands/pregain).
-    let mut last_written: Option<(Vec<HwBand>, f64, bool)> = None;
+    // What the device's RAM holds (the last state actually pushed), so an
+    // unchanged push can be skipped.
+    let mut ram: Option<(Vec<HwBand>, f64)> = None;
+    // What the device's flash holds, as far as this session knows, so an
+    // identical re-commit (re-clicking the active preset) never re-flashes.
+    let mut flashed: Option<(Vec<HwBand>, f64)> = None;
+    // When a debounced flash falls due; `None` = no flash owed.
+    let mut flash_due: Option<Instant> = None;
 
     loop {
-        // Block for the next command, or wake to flush throttled pending work.
-        let next = match &pending {
-            Some(_) => {
-                let wait = MIN_INTERVAL.saturating_sub(last_write.elapsed());
+        // Block for the next command, or wake for the earlier of: flushing
+        // throttled pending work, or a debounced flash falling due.
+        let deadline = match (&pending, flash_due) {
+            (Some(_), _) => Some(last_write + MIN_INTERVAL),
+            (None, Some(due)) => Some(due.max(last_write + MIN_INTERVAL)),
+            (None, None) => None,
+        };
+        let next = match deadline {
+            Some(d) => {
+                let wait = d.saturating_duration_since(Instant::now());
                 match rx.recv_timeout(wait) {
                     Ok(c) => Some(c),
                     Err(RecvTimeoutError::Timeout) => None,
@@ -198,18 +244,27 @@ fn run_loop(dev: &mut dyn HardwareEq, rx: &Receiver<Command>, status: &Arc<Mutex
             None => {}
         }
 
+        // Write pending state once the throttle window is clear.
         if let Some((bands, pregain, commit)) = pending.take() {
-            if last_write.elapsed() >= MIN_INTERVAL {
-                let unchanged = last_written
-                    .as_ref()
-                    .is_some_and(|(b, p, c)| *b == bands && *p == pregain && *c == commit);
-                if unchanged {
+            if last_write.elapsed() < MIN_INTERVAL {
+                pending = Some((bands, pregain, commit)); // flush on the next wake
+            } else {
+                let state = (bands, pregain);
+                let commit_inline = commit && policy == CommitPolicy::Immediate;
+                // Skip the write when the device already holds this state (and,
+                // for an inline commit, already has it flashed).
+                if ram.as_ref() == Some(&state)
+                    && (!commit_inline || flashed.as_ref() == Some(&state))
+                {
                     last_write = Instant::now();
                 } else {
-                    match dev.push(&bands, pregain, commit) {
+                    match dev.push(&state.0, state.1, commit_inline) {
                         Ok(()) => {
                             last_write = Instant::now();
-                            last_written = Some((bands, pregain, commit));
+                            ram = Some(state.clone());
+                            if commit_inline {
+                                flashed = Some(state.clone());
+                            }
                         }
                         Err(e) => {
                             set_status(status, |s| {
@@ -220,24 +275,59 @@ fn run_loop(dev: &mut dyn HardwareEq, rx: &Receiver<Command>, status: &Arc<Mutex
                         }
                     }
                 }
-            } else {
-                pending = Some((bands, pregain, commit)); // flush on the next wake
+                // Debounced-flash bookkeeping. A commit for already-flashed
+                // state owes nothing; a fresh commit (re)starts the quiet
+                // timer — and so does any further write while a flash is
+                // owed, so the flash lands after the burst, not inside it.
+                if let CommitPolicy::Debounced(delay) = policy {
+                    if flashed.as_ref() == Some(&state) {
+                        flash_due = None;
+                    } else if commit || flash_due.is_some() {
+                        flash_due = Some(Instant::now() + delay);
+                    }
+                }
+            }
+        }
+
+        // Write the debounced flash once it falls due (and the throttle allows).
+        if pending.is_none()
+            && flash_due.is_some_and(|due| Instant::now() >= due)
+            && last_write.elapsed() >= MIN_INTERVAL
+        {
+            match ram.clone() {
+                Some((bands, pregain)) if flashed.as_ref() != Some(&(bands.clone(), pregain)) => {
+                    match dev.push(&bands, pregain, true) {
+                        Ok(()) => {
+                            last_write = Instant::now();
+                            flashed = Some((bands, pregain));
+                            flash_due = None;
+                        }
+                        Err(e) => {
+                            set_status(status, |s| {
+                                s.error = Some(e);
+                                s.connected = false;
+                            });
+                            break;
+                        }
+                    }
+                }
+                _ => flash_due = None, // nothing to persist / already flashed
             }
         }
     }
 
-    // A pending push carrying a flash commit must not be lost on shutdown —
-    // the editor commits on mouse release, and a Stop (or the app quitting and
-    // dropping the sender) can land inside the throttle window. Volatile
-    // pending state is fine to drop; a promised flash save is not.
-    if let Some((bands, pregain, true)) = pending {
-        let unchanged = last_written
-            .as_ref()
-            .is_some_and(|(b, p, c)| *b == bands && *p == pregain && *c);
-        if !unchanged {
-            std::thread::sleep(MIN_INTERVAL.saturating_sub(last_write.elapsed()));
-            let _ = dev.push(&bands, pregain, true);
-        }
+    // A promised flash must not be lost on shutdown — it may still be
+    // coalesced in `pending` (Stop landed inside the throttle window) or
+    // deferred by the debounce. Volatile pending state is fine to drop.
+    let owed = match pending {
+        Some((bands, pregain, true)) => Some((bands, pregain)),
+        _ => flash_due.and(ram),
+    };
+    if let Some((bands, pregain)) = owed
+        && flashed.as_ref() != Some(&(bands.clone(), pregain))
+    {
+        std::thread::sleep(MIN_INTERVAL.saturating_sub(last_write.elapsed()));
+        let _ = dev.push(&bands, pregain, true);
     }
     // `connected` is reset by the caller's DisconnectOnExit guard (which also
     // covers a panic anywhere above), not by a trailing update here.
@@ -249,12 +339,22 @@ mod tests {
     use fastpeq_core::HwFilterType;
     use std::sync::mpsc::channel;
 
-    /// Records every push it receives.
-    struct MockDev(Vec<(Vec<HwBand>, f64, bool)>);
+    type PushLog = Arc<Mutex<Vec<(Vec<HwBand>, f64, bool)>>>;
+
+    /// Records every push into a shared log (shared so the debounce test can
+    /// run the loop on its own thread and inspect from the test thread).
+    struct MockDev(PushLog);
+
+    impl MockDev {
+        fn new() -> (Self, PushLog) {
+            let log: PushLog = Arc::new(Mutex::new(Vec::new()));
+            (MockDev(log.clone()), log)
+        }
+    }
 
     impl HardwareEq for MockDev {
         fn push(&mut self, bands: &[HwBand], pregain: f64, commit: bool) -> Result<(), String> {
-            self.0.push((bands.to_vec(), pregain, commit));
+            self.0.lock().unwrap().push((bands.to_vec(), pregain, commit));
             Ok(())
         }
         fn pull(&mut self) -> Result<Vec<HwBand>, String> {
@@ -282,7 +382,7 @@ mod tests {
     fn pending_commit_is_flushed_on_stop() {
         let (tx, rx) = channel();
         let status = Arc::new(Mutex::new(RuntimeStatus::default()));
-        let mut dev = MockDev(Vec::new());
+        let (mut dev, log) = MockDev::new();
         // The first push lands immediately and opens the throttle window; the
         // commit then coalesces into `pending`; Stop arrives before the flush.
         tx.send(Command::Push {
@@ -299,21 +399,22 @@ mod tests {
         .unwrap();
         tx.send(Command::Stop).unwrap();
 
-        run_loop(&mut dev, &rx, &status);
+        run_loop(&mut dev, &rx, &status, CommitPolicy::Immediate);
 
         assert_eq!(
-            dev.0.last(),
+            log.lock().unwrap().last(),
             Some(&(vec![band()], -3.0, true)),
             "the pending flash commit must reach the device"
         );
     }
 
-    /// Same when the sender is dropped (app quit) instead of an explicit Stop.
+    /// Same when the sender is dropped (app quit) instead of an explicit Stop —
+    /// and under the debounced policy, where the flash was deferred.
     #[test]
     fn pending_commit_is_flushed_on_disconnect() {
         let (tx, rx) = channel();
         let status = Arc::new(Mutex::new(RuntimeStatus::default()));
-        let mut dev = MockDev(Vec::new());
+        let (mut dev, log) = MockDev::new();
         tx.send(Command::Push {
             bands: Vec::new(),
             pregain: 0.0,
@@ -328,9 +429,14 @@ mod tests {
         .unwrap();
         drop(tx);
 
-        run_loop(&mut dev, &rx, &status);
+        run_loop(
+            &mut dev,
+            &rx,
+            &status,
+            CommitPolicy::Debounced(FLASH_DEBOUNCE),
+        );
 
-        assert_eq!(dev.0.last(), Some(&(vec![band()], -3.0, true)));
+        assert_eq!(log.lock().unwrap().last(), Some(&(vec![band()], -3.0, true)));
     }
 
     /// Shutdown never invents a flash write: volatile-only traffic stays volatile.
@@ -338,7 +444,7 @@ mod tests {
     fn volatile_pushes_are_never_flash_committed_on_stop() {
         let (tx, rx) = channel();
         let status = Arc::new(Mutex::new(RuntimeStatus::default()));
-        let mut dev = MockDev(Vec::new());
+        let (mut dev, log) = MockDev::new();
         for gain in [1.0, 2.0] {
             tx.send(Command::Push {
                 bands: vec![HwBand {
@@ -352,9 +458,85 @@ mod tests {
         }
         tx.send(Command::Stop).unwrap();
 
-        run_loop(&mut dev, &rx, &status);
+        run_loop(
+            &mut dev,
+            &rx,
+            &status,
+            CommitPolicy::Debounced(FLASH_DEBOUNCE),
+        );
 
-        assert!(dev.0.iter().all(|(.., commit)| !commit));
+        assert!(log.lock().unwrap().iter().all(|(.., commit)| !commit));
+    }
+
+    /// Debounced policy: a burst of commit pushes (tray preset cycling) applies
+    /// each state volatile but writes exactly ONE flash — for the final state —
+    /// once the device goes quiet.
+    #[test]
+    fn debounced_commits_coalesce_into_one_flash() {
+        let (tx, rx) = channel();
+        let status = Arc::new(Mutex::new(RuntimeStatus::default()));
+        let (mut dev, log) = MockDev::new();
+        let st = status.clone();
+        let worker = std::thread::spawn(move || {
+            run_loop(
+                &mut dev,
+                &rx,
+                &st,
+                CommitPolicy::Debounced(Duration::from_millis(50)),
+            );
+        });
+
+        // Three "preset clicks" in quick succession, then quiet.
+        for gain in [1.0, 2.0, 3.0] {
+            tx.send(Command::Push {
+                bands: vec![HwBand { gain, ..band() }],
+                pregain: -gain,
+                commit: true,
+            })
+            .unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(600)); // > throttle + debounce
+        drop(tx);
+        worker.join().unwrap();
+
+        let pushes = log.lock().unwrap();
+        let flashes: Vec<_> = pushes.iter().filter(|(.., commit)| *commit).collect();
+        assert_eq!(flashes.len(), 1, "one flash per burst, got {pushes:?}");
+        assert_eq!(
+            flashes[0],
+            &(vec![HwBand { gain: 3.0, ..band() }], -3.0, true),
+            "the flash must persist the final state"
+        );
+        // Every state change before the flash was applied volatile.
+        assert!(pushes.iter().any(|(b, _, commit)| !commit && b[0].gain == 3.0));
+    }
+
+    /// Re-committing state the flash already holds (re-clicking the active
+    /// preset) writes nothing — inline (DHA15) or debounced.
+    #[test]
+    fn identical_recommit_never_reflashes() {
+        let (tx, rx) = channel();
+        let status = Arc::new(Mutex::new(RuntimeStatus::default()));
+        let (mut dev, log) = MockDev::new();
+        for _ in 0..2 {
+            tx.send(Command::Push {
+                bands: vec![band()],
+                pregain: -3.0,
+                commit: true,
+            })
+            .unwrap();
+        }
+        tx.send(Command::Stop).unwrap();
+
+        run_loop(&mut dev, &rx, &status, CommitPolicy::Immediate);
+
+        let pushes = log.lock().unwrap();
+        assert_eq!(
+            pushes.len(),
+            1,
+            "the identical re-commit must be skipped, got {pushes:?}"
+        );
+        assert!(pushes[0].2, "the one write is the inline flash");
     }
 
     /// The exit guard clears `connected` even when the worker panics (e.g. a

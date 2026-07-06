@@ -80,7 +80,7 @@ rest open.
   versioning plan — see `PRESET-HISTORY.md` (undo-delete ships as its Phase 2,
   on top of general per-preset version history).
 
-- [ ] 5. **Every preset click / bypass / mode change writes the device's
+- [x] 5. **Every preset click / bypass / mode change writes the device's
   flash — question whether that's the right default.** `AppState::apply`,
   `toggle_bypass` (via `clear_hardware_eq` → `push_commit`), un-bypass, and
   `set_offload_mode` all send `commit = true`, while `sync_offload`
@@ -92,6 +92,13 @@ rest open.
   save could fault the device). **Fix suggestion:** commit only when
   `profile.commit_to_apply`, or debounce commits (volatile immediately, flash
   after N seconds of quiet); keep the explicit behavior for the DHA15.
+  **Fixed:** the worker now has a `CommitPolicy` — `Immediate` for
+  commit-to-apply devices (unchanged DHA15 behavior), `Debounced(2 s)`
+  otherwise: pushes apply volatile instantly and one flash is written for the
+  final state after the device goes quiet (deadline restarts on further
+  writes; still flushed on shutdown; identical re-commits still skipped via a
+  `flashed` cache). Tests: `debounced_commits_coalesce_into_one_flash`,
+  `identical_recommit_never_reflashes`. PERSISTENCE.md updated.
 
 - [ ] 6. **`HardwareStatus.active` ignores whether the worker is actually
   connected.** `state.rs::hardware_status` reports `active: enabled` whenever a
