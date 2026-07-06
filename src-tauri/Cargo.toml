@@ -23,6 +23,8 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 fastpeq-core = { path = "../crates/fastpeq-core" }
+# Hardware parametric-EQ device drivers (USB HID) — the I/O half of EQ offload.
+fastpeq-hw = { path = "../crates/fastpeq-hw" }
 
 # Windows audio-endpoint enumeration + default-device switching (the "switch
 # output device" hotkey action). Pinned to the same major already in the tree via
@@ -41,8 +43,3 @@ windows = { version = "0.61", features = [
 # Pulled in directly so the `#[interface]` macro (which emits `windows_core::…`
 # paths for the hand-declared IPolicyConfig) resolves. Same version as above.
 windows-core = "0.61"
-
-# USB HID access for hardware-EQ offload (the Moondrop DHA15 driver in
-# `hardware/`). Windows-gated like the rest of the device/OS code so the core
-# build and off-Windows tests don't pull it in; uses the system hid.dll.
-hidapi = "2"

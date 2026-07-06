@@ -549,7 +549,7 @@ mod tests {
     }
 
     /// Utility: put the device back on USER1 (verified switch). Run with:
-    /// `cargo test -p fastpeq -- --ignored ka17_restore_user_slot --nocapture`.
+    /// `cargo test -p fastpeq-hw -- --ignored ka17_restore_user_slot --nocapture`.
     #[test]
     #[ignore]
     fn ka17_restore_user_slot() {
@@ -569,7 +569,7 @@ mod tests {
 
     /// Utility: reset USER1 to a flat curve AND persist it (SAVE_V2), so the slot
     /// isn't left holding a test EQ across a power cycle. Run with:
-    /// `cargo test -p fastpeq -- --ignored ka17_clear_user_slot --nocapture`.
+    /// `cargo test -p fastpeq-hw -- --ignored ka17_clear_user_slot --nocapture`.
     #[test]
     #[ignore]
     fn ka17_clear_user_slot() {
@@ -585,7 +585,7 @@ mod tests {
 
     /// Read-only probe: current preset, filter count, global gain, and the
     /// best-effort version query. Run with:
-    /// `cargo test -p fastpeq -- --ignored ka17_version_probe --nocapture`.
+    /// `cargo test -p fastpeq-hw -- --ignored ka17_version_probe --nocapture`.
     #[test]
     #[ignore]
     fn ka17_version_probe() {
@@ -625,7 +625,7 @@ mod tests {
     }
 
     /// Real-hardware smoke test. Ignored by default (needs a connected KA17);
-    /// run with: `cargo test -p fastpeq -- --ignored ka17_roundtrip --nocapture`.
+    /// run with: `cargo test -p fastpeq-hw -- --ignored ka17_roundtrip --nocapture`.
     /// Live (volatile) writes only — no flash save — flattened after.
     ///
     /// The core assertion is that [`FiioDevice::push`] completes on the control

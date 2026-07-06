@@ -1,15 +1,18 @@
 //! Hardware parametric-EQ devices: enumerating them and pushing EQ bands to them
 //! over USB HID.
 //!
-//! Like output-device switching in [`crate::audio`], this is a platform/device
-//! concern that lives in the shell, not in `fastpeq-core`. The pure split + biquad
-//! math is in [`fastpeq_core::offload`]; this module is the I/O half.
+//! This is a platform/device concern kept out of both `fastpeq-core` (pure logic)
+//! and the Tauri app (UI shell). The pure split + biquad math is in
+//! [`fastpeq_core::offload`]; this crate is the I/O half. The app consumes it
+//! through [`detect`], [`profile`], [`device_for_output`] and [`HardwareSession`];
+//! the `fastpeq-hw-cli` binary exposes the same surface (plus the raw [`hid`]
+//! layer) for developing new drivers without the GUI.
 //!
-//! **Modularity.** Each supported device family is a *driver* (see [`moondrop`]).
+//! **Modularity.** Each supported device family is a *driver* (see `moondrop`).
 //! A driver identifies its HID devices and opens them into a [`HardwareEq`].
 //! Adding a device = add a driver module and register it in `drivers()`. The
 //! non-Windows build provides stubs so the crate still compiles and tests stay
-//! green off-Windows, mirroring [`crate::audio`] and `fastpeq_core::apo::env`.
+//! green off-Windows, mirroring `fastpeq_core::apo::env`.
 
 use fastpeq_core::{HardwareProfile, HwBand};
 use serde::Serialize;
@@ -49,9 +52,9 @@ pub trait HardwareEq {
     /// headroom. When `commit` is set, also persist to the device's flash so the EQ
     /// survives a power-cycle; otherwise the write is volatile (live preview).
     fn push(&mut self, bands: &[HwBand], pregain: f64, commit: bool) -> Result<(), String>;
-    /// Read the bands currently on the device. Used by the hardware smoke test and
-    /// reserved for a future device→app sync; not on the normal push path.
-    #[allow(dead_code)]
+    /// Read the bands currently on the device. Used by the hardware smoke tests and
+    /// the CLI's `pull` command, and reserved for a future device→app sync; not on
+    /// the normal push path.
     fn pull(&mut self) -> Result<Vec<HwBand>, String>;
     /// The device firmware version string (read as a connection handshake).
     fn version(&mut self) -> Result<String, String>;
@@ -60,14 +63,14 @@ pub trait HardwareEq {
 #[cfg(windows)]
 mod fiio;
 #[cfg(windows)]
-mod hid;
+pub mod hid;
 #[cfg(windows)]
 mod moondrop;
 #[cfg(windows)]
 mod walkplay;
 mod worker;
 
-pub use worker::HardwareSession;
+pub use worker::{HardwareSession, RuntimeStatus};
 
 /// The detected device that corresponds to an audio output's friendly name — i.e.
 /// the supported device whose model appears in the name (e.g. the output
@@ -82,11 +85,12 @@ pub fn device_for_output(output_name: &str) -> Option<DetectedDevice> {
         .find(|d| !d.model.is_empty() && name.contains(&d.model.to_uppercase()))
 }
 
-/// Internal view of one enumerated HID interface/collection. `pub(crate)` so the
-/// sibling driver modules can match against it.
+/// One enumerated HID interface/collection, as returned by [`hid::enumerate`].
+/// Drivers match against it in `identify`; the CLI's `enumerate` command prints it
+/// raw for new-device bring-up (finding the interface a protocol lives on).
 #[cfg(windows)]
 #[derive(Clone)]
-pub(crate) struct DeviceInfo {
+pub struct DeviceInfo {
     pub vendor_id: u16,
     pub product_id: u16,
     pub product: String,

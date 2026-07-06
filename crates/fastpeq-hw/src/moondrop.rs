@@ -349,23 +349,20 @@ mod tests {
         assert_eq!(i16::from_le_bytes([p[3], p[4]]), -6 * 256);
     }
 
-    /// Times HID enumeration vs the cheap default-output lookup, to gauge how much
-    /// work the background reconciler saves the UI. Run with:
-    /// `cargo test -p fastpeq -- --ignored enum_timing --nocapture`.
+    /// Times HID enumeration — the cost the app's background reconciler keeps off
+    /// the UI path. Run with:
+    /// `cargo test -p fastpeq-hw -- --ignored enum_timing --nocapture`.
     #[test]
     #[ignore]
     fn enum_timing() {
         let t = std::time::Instant::now();
         let n = super::super::detect().map(|d| d.len()).unwrap_or(0);
-        println!("hardware::detect(): {} devices in {:?}", n, t.elapsed());
-        let t = std::time::Instant::now();
-        let name = crate::audio::default_output_name();
-        println!("default_output_name(): {name:?} in {:?}", t.elapsed());
+        println!("detect(): {} devices in {:?}", n, t.elapsed());
     }
 
     /// Correlation smoke test: the DHA15's audio-endpoint friendly name resolves to
     /// its HID device, while an unrelated output does not. Needs the DHA15 connected.
-    /// Run with: `cargo test -p fastpeq -- --ignored dha15_correlates`.
+    /// Run with: `cargo test -p fastpeq-hw -- --ignored dha15_correlates`.
     #[test]
     #[ignore]
     fn dha15_correlates_to_output_name() {
@@ -391,7 +388,7 @@ mod tests {
     ///   3. writes pregain −6 dB via `0x23` → does `0x03` or `0x23` move?
     ///
     /// then restores a flat band and 0 pregain.
-    /// Run with: `cargo test -p fastpeq -- --ignored dha15_pregain_probe --nocapture`.
+    /// Run with: `cargo test -p fastpeq-hw -- --ignored dha15_pregain_probe --nocapture`.
     ///
     /// Result (firmware V0.1): `0x23` never replies to reads, and `0x03` stays at 0
     /// through band writes and pregain writes alike — but that only means the register
@@ -459,7 +456,7 @@ mod tests {
     }
 
     /// Real-hardware smoke test. Ignored by default (needs a connected DHA15);
-    /// run with: `cargo test -p fastpeq -- --ignored dha15_roundtrip`.
+    /// run with: `cargo test -p fastpeq-hw -- --ignored dha15_roundtrip`.
     #[test]
     #[ignore]
     fn dha15_roundtrip() {

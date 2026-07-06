@@ -3,12 +3,12 @@
 //! hotkey, and the IPC commands stay consistent.
 
 use crate::audio;
-use crate::hardware::{self, DetectedDevice, HardwareSession};
 use fastpeq_core::apo::env;
 use fastpeq_core::{
     Category, Config, ImportReport, Manager as CoreManager, OffloadMode, PresetStore, Tone,
     offload, provenance,
 };
+use fastpeq_hw::{self as hardware, DetectedDevice, HardwareSession};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

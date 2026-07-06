@@ -255,8 +255,8 @@ pub fn set_default_audio_device(id: String) -> Result<(), String> {
 /// Async + `spawn_blocking`: HID enumeration takes ~1 s, so it must not run on the
 /// UI thread (where synchronous commands execute).
 #[tauri::command]
-pub async fn list_hardware_devices() -> Result<Vec<crate::hardware::DetectedDevice>, String> {
-    tauri::async_runtime::spawn_blocking(crate::hardware::detect)
+pub async fn list_hardware_devices() -> Result<Vec<fastpeq_hw::DetectedDevice>, String> {
+    tauri::async_runtime::spawn_blocking(fastpeq_hw::detect)
         .await
         .map_err(|e| e.to_string())?
 }

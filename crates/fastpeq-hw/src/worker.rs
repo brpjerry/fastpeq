@@ -30,8 +30,9 @@ enum Command {
     Stop,
 }
 
-/// Live runtime state of the connection, shared with [`crate::state`] for status
-/// reporting and disconnect handling.
+/// Live runtime state of the connection, shared with the consumer (the app's
+/// state layer, or the CLI's `session` command) for status reporting and
+/// disconnect handling.
 #[derive(Default, Clone)]
 pub struct RuntimeStatus {
     pub version: Option<String>,
