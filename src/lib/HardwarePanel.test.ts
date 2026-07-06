@@ -18,6 +18,8 @@ const dha15: api.HardwareDevice = {
   model: "DHA15",
   max_filters: 8,
   user_pregain: false,
+  commit_to_apply: true,
+  commit_delay_ms: 500,
 };
 
 function status(over: Partial<api.HardwareStatus> = {}): api.HardwareStatus {

@@ -574,6 +574,8 @@
         offloadActive={!!offload?.active}
         {hardwareOnly}
         hwUserPregain={offload?.device?.user_pregain ?? true}
+        hwCommitToApply={offload?.device?.commit_to_apply ?? false}
+        hwCommitDelay={offload?.device?.commit_delay_ms ?? 500}
         reloadToken={editorReloadToken}
         onApplied={(n) => {
           active = n;

@@ -4,6 +4,7 @@
   // auto-hides after a hold. The window is shown/hidden here; the no-activate
   // styles (set in Rust) keep show() from stealing focus.
   import { onMount } from "svelte";
+  import { Spring } from "svelte/motion";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { OSD_EVENT, type OsdPayload } from "../lib/osd";
@@ -16,9 +17,20 @@
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // The level bar glides to each new value instead of snapping. A tone hotkey can
+  // be bound to a knob that fires many steps a second; a spring absorbs that —
+  // `set` just retargets, and its own rAF loop coalesces to the frame rate, so no
+  // matter how fast the steps arrive the fill smoothly chases the latest value.
+  // High stiffness + heavy damping keeps the chase quick and overshoot-free.
+  const barValue = new Spring(0, { stiffness: 0.3, damping: 0.9 });
+
   const win = getCurrentWindow();
 
   function present(p: OsdPayload) {
+    // A newly-appearing card (or a switch to a different control) snaps the bar to
+    // its starting value; only steps while the same card is already up animate.
+    const fresh = !shown || !payload?.bar || payload.title !== p.title;
+    if (p.bar) barValue.set(p.bar.value, fresh ? { instant: true } : undefined);
     payload = p;
     shown = true;
     win.show().catch(() => {});
@@ -47,10 +59,11 @@
     };
   });
 
-  // Bipolar level bar: fill spans from the zero marker to the value.
+  // Bipolar level bar: fill spans from the zero marker to the value. Fed by the
+  // spring's animated value so the fill eases toward each step.
   const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
   const fillPos = $derived(
-    payload?.bar ? clamp01((payload.bar.value - payload.bar.min) / (payload.bar.max - payload.bar.min)) : 0,
+    payload?.bar ? clamp01((barValue.current - payload.bar.min) / (payload.bar.max - payload.bar.min)) : 0,
   );
   const zeroPos = $derived(
     payload?.bar ? clamp01((0 - payload.bar.min) / (payload.bar.max - payload.bar.min)) : 0.5,

@@ -59,10 +59,10 @@ pub(super) fn identify(info: &DeviceInfo) -> Option<(String, HardwareProfile)> {
 
 /// The DHA15's capabilities (from the reverse-engineered `peq8Band12dBFullShelves`
 /// constraints): 8 bands, ±12 dB, Q 0.1–10, peaking + low/high shelf, biquads
-/// computed at 96 kHz. No user pregain: the `0x23` register accepts writes but
-/// ignores them (probed on real hardware — see `dha15_pregain_probe`; `0x23` isn't
-/// even readable, and neither it nor the DAC offset at `0x03` moves after a write),
-/// so the device manages its own input headroom from the written biquads.
+/// computed at 96 kHz. It takes a host pregain via `0x23`, sent with every filter
+/// write — without one the boosts overdrive its EQ (clipping, and at worst the DSP
+/// faults off USB). `user_pregain: true` exposes the Device slider so the value is
+/// host-adjustable.
 fn dha15_profile() -> HardwareProfile {
     HardwareProfile {
         max_filters: 8,
@@ -72,7 +72,13 @@ fn dha15_profile() -> HardwareProfile {
         freq_range: (20.0, 20_000.0),
         supports_low_shelf: true,
         supports_high_shelf: true,
-        user_pregain: false,
+        user_pregain: true,
+        // The DHA15 only latches a pregain/EQ write on the flash save (0x01); RAM
+        // writes stage but don't reach the audio, so the editor flashes on release.
+        commit_to_apply: true,
+        // Its audio drops out for a moment while the flash applies; freeze edits until
+        // it's back.
+        commit_delay_ms: 500,
     }
 }
 
@@ -95,8 +101,8 @@ impl HardwareEq for MoondropDevice {
             self.send(&write_packet(i as u8, &band, self.profile.sample_rate))?;
             self.send(&enable_packet(i as u8))?;
         }
-        // Only devices with a working pregain register get one; the DHA15's `0x23`
-        // ignores writes (it headrooms itself from the biquads), so skip it there.
+        // Send the host pregain alongside the filters: the DHA15 clips (and can fault
+        // off USB) if it writes boosts with no pregain packet.
         if self.profile.user_pregain {
             self.send(&pregain_packet(pregain))?;
         }
@@ -387,9 +393,11 @@ mod tests {
     /// then restores a flat band and 0 pregain.
     /// Run with: `cargo test -p fastpeq -- --ignored dha15_pregain_probe --nocapture`.
     ///
-    /// Result (firmware V0.1): `0x23` never replies to reads, and `0x03` stays
-    /// at 0 through band writes and pregain writes alike → not user-modifiable,
-    /// hence `user_pregain: false` in [`dha15_profile`].
+    /// Result (firmware V0.1): `0x23` never replies to reads, and `0x03` stays at 0
+    /// through band writes and pregain writes alike — but that only means the register
+    /// isn't read-back-able, not that the write has no effect. The device does need a
+    /// pregain packet present (boosts clip and it can fault off USB without one), so
+    /// [`dha15_profile`] sends it (`user_pregain: true`).
     #[test]
     #[ignore]
     fn dha15_pregain_probe() {

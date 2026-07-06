@@ -40,6 +40,8 @@
     offloadActive = false,
     hardwareOnly = false,
     hwUserPregain = true,
+    hwCommitToApply = false,
+    hwCommitDelay = 500,
   }: {
     name: string;
     reloadToken: number;
@@ -59,6 +61,12 @@
      * (the device headrooms itself), the Device preamp slider is hidden and the
      * device stage always shows the auto value. */
     hwUserPregain?: boolean;
+    /** Whether the offload device only takes effect on a flash commit (the DHA15).
+     * Its live RAM writes do nothing, so a commit on release latches the change. */
+    hwCommitToApply?: boolean;
+    /** How long (ms) to freeze edits after a flash commit — the device's audio drops
+     * out while it applies. */
+    hwCommitDelay?: number;
   } = $props();
 
   // Which band indices are currently sent to the hardware device. Queried from the
@@ -81,7 +89,25 @@
       api
         .offloadSelection(cfg)
         .then((idx) => {
-          if (!cancelled) hwBandIdx = new Set(idx);
+          if (cancelled) return;
+          const next = new Set(idx);
+          // A fresh Set is built each query, so compare contents, not identity.
+          // Bail when unchanged: reassigning a new reference re-runs everything
+          // downstream, and because `apoPreamp` feeds the config this same effect
+          // re-reads, that self-retriggers into a perpetual ~120 ms poll.
+          if (next.size === hwBandIdx.size && [...next].every((i) => hwBandIdx.has(i))) {
+            return;
+          }
+          hwBandIdx = next;
+          // Re-assert the live config once the split is known so the split-aware APO
+          // preamp / device pregain land. On a remount (e.g. returning from Settings)
+          // `hwBandIdx` starts empty, so the earlier apply wrote the whole-preset
+          // preamp onto APO instead of the split. Now that both stages derive from the
+          // split, this fires whenever offloading (not just Auto) so the APO slider and
+          // config.txt can't diverge. Direct (not schedule) so it never dirties.
+          if ((effectiveAuto || offloadActive) && !loading && !comparing) {
+            api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
+          }
         })
         .catch(() => {});
     }, 120);
@@ -103,7 +129,7 @@
   };
 
   let bands = $state<Band[]>([]);
-  let manualPreamp = $state(0);
+  let totalPreamp = $state(0); // master preamp — the single source of truth (see below)
   let balance = $state(0); // dB: <0 left louder, 0 centered, >0 right louder
   let hadPreamp = $state(false);
   let expanded = $state(false); // full-window graph + handle editing
@@ -172,48 +198,85 @@
     hardwareOnly ? bands.map((b) => (mutedIds.has(b.id) ? { ...b, enabled: false } : b)) : bands,
   );
 
-  // Manual (Auto-off) values for the two offload stages — runtime only, never saved
-  // into the preset (which stays the full EQ). Seeded from the auto values when Auto
-  // is switched off so the sliders don't jump.
-  let apoManual = $state(0);
-  let hwManual = $state(0);
+  const round1 = (v: number) => Math.round(v * 10) / 10;
 
-  // The device pregain that keeps the offloaded bands from clipping the device.
+  // ── Preamp: one source of truth (`totalPreamp`) ──────────────────────────────
+  // `totalPreamp` is the preset's master preamp — the overall attenuation. Every
+  // displayed/applied preamp derives from it: under offload it splits into the
+  // device pregain (headroom for the offloaded boosts) + the APO software preamp
+  // (the remainder). A manual slider edit folds back into `totalPreamp` so Save
+  // round-trips it; the Auto toggle and offload just re-split the same value.
+  //
+  // The lowest (≤ 0) preamp each stage needs to avoid clipping: the device needs
+  // `deviceMin` for its offloaded boosts; the APO stage needs `apoAntiClip` for the
+  // software remainder (or the whole EQ off offload).
   function computeHwPregain(): number {
-    return Math.round(Math.min(0, -Math.max(0, peakGainDb(hwBands, 0, balance))) * 10) / 10;
+    return round1(Math.min(0, -Math.max(0, peakGainDb(hwBands, 0, balance))));
   }
-
-  // The effective value of each offload stage (auto-computed or manual). In
-  // Hardware Only mode the APO stage doesn't exist — its preamp is pinned flat.
-  const apoPreamp = $derived(
-    hardwareOnly ? 0 : effectiveAuto ? computeAutoPreamp(softwareBands) : apoManual,
-  );
-  // A device that headrooms itself (no user pregain) always shows the auto value —
-  // there's no slider to write hwManual, so never fall back to it.
-  const hwPregain = $derived(
-    effectiveAuto || !hwUserPregain ? computeHwPregain() : hwManual,
+  const deviceMin = $derived(computeHwPregain());
+  const apoAntiClip = $derived(
+    computeAutoPreamp((offloadActive ? softwareBands : bands) as CurveFilter[]),
   );
 
-  // Turning Auto off while offloading seeds the manual sliders from the current
-  // auto values, so the two stages don't jump when the user takes over.
+  // The device's share while honoring the total: its required headroom plus half of
+  // any excess attenuation (the other half goes to APO — the two split spare headroom
+  // evenly); a shortfall stays on the device so it can't clip. Overridden when the
+  // user drags the Device slider (Auto off), then re-cleared when Auto turns off.
+  let deviceManual = $state<number | null>(null);
+  const deviceEvenSplit = $derived.by(() => {
+    const extra = totalPreamp - (apoAntiClip + deviceMin); // < 0 → spare headroom to share
+    return extra < 0 ? round1(deviceMin + extra / 2) : deviceMin;
+  });
+  const hwPregain = $derived.by(() => {
+    if (!offloadActive) return 0;
+    if (effectiveAuto || !hwUserPregain) return deviceMin; // auto minimizes to the headroom
+    return deviceManual ?? deviceEvenSplit;
+  });
+
+  // The APO software preamp: the remainder (total − device), but never less
+  // attenuation than the anti-clip value, so the software stage can't clip (that
+  // clamp isn't written back to `totalPreamp`). Auto minimizes it; Hardware Only pins
+  // it flat; off offload it's simply the master preamp.
+  const apoPreamp = $derived.by(() => {
+    if (hardwareOnly) return 0;
+    if (!offloadActive) return effectiveAuto ? apoAntiClip : totalPreamp;
+    if (effectiveAuto) return apoAntiClip;
+    return Math.min(round1(totalPreamp - hwPregain), apoAntiClip);
+  });
+
+  // The combined attenuation actually applied — both stages under offload, else just
+  // the APO preamp. Drives the curve + clip check.
+  const livePreamp = $derived(offloadActive ? apoPreamp + hwPregain : apoPreamp);
+  // The device pregain to send with a live preview (`null` = no offload).
+  const livePregain = $derived(offloadActive ? hwPregain : null);
+
+  // Master preamp slider (off offload): sets the total directly.
+  function setMasterPreamp(v: number) {
+    totalPreamp = v;
+    schedule();
+  }
+  // APO slider: pin the device where it is and hand the change to the total, so the
+  // APO stage lands exactly on `v` (the two stages still sum to the total).
+  function setApoPreamp(v: number) {
+    const dev = hwPregain;
+    deviceManual = dev;
+    totalPreamp = round1(v + dev);
+    schedule();
+  }
+  // Device slider: shift the total by the same amount so the APO stage holds steady,
+  // and remember the override.
+  function setDevicePreamp(v: number) {
+    totalPreamp = round1(totalPreamp + (v - hwPregain));
+    deviceManual = v;
+    schedule();
+  }
+  // Auto off recomputes the split from the total: drop the device override so both
+  // stages derive from `totalPreamp` again (with the even split).
   function setAutoPreamp(v: boolean) {
-    if (!v && offloadActive) {
-      apoManual = computeAutoPreamp(softwareBands);
-      hwManual = computeHwPregain();
-    }
+    deviceManual = null;
     saveAutoPreamp(v);
     schedule();
   }
-
-  // What the curve + clip check use: the single master preamp when offload is off,
-  // or the combined attenuation of both stages when it's on (both reduce the final
-  // output level).
-  const livePreamp = $derived(
-    offloadActive ? apoPreamp + hwPregain : effectiveAuto ? computeAutoPreamp() : manualPreamp,
-  );
-
-  // The device pregain to send with a live preview (`null` = automatic / no offload).
-  const livePregain = $derived(offloadActive ? hwPregain : null);
 
   // Possible clipping when the summed boost — the active bands plus the global
   // tone overlay, on whichever channel ends up louder — tops 0 dB. Past that the
@@ -277,18 +340,58 @@
       .catch((e) => (err = String(e)));
   }, 75);
 
+  // Device-side state (the offloaded bands + pregain) — tells whether a press
+  // actually changed what the device runs.
+  const deviceStateSig = $derived(
+    JSON.stringify([livePregain, hwBands.map((b) => [b.kind, b.freq, b.gain, b.q])]),
+  );
+
+  // A commit-to-apply device (the DHA15) only latches EQ/pregain on a flash commit,
+  // and its audio drops out while flashing — so its live RAM writes during a drag do
+  // nothing, and we hold off and flash once, on mouse release. While the flash is in
+  // flight `committing` grays the write controls for the device's commit delay so a
+  // fresh edit can't pile onto the one being latched (or write over the dropout).
+  let committing = $state(false);
+  let commitLock: ReturnType<typeof setTimeout> | null = null;
+  function flashDevice() {
+    if (!hwCommitToApply || !offloadActive || loading || comparing) return;
+    committing = true;
+    api.applyLive(buildConfig(false), livePregain, true).catch((e) => (err = String(e)));
+    if (commitLock) clearTimeout(commitLock);
+    commitLock = setTimeout(() => (committing = false), hwCommitDelay);
+  }
+
+  // Flash on mouse release, and only when the press actually changed the device state
+  // (a drag of the device pregain or an offloaded band). Capturing at pointerdown
+  // means a plain click, a software-only edit, or a preset load never flashes — and
+  // nothing fires while the button is held, so the controls never freeze mid-drag.
+  let sigAtDown = "";
+  $effect(() => {
+    const down = () => (sigAtDown = deviceStateSig);
+    const up = () => {
+      if (deviceStateSig !== sigAtDown) flashDevice();
+    };
+    window.addEventListener("pointerdown", down);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointerup", up);
+    };
+  });
+
   async function load(presetName: string) {
     err = "";
     loading = true;
     dirty = false;
     comparing = false; // a fresh preset is live; nothing to compare against yet
-    manualPreamp = 0;
+    totalPreamp = 0;
+    deviceManual = null;
     balance = 0;
     hadPreamp = false;
     try {
       const cfg = await api.getPreset(presetName);
       const parsed = parseConfigEq(cfg); // shared with the A/B-compare ghost
-      manualPreamp = parsed.preamp;
+      totalPreamp = parsed.preamp; // the preset's master preamp is the total (req 2)
       balance = parsed.balance;
       hadPreamp = parsed.hadPreamp;
       bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
@@ -303,10 +406,12 @@
       loading = false;
       resetHistory(); // start a fresh undo history at the loaded state
       
-      // If Auto Preamp is enabled, pushing it to the live config doesn't dirty
-      // the preset. Skipped when the load failed: bands/rawLines were just reset,
-      // so applying would overwrite the live config with an empty one.
-      if (effectiveAuto && !comparing && !err) {
+      // Push the live config so it reflects the derived preamp. Needed whenever the
+      // applied preamp isn't the preset's raw master value: Auto (the anti-clip
+      // value) or offload (the split — the preset's preamp lives on APO until we
+      // re-assert the device/APO split, else the two desync). Doesn't dirty the
+      // preset. Skipped when the load failed (bands/rawLines were just reset).
+      if ((effectiveAuto || offloadActive) && !comparing && !err) {
         api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
       }
     }
@@ -323,7 +428,7 @@
   // ── Undo / redo ────────────────────────────────────────────────────────────
   const hist = createHistory((s) => {
     bands = s.bands.map((b) => ({ ...b }));
-    manualPreamp = s.manualPreamp;
+    totalPreamp = s.totalPreamp;
     balance = s.balance;
     schedule();
   }, () => comparing);
@@ -333,9 +438,9 @@
 
   function snapState(): Snapshot {
     return {
-      key: JSON.stringify({ bands, manualPreamp, balance }),
+      key: JSON.stringify({ bands, totalPreamp, balance }),
       bands: $state.snapshot(bands) as Band[],
-      manualPreamp,
+      totalPreamp,
       balance,
     };
   }
@@ -344,7 +449,7 @@
   }
   function restoreSnap(s: Snapshot) {
     bands = s.bands.map((b) => ({ ...b })); // fresh copies so later edits don't touch history
-    manualPreamp = s.manualPreamp;
+    totalPreamp = s.totalPreamp;
     balance = s.balance;
     schedule();
   }
@@ -367,7 +472,7 @@
   // A burst of edits coalesces into one entry once it settles. JSON.stringify
   // reads every field, registering the effect's dependencies.
   $effect(() => {
-    JSON.stringify({ bands, manualPreamp, balance });
+    JSON.stringify({ bands, totalPreamp, balance });
     if (loading) return;
     const t = setTimeout(flushHistory, 400);
     return () => clearTimeout(t);
@@ -434,16 +539,10 @@
   function buildConfig(forSave = false): Config {
     const lines: Line[] = [];
     for (const r of rawLines) lines.push({ kind: "Raw", value: r });
-    // Save writes the full preset's preamp (clean when auto, else the combined
-    // value). A live preview under offload writes only the APO-stage preamp; the
-    // device pregain rides alongside via `apply_live`'s `pregain` argument.
-    const p = forSave
-      ? effectiveAuto
-        ? manualPreamp
-        : livePreamp
-      : offloadActive
-        ? apoPreamp
-        : livePreamp;
+    // Save writes the master preamp (the source of truth — req 6). A live preview
+    // under offload writes only the APO-stage preamp; the device pregain rides
+    // alongside via `apply_live`'s `pregain` argument.
+    const p = forSave ? totalPreamp : offloadActive ? apoPreamp : livePreamp;
     if (hadPreamp || p !== 0) {
       lines.push({ kind: "Preamp", value: { gain: p, channel: { kind: "both" } } });
     }
@@ -496,8 +595,8 @@
     const sig = `${tone.bass},${tone.mid},${tone.treble}`;
     const changed = sig !== lastToneSig;
     lastToneSig = sig;
-    if (changed && !loading && !comparing && effectiveAuto) {
-      api.applyLive(buildConfig(false)).catch((e) => (err = String(e)));
+    if (changed && !loading && !comparing && (effectiveAuto || offloadActive)) {
+      api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
     }
   });
 
@@ -508,12 +607,17 @@
 
   // Filters are grouped into three lists — both / left / right — selected by the
   // view toggle, optionally narrowed by the engine display filter while a hybrid
-  // offload is on. The graph always uses the full set, so it shows the real
-  // per-channel response no matter which list is on screen. Device membership
-  // comes from `hwBandIdx` (the backend's selection) — never re-derived here.
+  // offload is on. The graph tracks that same selection (see `graphBands`), so it
+  // plots exactly the filters currently listed. Device membership comes from
+  // `hwBandIdx` (the backend's selection) — never re-derived here.
   const inView = (b: Band, i: number, v: BandView) =>
     bandInView(b.channel, hwBandIdx.has(i), v, engine);
   const shown = $derived(bands.filter((b, i) => inView(b, i, view)));
+  // The graphs mirror the on-screen list: only the bands passing the current
+  // channel view + engine filter feed the traces, so the L / R tabs and the
+  // APO-only / HW-only buttons each redraw the curve to match what's listed.
+  // Uses `effectiveBands` so Hardware Only's muted bands stay excluded.
+  const graphBands = $derived(effectiveBands.filter((b, i) => inView(b, i, view)));
   function channelForView(v: BandView): Channel {
     if (v === "left") return { kind: "left" };
     if (v === "right") return { kind: "right" };
@@ -604,7 +708,10 @@
     clearSavedMeasurement(name);
   }
 
-  onDestroy(() => applyThrottle.cancel());
+  onDestroy(() => {
+    applyThrottle.cancel();
+    if (commitLock) clearTimeout(commitLock);
+  });
 </script>
 
 <svelte:window
@@ -707,7 +814,6 @@
      inline panel and the expanded overlay's side column. -->
 {#snippet eqControls()}
   <PreampRow
-    bind:manualPreamp
     autoPreamp={effectiveAuto}
     lockedAuto={forceAutoPreamp}
     bind:balance
@@ -716,8 +822,9 @@
     userPregain={hwUserPregain}
     {apoPreamp}
     {hwPregain}
-    bind:apoManual
-    bind:hwManual
+    onSetPreamp={setMasterPreamp}
+    onSetApo={setApoPreamp}
+    onSetDevice={setDevicePreamp}
     onSchedule={schedule}
     onAutoPreampChange={setAutoPreamp}
   />
@@ -737,7 +844,7 @@
 {/snippet}
 
 {#if !expanded}
-  <section class="panel" class:comparing>
+  <section class="panel" class:comparing class:committing>
     <div class="panel-head">
       <h2 title={name}>{name}</h2>
       <div class="actions">
@@ -748,7 +855,7 @@
     {#if err}<div class="err">{err}</div>{/if}
 
     <div class="graph-wrap">
-      <ResponseCurve filters={effectiveBands} preamp={livePreamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
+      <ResponseCurve filters={graphBands} preamp={livePreamp} {balance} {measurement} target={targetPoints} {compensate} {showMeas} reference={compareRef} />
       <button
         class="icon-btn expand-btn"
         onclick={() => (expanded = true)}
@@ -766,7 +873,7 @@
 {/if}
 
 {#if expanded}
-  <div class="overlay" class:comparing>
+  <div class="overlay" class:comparing class:committing>
     <div class="overlay-head">
       <h2 title={name}>{name}</h2>
       <div class="actions">
@@ -803,7 +910,7 @@
         />
         <div class="graph-fit">
           <CurveEditor
-            {bands}
+            bands={shown}
             preamp={livePreamp}
             {balance}
             {view}
@@ -862,15 +969,22 @@
     border-color: var(--accent-2);
   }
   /* While comparing, the EQ controls are locked (dimmed, non-interactive) and
-     the graph handles can't be dragged — only the live output is swapped. */
+     the graph handles can't be dragged — only the live output is swapped. The same
+     lock applies briefly while a commit-to-apply device flashes (`committing`), so a
+     fresh edit can't pile another write onto the one being latched. */
   .panel.comparing :global(.preamp),
+  .panel.committing :global(.preamp),
   .panel.comparing :global(.bands),
+  .panel.committing :global(.bands),
   .panel.comparing .band-actions,
-  .overlay.comparing .overlay-side {
+  .panel.committing .band-actions,
+  .overlay.comparing .overlay-side,
+  .overlay.committing .overlay-side {
     opacity: 0.5;
     pointer-events: none;
   }
-  .overlay.comparing .graph-fit {
+  .overlay.comparing .graph-fit,
+  .overlay.committing .graph-fit {
     pointer-events: none;
   }
   .clip {
@@ -977,8 +1091,21 @@
 
   .band-actions {
     display: flex;
+    /* Wrap whole buttons to a new line when the row can't fit; without this the
+       shrinkable engine filter (overflow: hidden) collapses to nothing instead
+       of dropping to the next line. */
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 8px;
+  }
+  /* Smaller than the default button, with single-line labels, so the row stays
+     compact and the labels don't wrap at the narrowest window width. Buttons
+     hold their natural width (flex: none) and the row wraps them as whole units. */
+  .band-actions button {
+    flex: none;
+    font-size: 11px;
+    padding: 5px 9px;
+    white-space: nowrap;
   }
   .add {
     align-self: flex-start;
@@ -986,6 +1113,9 @@
   /* Engine display filter, bottom-right of the band pane (hybrid offload only). */
   .engine-seg {
     margin-left: auto;
+    /* Never shrink: keep the segment (and its clipped inner buttons) at full
+       width so it stays fully visible, wrapping to the next line if need be. */
+    flex: none;
     display: inline-flex;
     border: 1px solid var(--border);
     border-radius: 7px;
@@ -996,8 +1126,10 @@
     border-right: 1px solid var(--border);
     border-radius: 0;
     background: transparent;
-    padding: 4px 10px;
-    font-size: 12px;
+    /* Match the reduced band-action buttons; a hair less vertical padding since
+       the segment sits inside its own 1px border. */
+    padding: 3px 8px;
+    font-size: 11px;
     color: var(--muted);
     white-space: nowrap;
   }

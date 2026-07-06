@@ -123,6 +123,8 @@ fn ka17_profile() -> HardwareProfile {
         supports_low_shelf: true,
         supports_high_shelf: true,
         user_pregain: true,
+        commit_to_apply: false, // applies live (RAM) writes immediately
+        commit_delay_ms: 500,
     }
 }
 

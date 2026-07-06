@@ -136,6 +136,10 @@ fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
 
     let mut pending: Option<(Vec<HwBand>, f64, bool)> = None;
     let mut last_write = Instant::now() - MIN_INTERVAL;
+    // The last state actually written, so an unchanged push can be skipped — chiefly
+    // to avoid re-flashing an identical config (the editor debounces a commit that may
+    // repeat the current bands/pregain).
+    let mut last_written: Option<(Vec<HwBand>, f64, bool)> = None;
 
     loop {
         // Block for the next command, or wake to flush throttled pending work.
@@ -171,14 +175,24 @@ fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
 
         if let Some((bands, pregain, commit)) = pending.take() {
             if last_write.elapsed() >= MIN_INTERVAL {
-                match dev.push(&bands, pregain, commit) {
-                    Ok(()) => last_write = Instant::now(),
-                    Err(e) => {
-                        set_status(&status, |s| {
-                            s.error = Some(e);
-                            s.connected = false;
-                        });
-                        break;
+                let unchanged = last_written
+                    .as_ref()
+                    .is_some_and(|(b, p, c)| *b == bands && *p == pregain && *c == commit);
+                if unchanged {
+                    last_write = Instant::now();
+                } else {
+                    match dev.push(&bands, pregain, commit) {
+                        Ok(()) => {
+                            last_write = Instant::now();
+                            last_written = Some((bands, pregain, commit));
+                        }
+                        Err(e) => {
+                            set_status(&status, |s| {
+                                s.error = Some(e);
+                                s.connected = false;
+                            });
+                            break;
+                        }
                     }
                 }
             } else {

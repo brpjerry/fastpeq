@@ -13,7 +13,7 @@ export type EditorBand = {
 export type Snapshot = {
   key: string;
   bands: EditorBand[];
-  manualPreamp: number;
+  totalPreamp: number;
   balance: number;
 };
 

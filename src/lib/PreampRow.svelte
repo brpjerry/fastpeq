@@ -3,7 +3,6 @@
   import { dismissable } from "./dismiss";
 
   let {
-    manualPreamp = $bindable(),
     livePreamp,
     autoPreamp = $bindable(),
     lockedAuto = false,
@@ -12,12 +11,12 @@
     userPregain = true,
     apoPreamp = 0,
     hwPregain = 0,
-    apoManual = $bindable(0),
-    hwManual = $bindable(0),
+    onSetPreamp,
+    onSetApo,
+    onSetDevice,
     onSchedule,
     onAutoPreampChange,
   }: {
-    manualPreamp: number;
     livePreamp: number;
     autoPreamp: boolean;
     /** When set, Auto Preamp is forced on and the toggle is disabled (e.g. by
@@ -32,9 +31,11 @@
     /** Effective APO-stage preamp / device pregain shown on the two sliders. */
     apoPreamp?: number;
     hwPregain?: number;
-    /** Manual (Auto-off) values the two offload sliders write back. */
-    apoManual?: number;
-    hwManual?: number;
+    /** Report a slider/field's new value; the parent folds it into the master
+     * "total" preamp (the single source of truth) and schedules the apply. */
+    onSetPreamp: (v: number) => void; // master slider (off offload)
+    onSetApo: (v: number) => void; // APO stage (offloading)
+    onSetDevice: (v: number) => void; // device stage (offloading)
     onSchedule: () => void;
     onAutoPreampChange: (v: boolean) => void;
   } = $props();
@@ -49,7 +50,8 @@
   let showBalance = $state(false);
   let chanBtn = $state<HTMLButtonElement | null>(null);
 
-  /* Typed dB values land on the same manual state the sliders write. */
+  /* Typed dB values route through the same setters as the sliders (the parent
+     folds each into the total preamp). */
   function preampDb(v: string): number | null {
     const db = Number(v);
     if (v.trim() === "" || !Number.isFinite(db)) return null;
@@ -57,21 +59,16 @@
   }
   function setApoDb(v: string) {
     const db = preampDb(v);
-    if (db === null) return;
-    apoManual = db;
-    onSchedule();
+    if (db !== null) onSetApo(db);
   }
   function setManualDb(v: string) {
     const db = preampDb(v);
-    if (db === null) return;
-    manualPreamp = db;
-    onSchedule();
+    if (db !== null) onSetPreamp(db);
   }
   function setDeviceDb(v: string) {
     const db = Number(v);
     if (v.trim() === "" || !Number.isFinite(db)) return;
-    hwManual = Math.max(PRE_MIN, Math.min(DEV_PRE_MAX, db));
-    onSchedule();
+    onSetDevice(Math.max(PRE_MIN, Math.min(DEV_PRE_MAX, db)));
   }
   /** One-decimal display value (sums of rounded stages can carry float dust). */
   function r1(v: number): number {
@@ -106,10 +103,7 @@
           max="6"
           step="0.1"
           value={apoPreamp}
-          oninput={(e) => {
-            apoManual = Number(e.currentTarget.value);
-            onSchedule();
-          }}
+          oninput={(e) => onSetApo(Number(e.currentTarget.value))}
           disabled={autoPreamp}
         />
         <span class="pval">
@@ -132,10 +126,7 @@
           max="6"
           step="0.1"
           value={livePreamp}
-          oninput={(e) => {
-            manualPreamp = Number(e.currentTarget.value);
-            onSchedule();
-          }}
+          oninput={(e) => onSetPreamp(Number(e.currentTarget.value))}
           disabled={autoPreamp}
         />
         <span class="pval">
@@ -164,10 +155,7 @@
           max={DEV_PRE_MAX}
           step="0.1"
           value={hwPregain}
-          oninput={(e) => {
-            hwManual = Number(e.currentTarget.value);
-            onSchedule();
-          }}
+          oninput={(e) => onSetDevice(Number(e.currentTarget.value))}
           disabled={autoPreamp}
         />
         <span class="pval">
@@ -287,6 +275,10 @@
   .pval input[type="number"] {
     width: 46px; /* e.g. -12.3 */
     flex: none;
+    /* Match a band row's gain/freq field height (BandRow's `.band input`), so the
+       preamp fields don't tower over the filter list below them. */
+    padding: 2px 5px;
+    font-size: 12px;
   }
   .pval small {
     white-space: nowrap;

@@ -106,8 +106,9 @@ pub fn apply_live(
     state: State<'_, AppState>,
     config: Config,
     pregain: Option<f64>,
+    commit: Option<bool>,
 ) -> Result<(), String> {
-    state.apply_config(&config, pregain)
+    state.apply_config(&config, pregain, commit.unwrap_or(false))
 }
 
 #[tauri::command]

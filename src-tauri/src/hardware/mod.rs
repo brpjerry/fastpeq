@@ -29,6 +29,13 @@ pub struct DetectedDevice {
     /// [`HardwareProfile::user_pregain`]). The UI hides the Device preamp
     /// slider when it isn't.
     pub user_pregain: bool,
+    /// Whether the device only takes effect on a flash commit (see
+    /// [`HardwareProfile::commit_to_apply`]). The editor flashes a commit on mouse
+    /// release so the change latches.
+    pub commit_to_apply: bool,
+    /// How long (ms) the editor freezes edits after a flash commit (the device's audio
+    /// drops out while it applies). See [`HardwareProfile::commit_delay_ms`].
+    pub commit_delay_ms: u32,
 }
 
 /// A connected hardware-EQ device that EQ bands can be pushed to. Implemented per
@@ -153,6 +160,8 @@ pub fn detect() -> Result<Vec<DetectedDevice>, String> {
             model,
             max_filters: profile.max_filters,
             user_pregain: profile.user_pregain,
+            commit_to_apply: profile.commit_to_apply,
+            commit_delay_ms: profile.commit_delay_ms,
         });
     }
     Ok(out)
