@@ -302,8 +302,13 @@ fn le16(v: i64) -> [u8; 2] {
 
 /// Decode the version reply: ASCII starting at payload byte 3 (the Space Pro
 /// capture shows `"1.0"`). Falls back to the raw numeric form if not text.
+/// Total: `read_reply` only guarantees the two command bytes, so a short
+/// (malformed) reply decodes to zeros rather than panicking the worker thread.
 fn decode_version(p: &[u8]) -> String {
-    let text: String = p[3..]
+    let byte = |i: usize| p.get(i).copied().unwrap_or(0);
+    let text: String = p
+        .get(3..)
+        .unwrap_or_default()
         .iter()
         .take_while(|&&b| b != 0)
         .map(|&b| b as char)
@@ -311,16 +316,18 @@ fn decode_version(p: &[u8]) -> String {
         .collect();
     let text = text.trim().to_string();
     if text.is_empty() {
-        format!("{}.{}.{}", p[3], p[4], p[5])
+        format!("{}.{}.{}", byte(3), byte(4), byte(5))
     } else {
         text
     }
 }
 
 /// Decode a band from a read reply (inverse of [`write_packet`]'s readable fields).
+/// Total, like [`decode_version`]: missing bytes read as zero.
 fn decode_band(p: &[u8]) -> HwBand {
-    let read_i16 = |lo: usize| i16::from_le_bytes([p[lo], p[lo + 1]]) as f64;
-    let freq = u16::from_le_bytes([p[27], p[28]]) as f64;
+    let byte = |i: usize| p.get(i).copied().unwrap_or(0);
+    let read_i16 = |lo: usize| i16::from_le_bytes([byte(lo), byte(lo + 1)]) as f64;
+    let freq = u16::from_le_bytes([byte(27), byte(28)]) as f64;
     let q = read_i16(29) / 256.0;
     let gain = read_i16(31) / 256.0;
     let kind = match p.get(33) {
@@ -391,6 +398,18 @@ mod tests {
         assert_eq!(back.freq, 8000.0);
         assert!((back.gain - (-3.5)).abs() < 0.01);
         assert!((back.q - 0.7).abs() < 0.01);
+    }
+
+    /// A truncated (malformed) reply must decode to something inert, never
+    /// panic — a decoder panic kills the worker thread mid-session.
+    #[test]
+    fn short_replies_decode_without_panicking() {
+        // Two bytes is the minimum read_reply() will hand a decoder.
+        let short = [CMD_READ, CMD_VER];
+        assert_eq!(decode_version(&short), "0.0.0");
+        let band = decode_band(&[CMD_READ, CMD_PEQ_VALUES]);
+        assert_eq!(band.gain, 0.0);
+        assert_eq!(band.kind, HwFilterType::Peak);
     }
 
     #[test]

@@ -9,7 +9,7 @@
 //! The device is opened on the worker thread (HID handles are thread-affine) and
 //! released when the worker stops, so nothing non-`Send` ever crosses threads.
 
-use super::{DetectedDevice, open};
+use super::{DetectedDevice, HardwareEq, open};
 use fastpeq_core::{HardwareProfile, HwBand};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -115,6 +115,24 @@ fn set_status(status: &Arc<Mutex<RuntimeStatus>>, f: impl FnOnce(&mut RuntimeSta
     }
 }
 
+/// Clears `connected` when the worker exits — *however* it exits. A panic
+/// (say, a malformed device reply tripping a decoder) unwinds past any
+/// trailing status update, and without this guard the session would keep
+/// reporting a connected device forever while the worker is dead.
+struct DisconnectOnExit<'a>(&'a Arc<Mutex<RuntimeStatus>>);
+
+impl Drop for DisconnectOnExit<'_> {
+    fn drop(&mut self) {
+        let panicked = std::thread::panicking();
+        set_status(self.0, |s| {
+            s.connected = false;
+            if panicked && s.error.is_none() {
+                s.error = Some("Hardware worker crashed".to_string());
+            }
+        });
+    }
+}
+
 fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
     let mut dev = match open(&id) {
         Ok(d) => d,
@@ -126,6 +144,7 @@ fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
             return;
         }
     };
+    let _disconnect = DisconnectOnExit(&status);
     set_status(&status, |s| {
         s.connected = true;
         s.error = None;
@@ -134,7 +153,12 @@ fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
     if let Ok(v) = dev.version() {
         set_status(&status, |s| s.version = Some(v));
     }
+    run_loop(dev.as_mut(), &rx, &status);
+}
 
+/// The coalesce/throttle loop, on a device that's already open. Split from
+/// [`run`] so it can be driven by a mock [`HardwareEq`] in tests.
+fn run_loop(dev: &mut dyn HardwareEq, rx: &Receiver<Command>, status: &Arc<Mutex<RuntimeStatus>>) {
     let mut pending: Option<(Vec<HwBand>, f64, bool)> = None;
     let mut last_write = Instant::now() - MIN_INTERVAL;
     // The last state actually written, so an unchanged push can be skipped — chiefly
@@ -188,7 +212,7 @@ fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
                             last_written = Some((bands, pregain, commit));
                         }
                         Err(e) => {
-                            set_status(&status, |s| {
+                            set_status(status, |s| {
                                 s.error = Some(e);
                                 s.connected = false;
                             });
@@ -202,5 +226,154 @@ fn run(id: String, rx: Receiver<Command>, status: Arc<Mutex<RuntimeStatus>>) {
         }
     }
 
-    set_status(&status, |s| s.connected = false);
+    // A pending push carrying a flash commit must not be lost on shutdown —
+    // the editor commits on mouse release, and a Stop (or the app quitting and
+    // dropping the sender) can land inside the throttle window. Volatile
+    // pending state is fine to drop; a promised flash save is not.
+    if let Some((bands, pregain, true)) = pending {
+        let unchanged = last_written
+            .as_ref()
+            .is_some_and(|(b, p, c)| *b == bands && *p == pregain && *c);
+        if !unchanged {
+            std::thread::sleep(MIN_INTERVAL.saturating_sub(last_write.elapsed()));
+            let _ = dev.push(&bands, pregain, true);
+        }
+    }
+    // `connected` is reset by the caller's DisconnectOnExit guard (which also
+    // covers a panic anywhere above), not by a trailing update here.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fastpeq_core::HwFilterType;
+    use std::sync::mpsc::channel;
+
+    /// Records every push it receives.
+    struct MockDev(Vec<(Vec<HwBand>, f64, bool)>);
+
+    impl HardwareEq for MockDev {
+        fn push(&mut self, bands: &[HwBand], pregain: f64, commit: bool) -> Result<(), String> {
+            self.0.push((bands.to_vec(), pregain, commit));
+            Ok(())
+        }
+        fn pull(&mut self) -> Result<Vec<HwBand>, String> {
+            Ok(Vec::new())
+        }
+        fn version(&mut self) -> Result<String, String> {
+            Ok("mock".to_string())
+        }
+    }
+
+    fn band() -> HwBand {
+        HwBand {
+            kind: HwFilterType::Peak,
+            freq: 1000.0,
+            gain: 3.0,
+            q: 1.0,
+        }
+    }
+
+    /// A commit still sitting throttled in `pending` when Stop arrives must be
+    /// flushed to the device, not dropped — a flash save is a promise. (If the
+    /// test machine stalls past the throttle window the commit lands inline
+    /// instead; the assertion holds either way.)
+    #[test]
+    fn pending_commit_is_flushed_on_stop() {
+        let (tx, rx) = channel();
+        let status = Arc::new(Mutex::new(RuntimeStatus::default()));
+        let mut dev = MockDev(Vec::new());
+        // The first push lands immediately and opens the throttle window; the
+        // commit then coalesces into `pending`; Stop arrives before the flush.
+        tx.send(Command::Push {
+            bands: Vec::new(),
+            pregain: 0.0,
+            commit: false,
+        })
+        .unwrap();
+        tx.send(Command::Push {
+            bands: vec![band()],
+            pregain: -3.0,
+            commit: true,
+        })
+        .unwrap();
+        tx.send(Command::Stop).unwrap();
+
+        run_loop(&mut dev, &rx, &status);
+
+        assert_eq!(
+            dev.0.last(),
+            Some(&(vec![band()], -3.0, true)),
+            "the pending flash commit must reach the device"
+        );
+    }
+
+    /// Same when the sender is dropped (app quit) instead of an explicit Stop.
+    #[test]
+    fn pending_commit_is_flushed_on_disconnect() {
+        let (tx, rx) = channel();
+        let status = Arc::new(Mutex::new(RuntimeStatus::default()));
+        let mut dev = MockDev(Vec::new());
+        tx.send(Command::Push {
+            bands: Vec::new(),
+            pregain: 0.0,
+            commit: false,
+        })
+        .unwrap();
+        tx.send(Command::Push {
+            bands: vec![band()],
+            pregain: -3.0,
+            commit: true,
+        })
+        .unwrap();
+        drop(tx);
+
+        run_loop(&mut dev, &rx, &status);
+
+        assert_eq!(dev.0.last(), Some(&(vec![band()], -3.0, true)));
+    }
+
+    /// Shutdown never invents a flash write: volatile-only traffic stays volatile.
+    #[test]
+    fn volatile_pushes_are_never_flash_committed_on_stop() {
+        let (tx, rx) = channel();
+        let status = Arc::new(Mutex::new(RuntimeStatus::default()));
+        let mut dev = MockDev(Vec::new());
+        for gain in [1.0, 2.0] {
+            tx.send(Command::Push {
+                bands: vec![HwBand {
+                    gain,
+                    ..band()
+                }],
+                pregain: 0.0,
+                commit: false,
+            })
+            .unwrap();
+        }
+        tx.send(Command::Stop).unwrap();
+
+        run_loop(&mut dev, &rx, &status);
+
+        assert!(dev.0.iter().all(|(.., commit)| !commit));
+    }
+
+    /// The exit guard clears `connected` even when the worker panics (e.g. a
+    /// malformed device reply), and records an error so the UI shows why.
+    #[test]
+    fn a_panicking_worker_still_reads_as_disconnected() {
+        let status = Arc::new(Mutex::new(RuntimeStatus {
+            connected: true,
+            ..Default::default()
+        }));
+        let st = status.clone();
+        let worker = std::thread::spawn(move || {
+            let _guard = DisconnectOnExit(&st);
+            panic!("simulated decoder panic");
+        });
+        assert!(worker.join().is_err());
+
+        let s = status.lock().unwrap();
+        assert!(!s.connected, "a dead worker must not read as connected");
+        assert_eq!(s.error.as_deref(), Some("Hardware worker crashed"));
+    }
 }

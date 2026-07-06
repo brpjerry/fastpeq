@@ -245,9 +245,14 @@ fn le16(v: i64) -> [u8; 2] {
 
 /// Decode the version reply. The DHA15 returns an ASCII string starting at byte 3
 /// (e.g. `"V0.5.0"`); read the printable run. Falls back to the raw numeric form if
-/// the payload isn't text.
+/// the payload isn't text. Total: `read_reply` only guarantees the two command
+/// bytes, so a short (malformed) reply decodes to zeros rather than panicking
+/// the worker thread.
 fn decode_version(p: &[u8]) -> String {
-    let text: String = p[3..]
+    let byte = |i: usize| p.get(i).copied().unwrap_or(0);
+    let text: String = p
+        .get(3..)
+        .unwrap_or_default()
         .iter()
         .take_while(|&&b| b != 0)
         .map(|&b| b as char)
@@ -255,7 +260,7 @@ fn decode_version(p: &[u8]) -> String {
         .collect();
     let text = text.trim().to_string();
     if text.is_empty() {
-        format!("{}.{}.{}", p[3], p[4], p[5])
+        format!("{}.{}.{}", byte(3), byte(4), byte(5))
     } else {
         text
     }
@@ -263,10 +268,12 @@ fn decode_version(p: &[u8]) -> String {
 
 /// Decode a band from a read reply (inverse of [`write_packet`]'s readable fields).
 /// On the read-back path (`pull`), so only reached by the hardware smoke test today.
+/// Total, like [`decode_version`]: missing bytes read as zero.
 #[allow(dead_code)]
 fn decode_band(p: &[u8]) -> HwBand {
-    let read_i16 = |lo: usize| i16::from_le_bytes([p[lo], p[lo + 1]]) as f64;
-    let freq = u16::from_le_bytes([p[27], p[28]]) as f64;
+    let byte = |i: usize| p.get(i).copied().unwrap_or(0);
+    let read_i16 = |lo: usize| i16::from_le_bytes([byte(lo), byte(lo + 1)]) as f64;
+    let freq = u16::from_le_bytes([byte(27), byte(28)]) as f64;
     let q = read_i16(29) / 256.0;
     let gain = read_i16(31) / 256.0;
     let kind = match p.get(33) {
@@ -349,6 +356,18 @@ mod tests {
         assert_eq!(i16::from_le_bytes([p[3], p[4]]), -6 * 256);
     }
 
+    /// A truncated (malformed) reply must decode to something inert, never
+    /// panic — a decoder panic kills the worker thread mid-session.
+    #[test]
+    fn short_replies_decode_without_panicking() {
+        // Two bytes is the minimum read_reply() will hand a decoder.
+        let short = [CMD_READ, CMD_VER];
+        assert_eq!(decode_version(&short), "0.0.0");
+        let band = decode_band(&[CMD_READ, CMD_UPDATE_EQ]);
+        assert_eq!(band.gain, 0.0);
+        assert_eq!(band.kind, HwFilterType::Peak);
+    }
+
     /// Times HID enumeration — the cost the app's background reconciler keeps off
     /// the UI path. Run with:
     /// `cargo test -p fastpeq-hw -- --ignored enum_timing --nocapture`.
@@ -417,7 +436,8 @@ mod tests {
             match dev.read_reply(CMD_READ, cmd) {
                 Ok(p) => {
                     let head = &p[..p.len().min(10)];
-                    let fixed = i16::from_le_bytes([p[3], p[4]]) as f64 / 256.0;
+                    let byte = |i: usize| p.get(i).copied().unwrap_or(0);
+                    let fixed = i16::from_le_bytes([byte(3), byte(4)]) as f64 / 256.0;
                     println!("{label}: {head:02x?}  (bytes3..5 as 8.8 fixed: {fixed} dB)");
                 }
                 Err(e) => println!("{label}: no reply ({e})"),

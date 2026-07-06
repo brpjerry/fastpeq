@@ -415,10 +415,14 @@ fn get_band_packet(index: u8) -> Vec<u8> {
 }
 
 /// Decode a band from a params reply (`[BB 0B ? ? 15 8 idx gHi gLo fHi fLo qHi qLo type …]`).
+/// Total: `read_reply` only guarantees the reply through the index byte, so a
+/// short (malformed) reply decodes to zeros rather than panicking the worker
+/// thread.
 fn decode_band(p: &[u8]) -> HwBand {
-    let gain_raw = i16::from_be_bytes([p[7], p[8]]);
-    let freq = u16::from_be_bytes([p[9], p[10]]) as f64;
-    let q_raw = u16::from_be_bytes([p[11], p[12]]);
+    let byte = |i: usize| p.get(i).copied().unwrap_or(0);
+    let gain_raw = i16::from_be_bytes([byte(7), byte(8)]);
+    let freq = u16::from_be_bytes([byte(9), byte(10)]) as f64;
+    let q_raw = u16::from_be_bytes([byte(11), byte(12)]);
     let kind = match p.get(13) {
         Some(&TYPE_LSQ) => HwFilterType::LowShelf,
         Some(&TYPE_HSQ) => HwFilterType::HighShelf,
@@ -509,6 +513,18 @@ mod tests {
         assert_eq!(back.freq, 8000.0);
         assert!((back.gain - (-3.5)).abs() < 0.01);
         assert!((back.q - 0.7).abs() < 0.01);
+    }
+
+    /// A truncated (malformed) reply must decode to something inert, never
+    /// panic — a decoder panic kills the worker thread mid-session.
+    #[test]
+    fn short_replies_decode_without_panicking() {
+        // Seven bytes is the minimum read_reply() will hand a decoder.
+        let short = [GET_HEADER[0], GET_HEADER[1], 0, 0, CMD_FILTER_PARAMS, 8, 0];
+        let band = decode_band(&short);
+        assert_eq!(band.gain, 0.0);
+        assert_eq!(band.kind, HwFilterType::Peak);
+        assert_eq!(band.q, 1.0); // the q_raw == 0 fallback
     }
 
     #[test]
