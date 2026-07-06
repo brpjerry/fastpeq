@@ -37,9 +37,10 @@
 //! [`jeromeof/devicePEQ`]: https://github.com/jeromeof/devicePEQ
 
 use super::{DeviceInfo, HardwareEq};
+use crate::protocol::{self, FLAT_BAND, dry_run};
 use fastpeq_core::{HardwareProfile, HwBand, HwFilterType};
 use hidapi::HidDevice;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The KA17's HID report id (per-model in the reference tool; default is 7).
 const REPORT_ID: u8 = 0x01;
@@ -89,8 +90,6 @@ const INTER_PACKET: Duration = Duration::from_millis(10);
 /// Post-batch settle time the reference tool uses after the counter write and
 /// before a save.
 const SETTLE: Duration = Duration::from_millis(100);
-/// How long to wait for a device reply to a read command.
-const READ_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// Recognize a FiiO device this driver can drive. Matches the KA17 by vendor id
 /// and product string (`"FIIO KA17"`, including the `(MQA HID)` firmware variant),
@@ -263,64 +262,28 @@ impl FiioDevice {
     /// Discard any queued input reports so a read matches its own reply, not a
     /// stale one.
     fn drain_input(&self) {
-        let mut buf = [0u8; 1 + REPORT_LEN];
-        while matches!(self.device.read_timeout(&mut buf, 0), Ok(n) if n > 0) {}
+        protocol::drain_input(&self.device, REPORT_LEN);
     }
 
-    /// Send one report (`payload` is zero-padded to the report length and
-    /// prefixed with the report id). Honors the dry-run guard and paces
-    /// consecutive packets.
     fn send(&self, payload: &[u8]) -> Result<(), String> {
-        let mut buf = [0u8; 1 + REPORT_LEN];
-        buf[0] = REPORT_ID;
-        buf[1..1 + payload.len()].copy_from_slice(payload);
-        if dry_run() {
-            eprintln!("[hw dry-run] fiio send {:02x?}", &buf[..1 + payload.len()]);
-            return Ok(());
-        }
-        self.device.write(&buf).map_err(|e| e.to_string())?;
-        std::thread::sleep(INTER_PACKET);
-        Ok(())
+        protocol::send_report(
+            &self.device,
+            "fiio",
+            REPORT_ID,
+            REPORT_LEN,
+            payload,
+            INTER_PACKET,
+        )
     }
 
     /// Read input reports until a `[0xBB, 0x0B, …, cmd, …]` reply for `cmd`
-    /// arrives, or time out. The HID report id, if present, is stripped so the
-    /// payload indices match the reference decoder.
+    /// arrives (guaranteed at least through the index byte), or time out.
     fn read_reply(&self, cmd: u8) -> Result<Vec<u8>, String> {
-        let mut buf = [0u8; 1 + REPORT_LEN];
-        let deadline = Instant::now() + READ_TIMEOUT;
-        while Instant::now() < deadline {
-            let n = self
-                .device
-                .read_timeout(&mut buf, 200)
-                .map_err(|e| e.to_string())?;
-            if n == 0 {
-                continue;
-            }
-            let payload = if buf[0] == REPORT_ID {
-                &buf[1..n]
-            } else {
-                &buf[..n]
-            };
-            if payload.len() > 6
-                && payload[0] == GET_HEADER[0]
-                && payload[1] == GET_HEADER[1]
-                && payload[4] == cmd
-            {
-                return Ok(payload.to_vec());
-            }
-        }
-        Err("Timed out waiting for a device reply".to_string())
+        protocol::read_matching(&self.device, REPORT_ID, REPORT_LEN, |p| {
+            p.len() > 6 && p[0] == GET_HEADER[0] && p[1] == GET_HEADER[1] && p[4] == cmd
+        })
     }
 }
-
-/// A flat band (0 dB peak) for unset slots in a pull.
-const FLAT_BAND: HwBand = HwBand {
-    kind: HwFilterType::Peak,
-    freq: 1000.0,
-    gain: 0.0,
-    q: 1.0,
-};
 
 fn type_byte(kind: HwFilterType) -> u8 {
     match kind {
@@ -451,11 +414,6 @@ fn decode_version(p: &[u8]) -> String {
         .collect::<String>()
         .trim()
         .to_string()
-}
-
-/// Whether `FASTPEQ_HW_DRYRUN` is set — log packets instead of writing.
-fn dry_run() -> bool {
-    std::env::var_os("FASTPEQ_HW_DRYRUN").is_some_and(|v| !v.is_empty())
 }
 
 #[cfg(test)]

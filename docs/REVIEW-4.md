@@ -128,7 +128,7 @@ rest open.
 
 ## P3 — Code reuse / organization
 
-- [ ] 8. **Extract the shared HID-driver plumbing — the largest duplication in
+- [x] 8. **Extract the shared HID-driver plumbing — the largest duplication in
   the repo.** `moondrop.rs` and `walkplay.rs` are byte-identical in
   `coeff_bytes`, `le16`, `decode_version`, `decode_band`, `FLAT_BAND`, the
   type-code table (`TYPE_PK/LSQ/HSQ` with the same values), `dry_run`, and
@@ -145,6 +145,13 @@ rest open.
 
   The per-driver files then keep only what's genuinely per-device: identify,
   profile, command bytes, and the push/commit sequences.
+  **Fixed:** exactly this split — `protocol.rs` (paced `send_report`,
+  `read_matching`, `drain_input`, `dry_run`, `FLAT_BAND`, `READ_TIMEOUT`) and
+  `moondrop_family.rs` (report constants, `write_packet(…, slot)`,
+  `decode_band`/`decode_version`, `le16`/`coeff_bytes`, the shared
+  `read_reply` matcher). moondrop.rs 485→337 lines, walkplay.rs 596→454;
+  the duplicated codec tests were deduped into family tests while each
+  driver keeps its own byte-layout test (they pin the differing slot byte).
 
 - [ ] 9. **Editor.svelte re-asserts the live config with the same guarded call
   in three places.** `api.applyLive(buildConfig(false), livePregain).catch(...)`
