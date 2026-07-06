@@ -88,10 +88,21 @@ impl HardwareSession {
         } else {
             CommitPolicy::Debounced(FLASH_DEBOUNCE)
         };
-        let join = std::thread::Builder::new()
+        let join = match std::thread::Builder::new()
             .name("fastpeq-hw".into())
             .spawn(move || run(id, rx, st, policy))
-            .ok();
+        {
+            Ok(join) => Some(join),
+            // Without this, a failed spawn left the default status (not
+            // connected, no error) — a session that looks like it's
+            // connecting forever.
+            Err(e) => {
+                set_status(&status, |s| {
+                    s.error = Some(format!("Could not start the hardware worker: {e}"));
+                });
+                None
+            }
+        };
         HardwareSession {
             descriptor,
             profile,

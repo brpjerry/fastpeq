@@ -117,11 +117,14 @@ rest open.
   distinct "connection to <device> is down" status line for the
   session-present-but-disconnected case.
 
-- [ ] 7. **`HardwareSession::start` swallows a thread-spawn failure.** The
+- [x] 7. **`HardwareSession::start` swallows a thread-spawn failure.** The
   `Builder::spawn(...).ok()` leaves `join: None` and the status at its default
   (`connected: false`, `error: None`) — the session looks like it's connecting
   forever. Vanishingly rare, but one line fixes it: on spawn error, record it
   in `status.error` before constructing the session.
+  **Fixed:** the spawn result is matched; on error, `status.error` records
+  "Could not start the hardware worker: <e>" (which also makes
+  `wait_ready` return immediately instead of timing out).
 
 ## P3 — Code reuse / organization
 
