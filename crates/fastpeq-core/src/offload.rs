@@ -105,11 +105,18 @@ pub struct HardwareProfile {
     /// Whether the device can represent high-shelf bands.
     pub supports_high_shelf: bool,
     /// Whether the device's input headroom (pregain) is host-adjustable — i.e. the
-    /// UI shows a Device preamp slider the user can turn. `false` when the value
-    /// isn't usefully adjustable (e.g. the DHA15, which needs a pregain present to
-    /// avoid clipping but disregards changes to it); such a device is still sent an
-    /// auto-computed value by its driver, just without exposing the slider.
+    /// UI shows a Device preamp slider the user can turn.
     pub user_pregain: bool,
+    /// Whether the device only *applies* an EQ/pregain write once it's committed to
+    /// flash — its live (RAM) registers stage the value but don't take effect until
+    /// the save (the DHA15). The editor flashes it on mouse release so a live edit
+    /// still takes hold, without a flash per drag frame.
+    pub commit_to_apply: bool,
+    /// How long (ms) the editor freezes the write controls after a flash commit — the
+    /// device's audio drops out while it applies, so we hold off writing again until
+    /// it's back. Only meaningful when [`commit_to_apply`](Self::commit_to_apply);
+    /// default 500.
+    pub commit_delay_ms: u32,
 }
 
 /// A single band assigned to the hardware device, already clamped to the device's
@@ -544,6 +551,8 @@ mod tests {
             supports_low_shelf: true,
             supports_high_shelf: true,
             user_pregain: true,
+            commit_to_apply: false,
+            commit_delay_ms: 500,
         }
     }
 

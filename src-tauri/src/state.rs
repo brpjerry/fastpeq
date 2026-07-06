@@ -624,8 +624,16 @@ impl AppState {
     /// (with the one-time backup) WITHOUT touching any preset file. Saving the
     /// preset is a separate, explicit action. No tray refresh — it's called
     /// rapidly while dragging, so the tone is taken from the cache (no sidecar read).
-    pub fn apply_config(&self, config: &Config, device_pregain: Option<f64>) -> Result<(), String> {
-        let offloaded = self.offload_apply(config, None, false, device_pregain)?;
+    pub fn apply_config(
+        &self,
+        config: &Config,
+        device_pregain: Option<f64>,
+        commit: bool,
+    ) -> Result<(), String> {
+        // `commit` flashes the device (persist). Used by the editor to latch a live
+        // edit on a commit-to-apply device (the DHA15), debounced so a drag isn't a
+        // flash per frame; ordinary live writes pass `false`.
+        let offloaded = self.offload_apply(config, None, commit, device_pregain)?;
         if !offloaded {
             let tone = self.tone_cache();
             self.manager()

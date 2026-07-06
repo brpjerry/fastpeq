@@ -24,9 +24,11 @@ export const getPreset = (name: string) => invoke<Config>("get_preset", { name }
 export const savePreset = (name: string, config: Config) =>
   invoke<void>("save_preset", { name, config });
 /** Live preview. `pregain` (dB, ≤ 0) sets the hardware device's pregain when
- *  offload is active; `null` keeps the automatic pregain. */
-export const applyLive = (config: Config, pregain: number | null = null) =>
-  invoke<void>("apply_live", { config, pregain });
+ *  offload is active; `null` keeps the automatic pregain. `commit` flashes the
+ *  device (persist) — the editor uses it, debounced, to latch a live edit on a
+ *  commit-to-apply device; ordinary live writes leave it false. */
+export const applyLive = (config: Config, pregain: number | null = null, commit = false) =>
+  invoke<void>("apply_live", { config, pregain, commit });
 
 export const getTone = () => invoke<Tone>("get_tone");
 export const setTone = (tone: Tone) => invoke<void>("set_tone", { tone });
@@ -71,6 +73,12 @@ export interface HardwareDevice {
   /** Whether the device's pregain is host-adjustable; false = it headrooms
    *  itself and the Device preamp slider is hidden. */
   user_pregain: boolean;
+  /** Whether the device only takes effect on a flash commit (the DHA15) — the
+   *  editor flashes a commit on mouse release so the change latches. */
+  commit_to_apply: boolean;
+  /** How long (ms) the editor freezes edits after a flash commit (the device's
+   *  audio drops out while it applies). */
+  commit_delay_ms: number;
 }
 /** EQ routing: offload off (`apo-only`), or which bands go to hardware. */
 export type OffloadMode =
