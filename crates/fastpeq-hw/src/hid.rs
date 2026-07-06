@@ -1,5 +1,6 @@
 //! Thin Windows USB HID layer over the `hidapi` crate: enumerate devices and open
-//! one by path. Used by the device drivers in this module.
+//! one by path. Used by the device drivers in this crate, and public so the CLI
+//! can probe unrecognized hardware (raw report I/O) when developing a new driver.
 //!
 //! `hidapi`'s context is process-global — creating a second `HidApi` while one is
 //! live errors, and dropping it invalidates every open device. So we keep a single
@@ -36,7 +37,7 @@ fn lock() -> Result<MutexGuard<'static, HidApi>, String> {
 
 /// Enumerate every HID interface/collection currently present. Refreshes first so
 /// a just-plugged device shows up.
-pub(super) fn enumerate() -> Result<Vec<DeviceInfo>, String> {
+pub fn enumerate() -> Result<Vec<DeviceInfo>, String> {
     let mut guard = lock()?;
     guard.refresh_devices().map_err(|e| e.to_string())?;
     Ok(guard
@@ -55,7 +56,7 @@ pub(super) fn enumerate() -> Result<Vec<DeviceInfo>, String> {
 /// Open the HID interface at `path` (an id from [`enumerate`]). The returned
 /// handle outlives the lock — it stays valid because the global `HidApi` is never
 /// dropped.
-pub(super) fn open(path: &str) -> Result<HidDevice, String> {
+pub fn open(path: &str) -> Result<HidDevice, String> {
     let guard = lock()?;
     let cpath = CString::new(path).map_err(|e| e.to_string())?;
     guard.open_path(&cpath).map_err(|e| e.to_string())

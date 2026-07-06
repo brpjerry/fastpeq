@@ -934,7 +934,7 @@ name = "fastpeq"
 version = "0.6.2"
 dependencies = [
  "fastpeq-core",
- "hidapi",
+ "fastpeq-hw",
  "serde",
  "serde_json",
  "tauri",
@@ -953,6 +953,16 @@ dependencies = [
  "serde",
  "serde_json",
  "winreg 0.56.0",
+]
+
+[[package]]
+name = "fastpeq-hw"
+version = "0.6.2"
+dependencies = [
+ "fastpeq-core",
+ "hidapi",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

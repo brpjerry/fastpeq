@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/fastpeq-core", "src-tauri"]
-# Bare `cargo build`/`cargo test` act on the core only, so they don't require the
-# frontend to be built first. The Tauri app is built explicitly via the Tauri CLI
-# (or `cargo build -p fastpeq`).
-default-members = ["crates/fastpeq-core"]
+members = ["crates/fastpeq-core", "crates/fastpeq-hw", "src-tauri"]
+# Bare `cargo build`/`cargo test` act on the core and hardware crates only, so
+# they don't require the frontend to be built first. The Tauri app is built
+# explicitly via the Tauri CLI (or `cargo build -p fastpeq`).
+default-members = ["crates/fastpeq-core", "crates/fastpeq-hw"]
 
 # The Tauri application crate (`src-tauri`) and the Svelte frontend are added in
 # Phase 2. Phase 1 is intentionally Node-free so the core compiles and tests with

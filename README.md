@@ -83,7 +83,8 @@ A hard split between a UI-agnostic Rust core and a thin Tauri + Svelte shell.
 | Component | Role |
 |-----------|------|
 | `crates/fastpeq-core` | Detect APO, parse/edit/serialize configs, preset store, atomic writes, hardware/software split + biquad math (`offload`) |
-| `src-tauri` | Tauri 2 commands, system tray, configurable global hotkeys, single-instance, hardware-EQ device I/O (`hardware/`) |
+| `crates/fastpeq-hw` | Hardware-EQ device drivers (USB HID) + `fastpeq-hw-cli`, a driver-development CLI that drives the same surface without the GUI |
+| `src-tauri` | Tauri 2 commands, system tray, configurable global hotkeys, single-instance |
 | `src/` | Svelte + TS UI: preset list, band editor, response curve, curve editor |
 
 The core models an APO configuration as an ordered list of lines. It only understands `Preamp:`
@@ -121,19 +122,25 @@ host-adjustable (the DHA15 computes its own headroom from the written bands; its
 ignores writes) show only the APO slider.
 
 The split logic and the device biquad math are pure and live in `fastpeq_core::offload`; the
-USB/HID I/O lives in the shell (`src-tauri/src/hardware/`), mirroring how Windows output-device
+USB/HID I/O lives in its own crate (`crates/fastpeq-hw`), mirroring how Windows output-device
 switching is isolated in `audio.rs`. Each device family is a self-contained *driver*, so adding
 hardware means adding a driver and registering it. A dedicated worker thread **rate-limits** and
 coalesces updates, since devices can't be rewritten as fast as APO's file reload; live edits go to
 volatile RAM and an applied preset is committed to the device's flash.
 
-> Supported devices: **Moondrop DHA15** (`hardware/moondrop.rs`), **Tanchjim Space Pro**
-> (`hardware/walkplay.rs` — the Walkplay-platform protocol, scheme No16, 10 bands ±10 dB), and
-> **FiiO KA17** (`hardware/fiio.rs` — FiiO's parameter protocol, 10 bands ±12 dB in the USER1–3
+The crate ships **`fastpeq-hw-cli`** (`cargo run -p fastpeq-hw -- help`), which drives every
+entry point the app uses — device detection, output-name matching, capability profiles,
+push/pull/version, and the rate-limited worker session — plus raw HID enumeration and report I/O
+for bringing up devices that don't have a driver yet. If a new device works through the CLI, it
+works in fastpeq.
+
+> Supported devices: **Moondrop DHA15** (`fastpeq-hw/src/moondrop.rs`), **Tanchjim Space Pro**
+> (`fastpeq-hw/src/walkplay.rs` — the Walkplay-platform protocol, scheme No16, 10 bands ±10 dB), and
+> **FiiO KA17** (`fastpeq-hw/src/fiio.rs` — FiiO's parameter protocol, 10 bands ±12 dB in the USER1–3
 > preset slots). All protocols are community **reverse-engineered** (no official spec). Set
-> `FASTPEQ_HW_DRYRUN=1` to log device packets without sending them. Each driver is validated
-> against real hardware by ignored tests: `cargo test -p fastpeq -- --ignored dha15` /
-> `-- --ignored space_pro` / `-- --ignored ka17` (writes to RAM only).
+> `FASTPEQ_HW_DRYRUN=1` (or pass `--dry-run` to the CLI) to log device packets without sending them.
+> Each driver is validated against real hardware by ignored tests: `cargo test -p fastpeq-hw --
+> --ignored dha15` / `-- --ignored space_pro` / `-- --ignored ka17` (writes to RAM only).
 
 ## Roadmap
 

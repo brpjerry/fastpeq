@@ -417,7 +417,7 @@ mod tests {
     }
 
     /// Real-hardware smoke test. Ignored by default (needs a connected Space Pro);
-    /// run with: `cargo test -p fastpeq -- --ignored space_pro_roundtrip --nocapture`.
+    /// run with: `cargo test -p fastpeq-hw -- --ignored space_pro_roundtrip --nocapture`.
     /// Writes to RAM only (no flash commit) and restores a flat band after.
     #[test]
     #[ignore]
@@ -471,7 +471,7 @@ mod tests {
     /// Raw-bytes probe: dump the bulk EQ read, a per-band read, then write one
     /// test band + apply and re-read, with and without slot activation — to pin
     /// down the slot byte and whether writes land. RAM only. Run with:
-    /// `cargo test -p fastpeq -- --ignored space_pro_raw_probe --nocapture`.
+    /// `cargo test -p fastpeq-hw -- --ignored space_pro_raw_probe --nocapture`.
     #[test]
     #[ignore]
     fn space_pro_raw_probe() {
@@ -542,7 +542,7 @@ mod tests {
     }
 
     /// Probe the global-gain register round-trip on real hardware. Run with:
-    /// `cargo test -p fastpeq -- --ignored space_pro_gain_probe --nocapture`.
+    /// `cargo test -p fastpeq-hw -- --ignored space_pro_gain_probe --nocapture`.
     #[test]
     #[ignore]
     fn space_pro_gain_probe() {
