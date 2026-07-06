@@ -89,7 +89,8 @@ export type OffloadMode =
   | "hardware-only";
 
 /** Current hardware-offload state. `enabled` is the global toggle; `active` means
- *  offload is actually engaged (the active output is a supported device). */
+ *  offload is actually engaged — the active output is a supported device AND the
+ *  worker holds a live connection to it (a dead/unplugged device is not active). */
 export interface HardwareStatus {
   enabled: boolean;
   active: boolean;

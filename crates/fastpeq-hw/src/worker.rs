@@ -130,6 +130,21 @@ impl HardwareSession {
         self.status.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
+    /// Block (bounded) until the worker has settled its open — `connected`, or
+    /// an error — and return that status. A status read straight after
+    /// [`start`](Self::start) would otherwise race the device open and briefly
+    /// report a healthy session as disconnected.
+    pub fn wait_ready(&self, timeout: Duration) -> RuntimeStatus {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let s = self.status();
+            if s.connected || s.error.is_some() || Instant::now() >= deadline {
+                return s;
+            }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+    }
+
     /// Signal the worker to stop and wait for it to release the device.
     pub fn stop(mut self) {
         let _ = self.tx.send(Command::Stop);

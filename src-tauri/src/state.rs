@@ -29,9 +29,10 @@ pub struct ApoStatus {
 pub struct HardwareStatus {
     /// The global toggle: offload to the active output when it supports it.
     pub enabled: bool,
-    /// Whether EQ is *currently* being offloaded (the active output is a supported
-    /// device and the toggle is on). `false` when the toggle is on but the active
-    /// output isn't a device we can offload to.
+    /// Whether EQ is *currently* being offloaded: the toggle is on, the active
+    /// output is a supported device, **and** the worker holds a live connection
+    /// to it. `false` when the output isn't offloadable — or the device
+    /// connection is down (unplugged, worker error).
     pub active: bool,
     /// Whether the one-time startup offload reconcile has finished. `false` only
     /// during the brief window at launch while the ~1 s HID enumeration (re)connects
@@ -345,7 +346,12 @@ impl AppState {
         match target {
             Some(dev) => match hardware::profile(&dev.id) {
                 Ok(profile) => {
-                    *self.hardware.lock().unwrap() = Some(HardwareSession::start(dev, profile));
+                    let session = HardwareSession::start(dev, profile);
+                    // Wait (bounded, off the UI thread) for the worker's open to
+                    // settle, so a status read right after this reconcile sees a
+                    // connected session instead of the brief open race.
+                    session.wait_ready(std::time::Duration::from_secs(3));
+                    *self.hardware.lock().unwrap() = Some(session);
                     // Push the current EQ to the new device (RAM only — following the
                     // output shouldn't wear the device's flash) and write the remainder.
                     if let Some(full) = &full
@@ -671,9 +677,11 @@ impl AppState {
                 let rt = session.status();
                 HardwareStatus {
                     enabled,
-                    // A session can briefly outlive a turn-off until the reconciler
-                    // closes it — it's only "active" while offload is still enabled.
-                    active: enabled,
+                    // "Active" needs the toggle on AND the worker actually holding
+                    // the device: a session can briefly outlive a turn-off until
+                    // the reconciler closes it, and a dead worker (device
+                    // unplugged, crash) must not read as offloading.
+                    active: enabled && rt.connected,
                     reconciled,
                     device: Some(session.descriptor.clone()),
                     version: rt.version,

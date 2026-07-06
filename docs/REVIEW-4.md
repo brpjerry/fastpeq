@@ -100,7 +100,7 @@ rest open.
   `flashed` cache). Tests: `debounced_commits_coalesce_into_one_flash`,
   `identical_recommit_never_reflashes`. PERSISTENCE.md updated.
 
-- [ ] 6. **`HardwareStatus.active` ignores whether the worker is actually
+- [x] 6. **`HardwareStatus.active` ignores whether the worker is actually
   connected.** `state.rs::hardware_status` reports `active: enabled` whenever a
   session object exists; `RuntimeStatus.connected` is never read by the GUI (only
   the CLI uses it). A session whose worker died (device unplugged, or item 2's
@@ -109,6 +109,13 @@ rest open.
   startup-connect flicker is the concern, an explicit tri-state
   (connecting / offloading / error) since `reconciled` already exists for the
   startup case.
+  **Fixed:** `active` is now `enabled && rt.connected`. The startup race is
+  closed at the source: `HardwareSession::wait_ready(timeout)` blocks
+  (bounded, off the UI thread) until the open settles, called by
+  `sync_offload` right after `start` — it also replaces the CLI `session`
+  command's hand-rolled copy of the same poll. `HardwarePanel` gained a
+  distinct "connection to <device> is down" status line for the
+  session-present-but-disconnected case.
 
 - [ ] 7. **`HardwareSession::start` swallows a thread-spawn failure.** The
   `Builder::spawn(...).ok()` leaves `join: None` and the status at its default
