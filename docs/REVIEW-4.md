@@ -198,11 +198,15 @@ rest open.
   **Fixed:** a `candidates()` iterator over a small `Candidate { line_idx,
   filter_pos, band }` struct; each caller maps out the key it needs.
 
-- [ ] 14. **App.svelte hand-rolls a debounce for hotkey registration**
+- [x] 14. **App.svelte hand-rolls a debounce for hotkey registration**
   (`hkTimer`, ~line 154) with the timer variable outliving the effect, while
   `throttle.ts` exists precisely to name this pattern. Add a `createDebounce`
   sibling (or an option on the throttle) and migrate — the module-level `let`
   and double-clear logic go away.
+  **Fixed:** `createDebounce(fn, ms)` in throttle.ts (with unit tests
+  alongside the throttle's); App's effect is now schedule + cancel-on-cleanup,
+  and the accelerators are read at fire time (fresher than the old
+  captured-at-schedule value).
 
 ## P4 — Dead code / nits
 
