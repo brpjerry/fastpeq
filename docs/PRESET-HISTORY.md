@@ -1,9 +1,15 @@
 # Preset history — versioning & undo plan
 
-**Status:** 🟨 Phases 1 (core history) and 2 (undo-delete toast) implemented;
-Phases 3–5 open. One deviation from the Phase 2 sketch: no `restorePresetView`
-was needed — the view-state clear is simply *deferred* to toast expiry (the
-toast's `onExpire`), so an undo finds the entry untouched.
+**Status:** 🟨 Phases 1 (core history), 2 (undo-delete toast), and 3
+(loudness-matched compare) implemented; 4–5 open. Deviations from the sketches:
+Phase 2 needed no `restorePresetView` — the view-state clear is simply
+*deferred* to toast expiry (the toast's `onExpire`), so an undo finds the entry
+untouched. Phase 3's session semantics got sharpened during implementation:
+the matching session **outlives individual A⇄B flips** (the Compare button
+flips sides within it) and ends on Esc, Save, or a preset (re)load — otherwise
+the louder-side offset would vanish exactly when flipping back to the edit,
+defeating the match. The label shows the *audible side's* extra offset
+(`Auto (−0.0 dB)` on the quieter side).
 
 Every preset mutation today is destructive: Save overwrites the file, Delete
 removes it (plus its category and per-preset view state) on a single

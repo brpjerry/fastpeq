@@ -11,6 +11,8 @@
     userPregain = true,
     apoPreamp = 0,
     hwPregain = 0,
+    matchArmed = false,
+    matchOffset = 0,
     onSetPreamp,
     onSetApo,
     onSetDevice,
@@ -31,6 +33,11 @@
     /** Effective APO-stage preamp / device pregain shown on the two sliders. */
     apoPreamp?: number;
     hwPregain?: number;
+    /** Compare-mode loudness matching is active: the Auto switch turns red and
+     * labels the audible side's extra offset; toggling it off opts out. */
+    matchArmed?: boolean;
+    /** Extra attenuation (dB, ≥ 0) on the currently audible side. */
+    matchOffset?: number;
     /** Report a slider/field's new value; the parent folds it into the master
      * "total" preamp (the single source of truth) and schedules the apply. */
     onSetPreamp: (v: number) => void; // master slider (off offload)
@@ -176,13 +183,16 @@
   <div class="pside">
     <Switch
       compact
-      label="Auto"
+      label={matchArmed ? `Auto (−${matchOffset.toFixed(1)} dB)` : "Auto"}
       checked={autoPreamp}
       disabled={lockedAuto}
+      accent={matchArmed ? "var(--danger)" : ""}
       onChange={onAutoPreampChange}
-      title={lockedAuto
-        ? "Auto Preamp is managed by hardware offload"
-        : "Automatically set the preamp so the EQ never clips"}
+      title={matchArmed
+        ? "Compare is volume-matching the two sides (A-weighted); the offset shown is the extra attenuation on what you're hearing. Turn off to hear raw levels."
+        : lockedAuto
+          ? "Auto Preamp is managed by hardware offload"
+          : "Automatically set the preamp so the EQ never clips"}
     />
     <div class="balance-wrap">
       <button

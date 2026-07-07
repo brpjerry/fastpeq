@@ -10,7 +10,7 @@
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
+  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, loudnessDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { getFilterShapes, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
@@ -137,19 +137,34 @@
   // on the warning never fires. Persisted with the other UI prefs.
   const autoPreamp = $derived(getAutoPreamp());
 
-  // Auto Preamp is on either by the user's toggle or because hardware offload's
-  // Min. APO preamp mode forces it. The forced state never overwrites the user's
-  // stored preference — it just overrides the effective behavior while active.
-  const effectiveAuto = $derived(forceAutoPreamp || autoPreamp);
+  // Loudness-matching compare session flags (see the A/B compare section for
+  // the machinery): armed on the first Compare entry, `matchOff` = the user's
+  // per-session opt-out via the Auto switch.
+  let matchArmed = $state(false);
+  let matchOff = $state(false);
+
+  // Auto Preamp is on by the user's toggle, because hardware offload's Min. APO
+  // preamp mode forces it, or because a loudness-matching compare session is
+  // running (both sides audition on their anti-clip preamp — unless the user
+  // opted out via the switch). None of the forced states overwrite the user's
+  // stored preference — they just override the effective behavior while active.
+  const effectiveAuto = $derived(
+    matchArmed ? forceAutoPreamp || !matchOff : forceAutoPreamp || autoPreamp,
+  );
 
   // Auto-preamp value for a band set: the lowest (≤ 0) master preamp that keeps the
   // summed boost — those bands plus the global tone overlay — from clipping.
-  function computeAutoPreamp(forBands: CurveFilter[] = bands as CurveFilter[]): number {
-    const bandsPeak = peakGainDb(forBands, 0, balance);
+  // `bal` defaults to the working edit's balance; the compare matcher passes the
+  // saved version's own.
+  function computeAutoPreamp(
+    forBands: CurveFilter[] = bands as CurveFilter[],
+    bal: number = balance,
+  ): number {
+    const bandsPeak = peakGainDb(forBands, 0, bal);
     const combinedPeak = peakGainDb(
       [...forBands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
       0,
-      balance,
+      bal,
     );
     const requiredPeak = Math.max(bandsPeak + getToneHeadroom(), combinedPeak);
     return Math.round(Math.min(0, -requiredPeak) * 10) / 10;
@@ -227,10 +242,17 @@
   // clamp isn't written back to `totalPreamp`). Auto minimizes it; Hardware Only pins
   // it flat; off offload it's simply the master preamp.
   const apoPreamp = $derived.by(() => {
-    if (hardwareOnly) return 0;
-    if (!offloadActive) return effectiveAuto ? apoAntiClip : totalPreamp;
-    if (effectiveAuto) return apoAntiClip;
-    return Math.min(round1(totalPreamp - hwPregain), apoAntiClip);
+    if (hardwareOnly) return 0; // APO is flat; matching can't trim here (device-only)
+    const base = !offloadActive
+      ? effectiveAuto
+        ? apoAntiClip
+        : totalPreamp
+      : effectiveAuto
+        ? apoAntiClip
+        : Math.min(round1(totalPreamp - hwPregain), apoAntiClip);
+    // The compare matcher's extra attenuation on the working edit (0 when the
+    // saved side is the louder one, or matching is off).
+    return round1(base - (matchInfo?.aOffset ?? 0));
   });
 
   // The combined attenuation actually applied — both stages under offload, else just
@@ -262,6 +284,19 @@
   // Auto off recomputes the split from the total: drop the device override so both
   // stages derive from `totalPreamp` again (with the even split).
   function setAutoPreamp(v: boolean) {
+    // During a matching session the switch is the opt-out: off disables both
+    // the forced Auto and the loudness offset (raw preamps on both sides), on
+    // re-engages them. The user's stored preference is never touched.
+    if (matchArmed) {
+      matchOff = !v;
+      if (comparing) {
+        const cfg = matchOff ? savedConfig : auditionConfig();
+        if (cfg) api.applyLive(cfg).catch((e) => (err = String(e)));
+      } else {
+        schedule();
+      }
+      return;
+    }
     deviceManual = null;
     saveAutoPreamp(v);
     schedule();
@@ -373,6 +408,8 @@
     loading = true;
     dirty = false;
     comparing = false; // a fresh preset is live; nothing to compare against yet
+    matchArmed = false; // ...and any matching session ends with it
+    matchOff = false;
     totalPreamp = 0;
     deviceManual = null;
     balance = 0;
@@ -476,24 +513,86 @@
   let savedConfig = $state<Config | null>(null);
   let comparing = $state(false);
 
+  // Loudness-matching session (state flags declared up top, near effectiveAuto):
+  // louder reads as "better", so an unmatched A/B is biased. Entering Compare
+  // arms the session — both sides audition on their anti-clip Auto preamp, and
+  // the louder side (by A-weighted power mean of its response) is attenuated
+  // by the difference. The session outlives individual A⇄B flips (the button)
+  // and ends on Esc, Save, or a preset (re)load; the Auto switch turns red
+  // showing the audible side's extra offset, and toggling it off opts out
+  // (raw preamps) for the session.
+
   const canCompare = $derived(dirty && savedConfig !== null);
   // Graph-ready filters/preamp/balance of the saved version — parsed exactly
   // like load(), via the shared parseConfigEq.
   const savedCurve = $derived(savedConfig ? parseConfigEq(savedConfig) : null);
-  // The faded ghost trace passed to the graphs — only while actually comparing.
-  const compareRef = $derived(comparing ? savedCurve : null);
+
+  // The matcher: each side's anti-clip preamp plus the extra attenuation the
+  // louder side needs (attenuation-only, so matching can never clip).
+  const matchInfo = $derived.by(() => {
+    if (!matchArmed || matchOff || !savedCurve) return null;
+    const aBands = effectiveBands as CurveFilter[];
+    const autoA = computeAutoPreamp(aBands);
+    const autoB = computeAutoPreamp(savedCurve.filters, savedCurve.balance);
+    const la = loudnessDb(aBands, autoA);
+    const lb = loudnessDb(savedCurve.filters, autoB);
+    const x = round1(Math.abs(la - lb));
+    return {
+      aOffset: la > lb ? x : 0,
+      bOffset: lb > la ? x : 0,
+      bPreamp: round1(autoB - (lb > la ? x : 0)),
+    };
+  });
+  // The extra offset on the side currently audible — the switch label's "−X dB".
+  const matchOffset = $derived(
+    matchInfo ? (comparing ? matchInfo.bOffset : matchInfo.aOffset) : 0,
+  );
+
+  // The faded ghost trace passed to the graphs — only while actually comparing,
+  // at the preamp it is actually auditioned with.
+  const compareRef = $derived(
+    comparing && savedCurve
+      ? matchInfo
+        ? { ...savedCurve, preamp: matchInfo.bPreamp }
+        : savedCurve
+      : null,
+  );
+
+  // The saved version as auditioned: its master preamp replaced by the matched
+  // anti-clip value (balance trims and everything else stay).
+  function auditionConfig(): Config | null {
+    if (!savedConfig || !matchInfo) return savedConfig;
+    const lines: Line[] = savedConfig.lines.filter(
+      (l) => !(l.kind === "Preamp" && l.value.channel.kind === "both"),
+    );
+    lines.unshift({
+      kind: "Preamp",
+      value: { gain: matchInfo.bPreamp, channel: { kind: "both" } },
+    });
+    return { lines };
+  }
 
   function setCompare(on: boolean) {
     if (on === comparing || (on && !canCompare)) return;
+    if (on && !matchArmed) {
+      matchArmed = true; // first entry arms the matching session
+      matchOff = false;
+    }
     comparing = on;
-    if (comparing && savedConfig) {
-      api.applyLive(savedConfig).catch((e) => (err = String(e))); // hear the saved version
+    if (comparing) {
+      const cfg = auditionConfig();
+      if (cfg) api.applyLive(cfg).catch((e) => (err = String(e))); // hear the saved version
     } else {
-      schedule(); // back to the working edit
+      schedule(); // back to the working edit (still matched while armed)
     }
   }
   const toggleCompare = () => setCompare(!comparing);
-  const exitCompare = () => setCompare(false);
+  // Esc ends the whole session, not just the B audition.
+  function exitCompare() {
+    setCompare(false);
+    matchArmed = false;
+    matchOff = false;
+  }
 
   // Ctrl+Z / Ctrl+Y undo-redo and Ctrl+` to toggle compare, skipped while a real
   // text field is focused so their native behaviour still works. (Esc is handled
@@ -661,6 +760,8 @@
       await api.savePreset(name, config);
       savedConfig = config; // the new baseline for A/B compare
       dirty = false;
+      matchArmed = false; // A and B are one again — the matching session is over
+      matchOff = false;
       err = "";
     } catch (e) {
       err = String(e);
@@ -814,6 +915,8 @@
     userPregain={hwUserPregain}
     {apoPreamp}
     {hwPregain}
+    matchArmed={matchArmed && !matchOff}
+    {matchOffset}
     onSetPreamp={setMasterPreamp}
     onSetApo={setApoPreamp}
     onSetDevice={setDevicePreamp}
