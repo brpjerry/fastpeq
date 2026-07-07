@@ -210,13 +210,18 @@ rest open.
 
 ## P4 — Dead code / nits
 
-- [ ] 15. **`Config::is_equivalent` is dead production code.** Nothing outside
+- [x] 15. **`Config::is_equivalent` is dead production code.** Nothing outside
   tests calls it (grep: only `model.rs` tests and `storage.rs` integration
   tests) — the provenance stamp replaced content-equivalence as the
   active-preset mechanism, and its 30-line doc comment still narrates the old
   design as if it were load-bearing. Either delete it (and its tests) or move
   it into the test support explicitly; keeping it public invites someone to
   build on the abandoned model.
+  **Fixed:** deleted, along with its private `raw_lines` helper and its three
+  unit tests. The two `storage.rs` uses were rewritten to say what they
+  actually meant: filters-equal for the "ambiguous by content" scene-setting,
+  and exact `assert_eq!` for the capture round-trip (which is lossless, so
+  equivalence was under-asserting).
 
 - [ ] 16. **`restoreSnap` in `Editor.svelte` (~line 450) is dead** — never
   called; the `createHistory` callback (~line 429) duplicates its body. Delete

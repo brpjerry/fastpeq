@@ -299,7 +299,9 @@ fn provenance_stamp_disambiguates_equivalent_presets() {
             Line::Filter(band),
         ],
     };
-    assert!(soft.is_equivalent(&loud)); // genuinely ambiguous by content alone
+    // Identical filters — genuinely ambiguous by content alone (they differ
+    // only in the master preamp, which Auto Preamp rewrites anyway).
+    assert!(soft.filters().eq(loud.filters()));
     manager.save_preset("Loud", &loud).unwrap(); // sorts before "Soft"
     manager.save_preset("Soft", &soft).unwrap();
 
@@ -349,7 +351,9 @@ fn saved_presets_never_carry_the_provenance_stamp() {
     manager.capture_current("Copy").unwrap();
     let copy = manager.load_preset("Copy").unwrap();
     assert_eq!(provenance::name(&copy), None);
-    assert!(copy.is_equivalent(&sample_config()));
+    // With the stamp gone (and the tone flat), the capture round-trip is
+    // lossless — the copy equals its source exactly.
+    assert_eq!(copy, sample_config());
     // Belt-and-suspenders: no marker comment survives in the file text.
     let text = std::fs::read_to_string(presets_dir.path().join("Copy.txt")).unwrap();
     assert!(!text.contains("fastpeq:preset"), "{text}");
