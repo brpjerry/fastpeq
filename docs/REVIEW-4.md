@@ -223,9 +223,11 @@ rest open.
   and exact `assert_eq!` for the capture round-trip (which is lossless, so
   equivalence was under-asserting).
 
-- [ ] 16. **`restoreSnap` in `Editor.svelte` (~line 450) is dead** — never
+- [x] 16. **`restoreSnap` in `Editor.svelte` (~line 450) is dead** — never
   called; the `createHistory` callback (~line 429) duplicates its body. Delete
   one and use the other as the callback.
+  **Fixed:** `createHistory(restoreSnap, …)` — the named function (with its
+  fresh-copies comment) is the callback; the inline duplicate is gone.
 
 - [ ] 17. **`Instant::now() - MIN_INTERVAL` (`worker.rs:139`) can panic in
   theory** (an `Instant` too close to its epoch can't be rewound). Use

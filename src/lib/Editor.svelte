@@ -413,12 +413,7 @@
   });
 
   // ── Undo / redo ────────────────────────────────────────────────────────────
-  const hist = createHistory((s) => {
-    bands = s.bands.map((b) => ({ ...b }));
-    totalPreamp = s.totalPreamp;
-    balance = s.balance;
-    schedule();
-  }, () => comparing);
+  const hist = createHistory(restoreSnap, () => comparing);
 
   const canUndo = $derived(hist.canUndo);
   const canRedo = $derived(hist.canRedo);
