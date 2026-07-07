@@ -190,6 +190,7 @@ pub fn run() {
             commands::capture_current,
             commands::delete_preset,
             commands::rename_preset,
+            commands::restore_revision,
             commands::get_preset,
             commands::save_preset,
             commands::apply_live,

@@ -613,6 +613,16 @@ impl AppState {
         Ok(())
     }
 
+    /// Restore a history revision into the preset file (undo-delete, or the
+    /// history browser's Restore).
+    pub fn restore_revision(&self, name: &str, id: &str) -> Result<(), String> {
+        self.manager()
+            .restore_revision(name, id)
+            .map_err(|e| e.to_string())?;
+        self.invalidate_active(); // the restored preset may (re)match the live stamp
+        Ok(())
+    }
+
     /// Load a preset as a structured config (for the parametric editor).
     pub fn load_config(&self, name: &str) -> Result<Config, String> {
         self.manager().load_preset(name).map_err(|e| e.to_string())

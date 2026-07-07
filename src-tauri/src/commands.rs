@@ -83,6 +83,20 @@ pub fn rename_preset(
     Ok(())
 }
 
+/// Restore a preset-history revision into the preset file — the undo-delete
+/// path, and later the history browser's Restore.
+#[tauri::command]
+pub fn restore_revision(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    id: String,
+) -> Result<(), String> {
+    state.restore_revision(&name, &id)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_preset(state: State<'_, AppState>, name: String) -> Result<Config, String> {
     state.load_config(&name)

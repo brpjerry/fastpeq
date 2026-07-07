@@ -1,7 +1,9 @@
 # Preset history — versioning & undo plan
 
-**Status:** 🟨 Phase 1 (core history + normalize + Manager wiring) implemented;
-Phases 2–5 open.
+**Status:** 🟨 Phases 1 (core history) and 2 (undo-delete toast) implemented;
+Phases 3–5 open. One deviation from the Phase 2 sketch: no `restorePresetView`
+was needed — the view-state clear is simply *deferred* to toast expiry (the
+toast's `onExpire`), so an undo finds the entry untouched.
 
 Every preset mutation today is destructive: Save overwrites the file, Delete
 removes it (plus its category and per-preset view state) on a single
