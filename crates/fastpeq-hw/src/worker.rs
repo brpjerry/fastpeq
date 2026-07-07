@@ -222,7 +222,12 @@ fn run_loop(
 ) {
     // Desired state not yet written (coalesced; a requested commit sticks).
     let mut pending: Option<(Vec<HwBand>, f64, bool)> = None;
-    let mut last_write = Instant::now() - MIN_INTERVAL;
+    // Backdated so the first push isn't throttled. `checked_sub` because an
+    // `Instant` can't be rewound past its (opaque) epoch — the panic is
+    // theoretical, but the fallback (a one-time 60 ms delay) costs nothing.
+    let mut last_write = Instant::now()
+        .checked_sub(MIN_INTERVAL)
+        .unwrap_or_else(Instant::now);
     // What the device's RAM holds (the last state actually pushed), so an
     // unchanged push can be skipped.
     let mut ram: Option<(Vec<HwBand>, f64)> = None;

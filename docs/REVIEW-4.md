@@ -229,10 +229,12 @@ rest open.
   **Fixed:** `createHistory(restoreSnap, …)` — the named function (with its
   fresh-copies comment) is the callback; the inline duplicate is gone.
 
-- [ ] 17. **`Instant::now() - MIN_INTERVAL` (`worker.rs:139`) can panic in
+- [x] 17. **`Instant::now() - MIN_INTERVAL` (`worker.rs:139`) can panic in
   theory** (an `Instant` too close to its epoch can't be rewound). Use
   `Instant::now().checked_sub(MIN_INTERVAL).unwrap_or_else(Instant::now)` or
   track "never written" with an `Option<Instant>`.
+  **Fixed:** the `checked_sub` form (worst case: a one-time 60 ms delay on
+  the first push).
 
 - [ ] 18. **`is_reserved_device` (`store.rs`) doesn't cover `CONIN$`/`CONOUT$`
   or the superscript-digit COM names (`COM¹`…`COM³`)** that newer Windows also
