@@ -9,6 +9,8 @@ use crate::apo::env::ApoInstall;
 use crate::apo::model::{Config, Line};
 use crate::apo::writer;
 use crate::category::Category;
+use crate::history::{self, PresetHistory, Revision, RevisionOp};
+use crate::offload;
 use crate::parse;
 use crate::provenance;
 use crate::store::PresetStore;
@@ -63,25 +65,87 @@ impl Manager {
     }
 
     pub fn save_preset(&self, name: &str, config: &Config) -> io::Result<()> {
-        self.store.save(name, config)
+        // Snapshot the content this save displaces — before the write, so a
+        // crash mid-save can't lose it. Skipped when nothing audible changes
+        // (the comparison is on the normalized form: preamp and no-op filters
+        // don't count).
+        let history = self.history();
+        if let Ok(prior) = self.store.load(name)
+            && history::normalize(&prior) != history::normalize(config)
+        {
+            log_history(history.record(name, &prior, RevisionOp::Save));
+        }
+        self.store.save(name, config)?;
+        // Invariant 2: the preset's new content must not linger as a revision
+        // (e.g. the user hand-edited their way back to an old snapshot).
+        log_history(history.remove_matching(name, config));
+        Ok(())
     }
 
-    pub fn delete_preset(&self, name: &str) -> io::Result<()> {
+    /// Delete a preset (and its category). Returns the id of the `delete`
+    /// history snapshot — the undo-delete handle — or `None` when there was
+    /// nothing to snapshot or history is unavailable (the UI then offers no
+    /// Undo instead of a dead button).
+    pub fn delete_preset(&self, name: &str) -> io::Result<Option<String>> {
+        let revision = match self.store.load(name) {
+            Ok(prior) => log_history(self.history().record(name, &prior, RevisionOp::Delete)),
+            Err(_) => None,
+        };
         self.store.delete(name)?;
         let mut map = self.categories()?;
         if map.remove(name).is_some() {
             self.write_categories(&map)?;
         }
-        Ok(())
+        Ok(revision)
     }
 
     pub fn rename_preset(&self, from: &str, to: &str) -> io::Result<()> {
         self.store.rename(from, to)?;
+        log_history(self.history().rename(from, to));
         let mut map = self.categories()?;
         if let Some(category) = map.remove(from) {
             map.insert(to.to_string(), category);
             self.write_categories(&map)?;
         }
+        Ok(())
+    }
+
+    // --- History: normalized snapshots of displaced preset content ------------
+
+    fn history(&self) -> PresetHistory {
+        PresetHistory::new(self.store.dir())
+    }
+
+    /// The revisions of a preset, newest first.
+    pub fn preset_history(&self, name: &str) -> io::Result<Vec<Revision>> {
+        self.history().list(name)
+    }
+
+    /// One revision, parsed — for the history browser's preview ghost.
+    pub fn load_revision(&self, name: &str, id: &str) -> io::Result<Config> {
+        self.history().load(name, id)
+    }
+
+    /// Restore a revision into the preset file. The current content (when it
+    /// differs) is snapshotted first as a `restore` revision, so a restore is
+    /// itself undoable. Snapshots carry no master preamp, so the restored
+    /// preset gets the *recomputed* anti-clip value over its bands — a
+    /// hand-set manual preamp is the one thing history doesn't preserve.
+    pub fn restore_revision(&self, name: &str, id: &str) -> io::Result<()> {
+        let history = self.history();
+        let mut restored = history.load(name, id)?;
+        if let Ok(current) = self.store.load(name)
+            && history::normalize(&current) != history::normalize(&restored)
+        {
+            log_history(history.record(name, &current, RevisionOp::Restore));
+        }
+        let preamp = (offload::auto_preamp(&restored, &Tone::default()) * 10.0).round() / 10.0;
+        if preamp != 0.0 {
+            offload::set_master_preamp(&mut restored, preamp);
+        }
+        self.store.save(name, &restored)?;
+        // The restored revision now IS the preset — invariant 2 removes it.
+        log_history(history.remove_matching(name, &restored));
         Ok(())
     }
 
@@ -331,5 +395,17 @@ impl Manager {
         let config_file = self.install.config_file();
         writer::backup_once(&config_file, &self.backup_path)?;
         writer::write_config_atomic(&config_file, config)
+    }
+}
+
+/// History is the safety net, not the payload: a failed snapshot must never
+/// fail the user's save/delete/rename — log and carry on without it.
+fn log_history<T>(result: io::Result<T>) -> Option<T> {
+    match result {
+        Ok(v) => Some(v),
+        Err(e) => {
+            eprintln!("fastpeq: preset history unavailable: {e}");
+            None
+        }
     }
 }

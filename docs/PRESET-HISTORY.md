@@ -1,6 +1,7 @@
 # Preset history — versioning & undo plan
 
-**Status:** 📋 planned — nothing implemented yet.
+**Status:** 🟨 Phase 1 (core history + normalize + Manager wiring) implemented;
+Phases 2–5 open.
 
 Every preset mutation today is destructive: Save overwrites the file, Delete
 removes it (plus its category and per-preset view state) on a single

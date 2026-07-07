@@ -58,15 +58,17 @@ pub fn capture_current(
     Ok(())
 }
 
+/// Delete a preset. Resolves to the id of its `delete` history revision (the
+/// undo handle), or `null` when nothing could be snapshotted.
 #[tauri::command]
 pub fn delete_preset(
     app: AppHandle,
     state: State<'_, AppState>,
     name: String,
-) -> Result<(), String> {
-    state.delete(&name)?;
+) -> Result<Option<String>, String> {
+    let revision = state.delete(&name)?;
     let _ = tray::refresh(&app);
-    Ok(())
+    Ok(revision)
 }
 
 #[tauri::command]

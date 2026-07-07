@@ -593,12 +593,16 @@ impl AppState {
         Ok(())
     }
 
-    pub fn delete(&self, name: &str) -> Result<(), String> {
-        self.manager()
+    /// Delete a preset. Returns the id of its `delete` history revision — the
+    /// undo handle for the frontend's toast — or `None` when nothing could be
+    /// snapshotted (no Undo is offered then).
+    pub fn delete(&self, name: &str) -> Result<Option<String>, String> {
+        let revision = self
+            .manager()
             .delete_preset(name)
             .map_err(|e| e.to_string())?;
         self.invalidate_active(); // a deleted preset can no longer be "active"
-        Ok(())
+        Ok(revision)
     }
 
     pub fn rename(&self, from: &str, to: &str) -> Result<(), String> {

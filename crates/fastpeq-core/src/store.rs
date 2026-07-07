@@ -126,7 +126,8 @@ impl PresetStore {
     }
 }
 
-fn is_safe_name(name: &str) -> bool {
+/// Shared with [`crate::history`], whose revision dirs are keyed by preset name.
+pub(crate) fn is_safe_name(name: &str) -> bool {
     // Reject path traversal, separators / drive specifiers / wildcards / illegal
     // filename chars and control chars, and a trailing dot or space (Windows
     // silently strips those, which would change the file we read/write).
