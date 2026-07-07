@@ -440,7 +440,10 @@
     const onFocus = () => {
       reload();
       loadDevices();
-      refreshOffload(); // follow an output-device change made while we were away
+      // Belt-and-braces resync: output changes are normally caught live by the
+      // backend's OS watcher (which emits fastpeq:changed), this covers anything
+      // missed while we were away.
+      refreshOffload();
     };
     window.addEventListener("focus", onFocus);
     return () => {

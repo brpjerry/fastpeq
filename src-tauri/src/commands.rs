@@ -270,8 +270,10 @@ pub fn hardware_status(state: State<'_, AppState>) -> HardwareStatus {
 
 /// Reconcile offload with the active output device, then return the fresh status.
 /// The frontend calls this on demand — window focus, opening the panel, a mode
-/// change, or after switching output — so offload follows the output without any
-/// polling. The reconcile runs off the UI thread (its HID enumeration takes ~1 s).
+/// change, or after switching output. Output changes made *outside* fastpeq are
+/// caught by the backend's OS watcher (`audio::watch_default_output`), so there
+/// is no polling anywhere; this command doubles as the belt-and-braces resync.
+/// The reconcile runs off the UI thread (its HID enumeration takes ~1 s).
 #[tauri::command]
 pub async fn refresh_hardware(app: AppHandle) -> Result<HardwareStatus, String> {
     let sync_app = app.clone();

@@ -284,7 +284,8 @@ impl AppState {
     /// device, or close it (restoring the full EQ to software) when it stops being
     /// one.
     ///
-    /// Called on demand — startup, focus, a mode change, an output switch — never on
+    /// Called on demand — startup, focus, a mode change, an output switch, and the
+    /// OS default-device notification ([`audio::watch_default_output`]) — never on
     /// a timer, and always off the UI thread (the HID enumeration takes ~1 s). It
     /// first checks a cached `(enabled, default-output-name)` key via the cheap
     /// `default_output_name()` and returns early when nothing changed, so most calls

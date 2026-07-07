@@ -35,16 +35,18 @@ mod imp {
     use super::AudioDevice;
     use core::ffi::c_void;
     use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
+    use windows::Win32::Foundation::PROPERTYKEY;
     use windows::Win32::Media::Audio::{
-        DEVICE_STATE_ACTIVE, IMMDeviceEnumerator, MMDeviceEnumerator, eCommunications, eConsole,
-        eMultimedia, eRender,
+        DEVICE_STATE, DEVICE_STATE_ACTIVE, EDataFlow, ERole, IMMDeviceEnumerator,
+        IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator, eCommunications,
+        eConsole, eMultimedia, eRender,
     };
     use windows::Win32::System::Com::{
         CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
         CoUninitialize, STGM_READ,
     };
     use windows::Win32::System::Variant::VT_LPWSTR;
-    use windows::core::{GUID, HRESULT, IUnknown, IUnknown_Vtbl, PCWSTR, PWSTR, interface};
+    use windows::core::{GUID, HRESULT, IUnknown, IUnknown_Vtbl, PCWSTR, PWSTR, implement, interface};
 
     /// CLSID of the policy-config class object that implements `IPolicyConfig`.
     const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
@@ -243,9 +245,92 @@ mod imp {
         }
     }
 
+    /// Register an OS callback that runs `on_change` whenever the default
+    /// render endpoint changes — the user switching output in Windows
+    /// settings, an unplug promoting another device, or our own
+    /// [`set_default`]. Event-driven (Core Audio's `IMMNotificationClient`),
+    /// so no polling; a burst of notifications (one per role on a normal
+    /// switch, rapid re-switches) is coalesced until 250 ms of quiet and
+    /// `on_change` runs once, on a dedicated thread. Registration failure is
+    /// logged and otherwise ignored — the focus-triggered reconcile remains
+    /// as the fallback.
+    pub fn watch_default_output(on_change: impl Fn() + Send + 'static) {
+        let spawned = std::thread::Builder::new()
+            .name("fastpeq-audio-watch".into())
+            .spawn(move || {
+                let _com = ComGuard::new();
+                let (tx, rx) = std::sync::mpsc::channel::<()>();
+                // SAFETY: COM is initialized; the enumerator and the registered
+                // client live on this thread's stack for the process lifetime
+                // (the loop below never exits), so the registration stays valid —
+                // mirroring the never-dropped HidApi.
+                let registered = unsafe {
+                    CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                        .and_then(|enumerator| {
+                            let client: IMMNotificationClient = OutputWatcher { tx }.into();
+                            enumerator
+                                .RegisterEndpointNotificationCallback(&client)
+                                .map(|()| (enumerator, client))
+                        })
+                };
+                let _keep_alive = match registered {
+                    Ok(pair) => pair,
+                    Err(e) => {
+                        eprintln!("fastpeq: default-output watch unavailable: {e}");
+                        return;
+                    }
+                };
+                while rx.recv().is_ok() {
+                    // Coalesce the burst: wait until no notification for 250 ms.
+                    while rx.recv_timeout(std::time::Duration::from_millis(250)).is_ok() {}
+                    on_change();
+                }
+            });
+        if let Err(e) = spawned {
+            eprintln!("fastpeq: could not start the default-output watch: {e}");
+        }
+    }
+
+    /// The `IMMNotificationClient` behind [`watch_default_output`]: forwards
+    /// console-render default changes to the watcher thread and ignores the
+    /// rest. Invoked by MMDevAPI on its own threads, so it only touches the
+    /// (thread-safe) channel sender.
+    #[implement(IMMNotificationClient)]
+    struct OutputWatcher {
+        tx: std::sync::mpsc::Sender<()>,
+    }
+
+    impl IMMNotificationClient_Impl for OutputWatcher_Impl {
+        fn OnDefaultDeviceChanged(
+            &self,
+            flow: EDataFlow,
+            role: ERole,
+            _id: &PCWSTR,
+        ) -> windows::core::Result<()> {
+            // Only the console render default drives offload; the other roles
+            // fire alongside it on a normal switch and would just double up.
+            if flow == eRender && role == eConsole {
+                let _ = self.tx.send(());
+            }
+            Ok(())
+        }
+        fn OnDeviceStateChanged(&self, _: &PCWSTR, _: DEVICE_STATE) -> windows::core::Result<()> {
+            Ok(())
+        }
+        fn OnDeviceAdded(&self, _: &PCWSTR) -> windows::core::Result<()> {
+            Ok(())
+        }
+        fn OnDeviceRemoved(&self, _: &PCWSTR) -> windows::core::Result<()> {
+            Ok(())
+        }
+        fn OnPropertyValueChanged(&self, _: &PCWSTR, _: &PROPERTYKEY) -> windows::core::Result<()> {
+            Ok(())
+        }
+    }
+
     #[cfg(test)]
     mod tests {
-        use super::{list_devices, set_default};
+        use super::{list_devices, set_default, watch_default_output};
 
         /// Smoke test against the real machine; ignored by default because it
         /// needs actual audio hardware. Run with:
@@ -281,11 +366,42 @@ mod imp {
                 .expect("expected a current default device");
             set_default(&current.id).expect("re-setting the current default should succeed");
         }
+
+        /// Live probe of the default-output watch: register, re-assert the
+        /// current default via IPolicyConfig, and expect the OS notification
+        /// (Windows fires OnDefaultDeviceChanged even for a same-device
+        /// re-set). Ignored by default (needs real audio hardware and mutates
+        /// the policy store). Run with:
+        /// `cargo test -p fastpeq -- --ignored default_output_change_notifies --nocapture`
+        #[test]
+        #[ignore]
+        fn default_output_change_notifies() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            watch_default_output(move || {
+                let _ = tx.send(());
+            });
+            // Give the watcher thread a beat to register the callback.
+            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            let current = list_devices()
+                .expect("enumeration should succeed")
+                .into_iter()
+                .find(|d| d.is_default)
+                .expect("expected a current default device");
+            set_default(&current.id).expect("re-setting the default should succeed");
+
+            let got = rx.recv_timeout(std::time::Duration::from_secs(3));
+            println!("watch notification after set_default: {got:?}");
+            assert!(
+                got.is_ok(),
+                "expected OnDefaultDeviceChanged to reach the watcher"
+            );
+        }
     }
 }
 
 #[cfg(windows)]
-pub use imp::{default_output_name, list_devices, set_default};
+pub use imp::{default_output_name, list_devices, set_default, watch_default_output};
 
 /// Enumerate output devices (non-Windows stub).
 #[cfg(not(windows))]
@@ -304,3 +420,7 @@ pub fn set_default(_id: &str) -> Result<(), String> {
 pub fn default_output_name() -> Option<String> {
     None
 }
+
+/// Watch for default-output changes (non-Windows stub — never fires).
+#[cfg(not(windows))]
+pub fn watch_default_output(_on_change: impl Fn() + Send + 'static) {}
