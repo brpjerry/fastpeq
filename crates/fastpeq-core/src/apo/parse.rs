@@ -48,8 +48,16 @@ pub fn parse(input: &str) -> Config {
 }
 
 /// Strip a case-insensitive prefix, returning the remainder if it matched.
+///
+/// Compared byte-wise: `prefix` is pure ASCII, so a multi-byte character in
+/// `line` can never match it, and on a match every compared byte is ASCII —
+/// which makes `prefix.len()` a character boundary and the remainder slice
+/// safe. (A naive `line[..prefix.len()]` slice panics when that index falls
+/// mid-character, e.g. on a `#中文` comment line.)
 fn strip_prefix_ci<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
-    if line.len() >= prefix.len() && line[..prefix.len()].eq_ignore_ascii_case(prefix) {
+    debug_assert!(prefix.is_ascii());
+    let head = line.as_bytes().get(..prefix.len())?;
+    if head.eq_ignore_ascii_case(prefix.as_bytes()) {
         Some(&line[prefix.len()..])
     } else {
         None
@@ -94,11 +102,7 @@ fn try_parse_filter(line: &str, channel: &Channel) -> Option<Filter> {
 
 /// Split `Filter:` or `Filter 7:` into its optional index and the remaining body.
 fn strip_filter_prefix(line: &str) -> Option<(Option<u32>, &str)> {
-    // "Filter" is 6 ASCII bytes; case-insensitive match keeps the slice valid.
-    if line.len() < 6 || !line[..6].eq_ignore_ascii_case("Filter") {
-        return None;
-    }
-    let after = line[6..].trim_start();
+    let after = strip_prefix_ci(line, "Filter")?.trim_start();
     let colon = after.find(':')?;
     let label = after[..colon].trim();
     let index = if label.is_empty() {

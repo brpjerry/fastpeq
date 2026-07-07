@@ -1,7 +1,6 @@
 <script lang="ts">
   import BandRow from "./BandRow.svelte";
-  import { bandInView, type BandView, type EngineFilter } from "./eq";
-  import type { EditorBand } from "./history.svelte";
+  import { bandInView, type BandView, type EngineFilter, type EditorBand } from "./eq";
 
   let {
     bands = $bindable(),

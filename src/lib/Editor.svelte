@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import * as api from "./api";
-  import type { Channel, Config, FilterKind, Line } from "./types";
+  import type { Channel, Config, Line } from "./types";
   import ResponseCurve from "./ResponseCurve.svelte";
   import CurveEditor from "./CurveEditor.svelte";
   import ToneGenerator from "./ToneGenerator.svelte";
@@ -10,7 +10,7 @@
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter } from "./eq";
+  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { getFilterShapes, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
@@ -102,12 +102,9 @@
           // Re-assert the live config once the split is known so the split-aware APO
           // preamp / device pregain land. On a remount (e.g. returning from Settings)
           // `hwBandIdx` starts empty, so the earlier apply wrote the whole-preset
-          // preamp onto APO instead of the split. Now that both stages derive from the
-          // split, this fires whenever offloading (not just Auto) so the APO slider and
-          // config.txt can't diverge. Direct (not schedule) so it never dirties.
-          if ((effectiveAuto || offloadActive) && !loading && !comparing) {
-            api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
-          }
+          // preamp onto APO instead of the split; this fires whenever offloading (not
+          // just Auto) so the APO slider and config.txt can't diverge.
+          reassertLive();
         })
         .catch(() => {});
     }, 120);
@@ -117,16 +114,8 @@
     };
   });
 
-  // Editable band: gain/q kept as plain numbers; nulled out per-type on save.
-  type Band = {
-    id: number;
-    enabled: boolean;
-    kind: FilterKind;
-    freq: number;
-    gain: number;
-    q: number;
-    channel: Channel;
-  };
+  // The shared editable-band shape (see EditorBand in eq.ts).
+  type Band = EditorBand;
 
   let bands = $state<Band[]>([]);
   let totalPreamp = $state(0); // master preamp — the single source of truth (see below)
@@ -405,15 +394,13 @@
     } finally {
       loading = false;
       resetHistory(); // start a fresh undo history at the loaded state
-      
+
       // Push the live config so it reflects the derived preamp. Needed whenever the
       // applied preamp isn't the preset's raw master value: Auto (the anti-clip
       // value) or offload (the split — the preset's preamp lives on APO until we
-      // re-assert the device/APO split, else the two desync). Doesn't dirty the
-      // preset. Skipped when the load failed (bands/rawLines were just reset).
-      if ((effectiveAuto || offloadActive) && !comparing && !err) {
-        api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
-      }
+      // re-assert the device/APO split, else the two desync). Skipped when the
+      // load failed (bands/rawLines were just reset).
+      if (!err) reassertLive();
     }
   }
 
@@ -426,12 +413,7 @@
   });
 
   // ── Undo / redo ────────────────────────────────────────────────────────────
-  const hist = createHistory((s) => {
-    bands = s.bands.map((b) => ({ ...b }));
-    totalPreamp = s.totalPreamp;
-    balance = s.balance;
-    schedule();
-  }, () => comparing);
+  const hist = createHistory(restoreSnap, () => comparing);
 
   const canUndo = $derived(hist.canUndo);
   const canRedo = $derived(hist.canRedo);
@@ -579,6 +561,18 @@
     applyThrottle.schedule();
   }
 
+  // Re-assert the live config outside the dirty/throttle path: direct (never
+  // dirties the preset), and only when a derived stage owns part of the output
+  // — Auto Preamp or an offload split — so config.txt tracks a recomputed
+  // preamp/pregain the user didn't edit. Shared by the on-load apply, the
+  // offload-selection refresh, and the tone-change re-apply, so their guards
+  // can't drift apart.
+  function reassertLive() {
+    if (loading || comparing) return;
+    if (!effectiveAuto && !offloadActive) return;
+    api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
+  }
+
   // Auto Preamp's master gain has to account for the global tone overlay, but the
   // tone is driven by the global controls (TonePanel / hotkeys) → `set_tone`,
   // which re-lays tone over the *existing* config and never runs the editor's
@@ -595,9 +589,7 @@
     const sig = `${tone.bass},${tone.mid},${tone.treble}`;
     const changed = sig !== lastToneSig;
     lastToneSig = sig;
-    if (changed && !loading && !comparing && (effectiveAuto || offloadActive)) {
-      api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
-    }
+    if (changed) reassertLive();
   });
 
   function changeKind(band: Band) {

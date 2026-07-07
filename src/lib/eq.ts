@@ -94,6 +94,21 @@ export interface CurveFilter {
   channel: Channel;
 }
 
+/** An editable band as the editor, its graphs, and the undo history hold it:
+ *  a [CurveFilter] whose gain/q are always plain numbers (defaulted per type
+ *  on load, nulled back out per type on save) plus a stable id for keyed
+ *  lists, drag targets, and history snapshots. The one definition — Editor,
+ *  CurveEditor, and history all alias this. */
+export type EditorBand = {
+  id: number;
+  enabled: boolean;
+  kind: FilterKind;
+  freq: number;
+  gain: number;
+  q: number;
+  channel: Channel;
+};
+
 /** Whether a channel contributes to the given side's response. */
 export const inChannel = (c: Channel, side: "left" | "right") =>
   c.kind === "both" || c.kind === side;

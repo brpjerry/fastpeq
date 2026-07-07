@@ -15,7 +15,7 @@
   import { parseRew, normalize, downsample } from "./lib/measurement";
   import { getToneStep, defaultBandCount, initPrefs } from "./lib/prefs.svelte";
   import { initTheme } from "./lib/theme";
-  import { createTrailingThrottle } from "./lib/throttle";
+  import { createDebounce, createTrailingThrottle } from "./lib/throttle";
   import { getHotkeys, accelerators, initHotkeys } from "./lib/hotkeys.svelte";
   import { OSD_EVENT, payloadForHotkey } from "./lib/osd";
 
@@ -149,18 +149,15 @@
   }
 
   // (Re)register the global hotkeys whenever the list changes, debounced so a
-  // burst of edits (typing a key) doesn't thrash OS registration. `accelerators()`
-  // reads the store, so this re-runs on every add/edit/remove/reorder.
-  let hkTimer: ReturnType<typeof setTimeout> | null = null;
+  // burst of edits (typing a key) doesn't thrash OS registration. Reading
+  // `accelerators()` at fire time picks up the final state of the burst.
+  const hotkeyRegistration = createDebounce(() => {
+    api.setHotkeys(accelerators()).then((f) => (failedHotkeys = f)).catch(() => {});
+  }, 300);
   $effect(() => {
-    const accs = accelerators();
-    if (hkTimer) clearTimeout(hkTimer);
-    hkTimer = setTimeout(() => {
-      api.setHotkeys(accs).then((f) => (failedHotkeys = f)).catch(() => {});
-    }, 300);
-    return () => {
-      if (hkTimer) clearTimeout(hkTimer);
-    };
+    void accelerators(); // dependency: re-runs on every add/edit/remove/reorder
+    hotkeyRegistration.schedule();
+    return () => hotkeyRegistration.cancel(); // also drops a pending run on unmount
   });
 
   async function reload() {
@@ -443,7 +440,10 @@
     const onFocus = () => {
       reload();
       loadDevices();
-      refreshOffload(); // follow an output-device change made while we were away
+      // Belt-and-braces resync: output changes are normally caught live by the
+      // backend's OS watcher (which emits fastpeq:changed), this covers anything
+      // missed while we were away.
+      refreshOffload();
     };
     window.addEventListener("focus", onFocus);
     return () => {

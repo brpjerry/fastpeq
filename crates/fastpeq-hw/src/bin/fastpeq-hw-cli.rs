@@ -300,15 +300,8 @@ fn cmd_session(args: &[String]) -> Result<(), String> {
     let session = HardwareSession::start(dev, profile);
 
     // Wait briefly for the worker's open + version handshake, like the app's
-    // "connecting to hardware" hint.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    while std::time::Instant::now() < deadline {
-        let s = session.status();
-        if s.connected || s.error.is_some() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+    // startup reconcile does.
+    session.wait_ready(std::time::Duration::from_secs(3));
     print_status(&session);
 
     println!("commands: push <pregain> [BAND...] | commit <pregain> [BAND...] | status | quit");

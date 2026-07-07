@@ -132,6 +132,19 @@ pub fn run() {
             // Detect Equalizer APO and prepare the preset library.
             app.manage(AppState::initialize(&handle)?);
 
+            // Follow the default output without polling: Core Audio notifies on
+            // default-device changes (the user switching output in Windows
+            // settings, an unplug promoting another device). Each notification
+            // reconciles offload on the watcher's thread and nudges the UI to
+            // re-sync; the focus-triggered reconcile stays as the fallback.
+            let watch_handle = handle.clone();
+            audio::watch_default_output(move || {
+                if let Some(state) = watch_handle.try_state::<AppState>() {
+                    state.sync_offload();
+                    tray::notify_changed(&watch_handle);
+                }
+            });
+
             // Engage offload at startup (if the active output is a supported device),
             // off the UI thread since the HID enumeration takes ~1 s. After this,
             // reconciles happen on demand via `refresh_hardware` (focus / mode change

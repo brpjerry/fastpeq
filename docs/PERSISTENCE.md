@@ -61,13 +61,14 @@ Owner: `AppState` in [state.rs](../src-tauri/src/state.rs).
 | `theme.json` | JSON object (opaque) | `{ "accent": "<id>" }` — the accent color. Owner: [theme.ts](../src/lib/theme.ts). |
 | `config.backup.txt` | APO text | The user's pre-fastpeq `config.txt`, copied **exactly once** (`backup_once`) before fastpeq's first live write, and never touched again. |
 
-The four opaque UI-state documents go through one generic command pair
-(`load_ui_state` / `save_ui_state`). The backend allowlists the keys (a key
-becomes a file name, so unknown keys are rejected outright) and checks each
-document's top-level JSON type (object vs array) so a confused caller can't
-replace a file with garbage. `hotkeys.json` predates the generic mechanism and
-keeps its dedicated `load_hotkey_bindings` / `save_hotkey_bindings` commands
-with the same guarantees.
+The opaque UI-state documents go through one generic mechanism (the
+`UI_STATE_DOCS` allowlist behind `load_ui_state` / `save_ui_state`). The
+backend allowlists the keys (a key becomes a file name, so unknown keys are
+rejected outright) and checks each document's top-level JSON type (object vs
+array) so a confused caller can't replace a file with garbage. `hotkeys.json`
+keeps its dedicated `load_hotkey_bindings` / `save_hotkey_bindings` command
+names for the frontend, but they are thin wrappers over the same allowlist
+entry.
 
 ### Frontend store lifecycle (all five stores)
 
@@ -155,8 +156,13 @@ the offloaded bands + pregain in two tiers:
 - **Flash** (`push_commit`): deliberate actions — applying a preset, changing
   the routing mode, clearing on bypass — so the EQ survives the device being
   unplugged or used with another source (the point of Hardware Only mode).
-  The worker coalesces rapid pushes but a requested commit sticks until the
-  next successful flush, so a flash save is never dropped.
+  The worker coalesces rapid pushes and a requested commit sticks until it is
+  written (even across shutdown), so a flash save is never dropped. On
+  commit-to-apply devices (the DHA15) the flash is written inline — RAM
+  writes never reach the audio there. On devices that apply RAM writes live
+  (KA17, Space Pro) the state is applied volatile immediately and the flash
+  is **debounced** (~2 s of quiet), so cycling presets from the tray wears
+  the flash once per burst, not once per press.
 
 fastpeq never *reads* state back from the device except the firmware version;
 the app's own files are always the source of truth for what to push.

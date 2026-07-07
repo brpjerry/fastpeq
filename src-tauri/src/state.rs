@@ -29,9 +29,10 @@ pub struct ApoStatus {
 pub struct HardwareStatus {
     /// The global toggle: offload to the active output when it supports it.
     pub enabled: bool,
-    /// Whether EQ is *currently* being offloaded (the active output is a supported
-    /// device and the toggle is on). `false` when the toggle is on but the active
-    /// output isn't a device we can offload to.
+    /// Whether EQ is *currently* being offloaded: the toggle is on, the active
+    /// output is a supported device, **and** the worker holds a live connection
+    /// to it. `false` when the output isn't offloadable — or the device
+    /// connection is down (unplugged, worker error).
     pub active: bool,
     /// Whether the one-time startup offload reconcile has finished. `false` only
     /// during the brief window at launch while the ~1 s HID enumeration (re)connects
@@ -68,12 +69,6 @@ fn settings_path(data_dir: &Path) -> PathBuf {
     data_dir.join("settings.json")
 }
 
-/// The hotkey bindings live in their own file (not `settings.json`, and NOT the
-/// WebView's localStorage — see [`AppState::set_hotkey_bindings`]).
-fn hotkeys_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("hotkeys.json")
-}
-
 /// Top-level JSON type a UI state document must have (see [`UI_STATE_DOCS`]).
 #[derive(Clone, Copy, PartialEq)]
 enum JsonShape {
@@ -86,10 +81,11 @@ enum JsonShape {
 /// never interprets them; the shape is the same coarse guard the hotkeys file
 /// has, so a confused caller can't replace a file with garbage.
 const UI_STATE_DOCS: &[(&str, JsonShape)] = &[
+    ("hotkeys", JsonShape::Array), // global hotkey bindings (dedicated commands)
     ("preset-view", JsonShape::Object), // per-preset editor view state + measurements
-    ("targets", JsonShape::Array),      // user-imported target curves
-    ("prefs", JsonShape::Object),       // UI preferences (filter set, tone step, …)
-    ("theme", JsonShape::Object),       // accent color
+    ("targets", JsonShape::Array), // user-imported target curves
+    ("prefs", JsonShape::Object),  // UI preferences (filter set, tone step, …)
+    ("theme", JsonShape::Object),  // accent color
 ];
 
 /// The expected shape for an allowlisted key, or an error for anything else
@@ -288,7 +284,8 @@ impl AppState {
     /// device, or close it (restoring the full EQ to software) when it stops being
     /// one.
     ///
-    /// Called on demand — startup, focus, a mode change, an output switch — never on
+    /// Called on demand — startup, focus, a mode change, an output switch, and the
+    /// OS default-device notification ([`audio::watch_default_output`]) — never on
     /// a timer, and always off the UI thread (the HID enumeration takes ~1 s). It
     /// first checks a cached `(enabled, default-output-name)` key via the cheap
     /// `default_output_name()` and returns early when nothing changed, so most calls
@@ -345,7 +342,12 @@ impl AppState {
         match target {
             Some(dev) => match hardware::profile(&dev.id) {
                 Ok(profile) => {
-                    *self.hardware.lock().unwrap() = Some(HardwareSession::start(dev, profile));
+                    let session = HardwareSession::start(dev, profile);
+                    // Wait (bounded, off the UI thread) for the worker's open to
+                    // settle, so a status read right after this reconcile sees a
+                    // connected session instead of the brief open race.
+                    session.wait_ready(std::time::Duration::from_secs(3));
+                    *self.hardware.lock().unwrap() = Some(session);
                     // Push the current EQ to the new device (RAM only — following the
                     // output shouldn't wear the device's flash) and write the remainder.
                     if let Some(full) = &full
@@ -403,22 +405,23 @@ impl AppState {
     pub fn set_presets_dir(&self, path: &str) -> Result<(), String> {
         let dir = PathBuf::from(path);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let mut settings = load_settings(&self.data_dir);
-        settings.presets_dir = Some(dir.to_string_lossy().into_owned());
-        save_settings(&self.data_dir, &settings).map_err(|e| e.to_string())?;
-        let mut inner = self.inner.lock().unwrap();
-        *inner = build_inner(&self.data_dir, dir);
-        Ok(())
+        self.update_presets_dir(Some(dir))
     }
 
     /// Reset back to the default directory under the app data folder.
     pub fn reset_presets_dir(&self) -> Result<(), String> {
+        self.update_presets_dir(None)
+    }
+
+    /// Persist the presets-dir choice (`None` = the default) and rebuild the
+    /// manager on it. Persist-first, like [`set_offload_mode`](Self::set_offload_mode):
+    /// a failed settings write leaves the running state untouched.
+    fn update_presets_dir(&self, dir: Option<PathBuf>) -> Result<(), String> {
         let mut settings = load_settings(&self.data_dir);
-        settings.presets_dir = None;
+        settings.presets_dir = dir.as_ref().map(|d| d.to_string_lossy().into_owned());
         save_settings(&self.data_dir, &settings).map_err(|e| e.to_string())?;
-        let dir = self.default_presets_dir();
-        let mut inner = self.inner.lock().unwrap();
-        *inner = build_inner(&self.data_dir, dir);
+        let dir = dir.unwrap_or_else(|| self.default_presets_dir());
+        *self.inner.lock().unwrap() = build_inner(&self.data_dir, dir);
         Ok(())
     }
 
@@ -671,9 +674,11 @@ impl AppState {
                 let rt = session.status();
                 HardwareStatus {
                     enabled,
-                    // A session can briefly outlive a turn-off until the reconciler
-                    // closes it — it's only "active" while offload is still enabled.
-                    active: enabled,
+                    // "Active" needs the toggle on AND the worker actually holding
+                    // the device: a session can briefly outlive a turn-off until
+                    // the reconciler closes it, and a dead worker (device
+                    // unplugged, crash) must not read as offloading.
+                    active: enabled && rt.connected,
                     reconciled,
                     device: Some(session.descriptor.clone()),
                     version: rt.version,
@@ -897,12 +902,25 @@ impl AppState {
         Ok(report)
     }
 
-    // --- Hotkey bindings: an opaque JSON document owned by the frontend -------
+    // --- Hotkey bindings: a UI state document with dedicated commands ---------
+    // (they predate `load_ui_state`/`save_ui_state`; the storage and validation
+    // are the shared allowlist mechanism below).
 
     /// The persisted hotkey bindings, or `None` when none have been saved yet.
     /// The backend never interprets the document — the frontend owns the schema.
     pub fn hotkey_bindings(&self) -> Option<String> {
-        std::fs::read_to_string(hotkeys_path(&self.data_dir)).ok()
+        self.ui_state("hotkeys").ok().flatten()
+    }
+
+    /// Persist the hotkey bindings atomically to `hotkeys.json`.
+    ///
+    /// Bindings used to live only in the WebView's localStorage, which sits in a
+    /// browser profile shared by the installed app and any debug build run
+    /// directly, and which an unclean shutdown can silently discard — real user
+    /// data was lost that way once. A file in the app data dir survives all of
+    /// that.
+    pub fn set_hotkey_bindings(&self, json: &str) -> Result<(), String> {
+        self.set_ui_state("hotkeys", json)
     }
 
     // --- UI state documents: opaque JSON owned by the frontend's stores -------
@@ -928,24 +946,6 @@ impl AppState {
         fastpeq_core::apo::write_text_atomic(&ui_state_path(&self.data_dir, key), json)
             .map_err(|e| e.to_string())
     }
-
-    /// Persist the hotkey bindings atomically to `hotkeys.json`.
-    ///
-    /// Bindings used to live only in the WebView's localStorage, which sits in a
-    /// browser profile shared by the installed app and any debug build run
-    /// directly, and which an unclean shutdown can silently discard — real user
-    /// data was lost that way once. A file in the app data dir survives all of
-    /// that. The document is opaque, but it must at least be a JSON array so a
-    /// confused caller can't replace the file with garbage.
-    pub fn set_hotkey_bindings(&self, json: &str) -> Result<(), String> {
-        let parsed: serde_json::Value =
-            serde_json::from_str(json).map_err(|e| format!("invalid hotkeys JSON: {e}"))?;
-        if !parsed.is_array() {
-            return Err("hotkey bindings must be a JSON array".to_string());
-        }
-        fastpeq_core::apo::write_text_atomic(&hotkeys_path(&self.data_dir), json)
-            .map_err(|e| e.to_string())
-    }
 }
 
 #[cfg(test)]
@@ -954,6 +954,7 @@ mod tests {
 
     #[test]
     fn ui_state_accepts_each_allowlisted_key_with_its_shape() {
+        assert!(validate_ui_state("hotkeys", r#"[{"id":"h1","key":"B"}]"#).is_ok());
         assert!(validate_ui_state("preset-view", r#"{"A":{"targetId":"flat"}}"#).is_ok());
         assert!(validate_ui_state("targets", r#"[{"id":"t1"}]"#).is_ok());
         assert!(validate_ui_state("prefs", r#"{"toneStep":0.5}"#).is_ok());
@@ -964,7 +965,6 @@ mod tests {
     fn ui_state_rejects_unknown_keys() {
         // The key becomes a file name in the data dir, so nothing outside the
         // allowlist (least of all a path) may pass.
-        assert!(validate_ui_state("hotkeys", "[]").is_err());
         assert!(validate_ui_state("../evil", "{}").is_err());
         assert!(validate_ui_state("settings", "{}").is_err());
     }
@@ -975,5 +975,6 @@ mod tests {
         assert!(validate_ui_state("prefs", "[]").is_err()); // object expected
         assert!(validate_ui_state("targets", "{}").is_err()); // array expected
         assert!(validate_ui_state("theme", "\"rose\"").is_err()); // bare scalar
+        assert!(validate_ui_state("hotkeys", "{}").is_err()); // array expected
     }
 }

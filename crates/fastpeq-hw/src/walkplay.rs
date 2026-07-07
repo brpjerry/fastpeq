@@ -4,10 +4,8 @@
 //! Walkplay publishes no protocol spec; this is a native Rust port of the
 //! community reverse-engineering in [`jeromeof/devicePEQ`] (`walkplayHidHandler.js`
 //! plus the `SchemeNo16` device group and the Space Pro USB capture). The wire
-//! format is a close sibling of the Moondrop protocol in [`super::moondrop`]:
-//! report id `0x4B`, 63-byte zero-padded payloads, and per-band packets carrying
-//! both packed biquads (fs = 96 kHz, scaled by 2^30, little-endian) and readable
-//! freq/Q/gain/type fields. Differences from the DHA15:
+//! codec is the Moondrop-family format in [`crate::moondrop_family`]; what's
+//! Walkplay-specific stays here:
 //!
 //! - byte 35 of a band packet is the EQ *slot* (101 = the app's "Custom" slot),
 //! - registers are applied with one apply-all command (`0x0A`) instead of a
@@ -21,27 +19,23 @@
 //! [`jeromeof/devicePEQ`]: https://github.com/jeromeof/devicePEQ
 
 use super::{DeviceInfo, HardwareEq};
-use fastpeq_core::{HardwareProfile, HwBand, HwFilterType, biquad_coeffs};
+use crate::moondrop_family as family;
+use crate::protocol::{self, FLAT_BAND, dry_run};
+use family::{CMD_READ, CMD_WRITE, REPORT_ID, REPORT_LEN};
+use fastpeq_core::{HardwareProfile, HwBand};
 use hidapi::HidDevice;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-const REPORT_ID: u8 = 0x4B;
-/// Payload length of a report (the on-wire report is this + 1 for the id).
-const REPORT_LEN: usize = 63;
-
-// Command bytes (first two payload bytes of every report).
-const CMD_WRITE: u8 = 0x01;
-const CMD_READ: u8 = 0x80;
+// Walkplay-specific command bytes (byte 1 of a report; family::CMD_EQ_BAND is
+// the shared per-band packet).
 /// Write with no args: persist registers to flash. With `(enable, slot)` args:
 /// activate an EQ slot.
 const CMD_FLASH_EQ: u8 = 0x01;
 /// The 1-byte signed global-gain register (dB) — the working pregain path.
 const CMD_GLOBAL_GAIN: u8 = 0x03;
 const CMD_RESET_EQ: u8 = 0x05;
-const CMD_PEQ_VALUES: u8 = 0x09;
 /// Apply the written coefficients to the running DSP registers (all bands).
 const CMD_TEMP_WRITE: u8 = 0x0A;
-const CMD_VER: u8 = 0x0C;
 const CMD_RESET_FLASH: u8 = 0x17;
 
 /// The writable "Custom" EQ slot every band packet is tagged with.
@@ -51,19 +45,9 @@ const CUSTOM_SLOT: u8 = 101;
 /// register only carries what's needed beyond it.
 const GAIN_BUFFER_DB: f64 = -5.0;
 
-// Device filter-type codes (same family as Moondrop's).
-const TYPE_PK: u8 = 2;
-const TYPE_LSQ: u8 = 1;
-const TYPE_HSQ: u8 = 3;
-
-/// Biquad coefficient fixed-point scale (2^30).
-const COEFF_SCALE: f64 = 1_073_741_824.0;
-
 /// Gap between consecutive reports within one push — the reference tool waits
 /// 20 ms between band writes so the device's MCU keeps up.
 const INTER_PACKET: Duration = Duration::from_millis(20);
-/// How long to wait for a device reply to a read command.
-const READ_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// Recognize a Walkplay device this driver can drive. Matches the Tanchjim
 /// Space Pro by vendor id + product string (the connected "AT" hardware revision
@@ -141,9 +125,9 @@ impl HardwareEq for WalkplayDevice {
         self.drain_input();
         let mut bands = Vec::with_capacity(self.profile.max_filters);
         for i in 0..self.profile.max_filters {
-            self.send(&[CMD_READ, CMD_PEQ_VALUES, 0x00, 0x00, i as u8, 0x00])?;
-            let p = self.read_reply(CMD_READ, CMD_PEQ_VALUES)?;
-            bands.push(decode_band(&p));
+            self.send(&[CMD_READ, family::CMD_EQ_BAND, 0x00, 0x00, i as u8, 0x00])?;
+            let p = self.read_reply(CMD_READ, family::CMD_EQ_BAND)?;
+            bands.push(family::decode_band(&p));
         }
         Ok(bands)
     }
@@ -153,9 +137,9 @@ impl HardwareEq for WalkplayDevice {
             return Ok("dry-run".to_string());
         }
         self.drain_input();
-        self.send(&[CMD_READ, CMD_VER, 0x00])?;
-        let p = self.read_reply(CMD_READ, CMD_VER)?;
-        Ok(decode_version(&p))
+        self.send(&[CMD_READ, family::CMD_VER, 0x00])?;
+        let p = self.read_reply(CMD_READ, family::CMD_VER)?;
+        Ok(family::decode_version(&p))
     }
 }
 
@@ -169,9 +153,9 @@ impl WalkplayDevice {
             return Ok(());
         }
         self.drain_input();
-        self.send(&[CMD_READ, CMD_PEQ_VALUES, 0x00])?;
+        self.send(&[CMD_READ, family::CMD_EQ_BAND, 0x00])?;
         let active = self
-            .read_reply(CMD_READ, CMD_PEQ_VALUES)
+            .read_reply(CMD_READ, family::CMD_EQ_BAND)
             .ok()
             .and_then(|p| p.get(35).copied());
         if active != Some(CUSTOM_SLOT) {
@@ -182,96 +166,33 @@ impl WalkplayDevice {
         Ok(())
     }
 
-    /// Discard any queued input reports. The bulk EQ read (`0x80 0x09` with no
-    /// band index) streams one report per band; whoever consumed only the first
+    /// Discard queued input reports. The bulk EQ read (`0x80 0x09` with no band
+    /// index) streams one report per band; whoever consumed only the first
     /// leaves the rest queued, and a later read would match those stale reports
     /// instead of its own reply.
     fn drain_input(&self) {
-        let mut buf = [0u8; 1 + REPORT_LEN];
-        while matches!(self.device.read_timeout(&mut buf, 0), Ok(n) if n > 0) {}
+        protocol::drain_input(&self.device, REPORT_LEN);
     }
 
-    /// Send one report (`payload` is zero-padded to the report length and prefixed
-    /// with the report id). Honors the dry-run guard and paces consecutive packets.
     fn send(&self, payload: &[u8]) -> Result<(), String> {
-        let mut buf = [0u8; 1 + REPORT_LEN];
-        buf[0] = REPORT_ID;
-        buf[1..1 + payload.len()].copy_from_slice(payload);
-        if dry_run() {
-            eprintln!(
-                "[hw dry-run] walkplay send {:02x?}",
-                &buf[..1 + payload.len()]
-            );
-            return Ok(());
-        }
-        self.device.write(&buf).map_err(|e| e.to_string())?;
-        std::thread::sleep(INTER_PACKET);
-        Ok(())
+        protocol::send_report(
+            &self.device,
+            "walkplay",
+            REPORT_ID,
+            REPORT_LEN,
+            payload,
+            INTER_PACKET,
+        )
     }
 
-    /// Read input reports until one whose first two payload bytes match
-    /// `(c0, c1)`, or time out. The HID report id, if present, is stripped so the
-    /// payload indices match the reference decoder.
     fn read_reply(&self, c0: u8, c1: u8) -> Result<Vec<u8>, String> {
-        let mut buf = [0u8; 1 + REPORT_LEN];
-        let deadline = Instant::now() + READ_TIMEOUT;
-        while Instant::now() < deadline {
-            let n = self
-                .device
-                .read_timeout(&mut buf, 200)
-                .map_err(|e| e.to_string())?;
-            if n == 0 {
-                continue;
-            }
-            let payload = if buf[0] == REPORT_ID {
-                &buf[1..n]
-            } else {
-                &buf[..n]
-            };
-            if payload.len() > 1 && payload[0] == c0 && payload[1] == c1 {
-                return Ok(payload.to_vec());
-            }
-        }
-        Err("Timed out waiting for a device reply".to_string())
+        family::read_reply(&self.device, c0, c1)
     }
 }
 
-/// A flat band used to clear unused device slots.
-const FLAT_BAND: HwBand = HwBand {
-    kind: HwFilterType::Peak,
-    freq: 1000.0,
-    gain: 0.0,
-    q: 1.0,
-};
-
-fn type_byte(kind: HwFilterType) -> u8 {
-    match kind {
-        HwFilterType::Peak => TYPE_PK,
-        HwFilterType::LowShelf => TYPE_LSQ,
-        HwFilterType::HighShelf => TYPE_HSQ,
-    }
-}
-
-/// Build the 63-byte EQ-write payload for one band slot. Identical layout to the
-/// Moondrop packet except byte 35 carries the EQ slot the band belongs to.
+/// The family band packet, tagged with the Walkplay Custom slot.
 fn write_packet(index: u8, band: &HwBand, fs: f64) -> Vec<u8> {
-    let mut p = vec![0u8; REPORT_LEN];
-    p[0] = CMD_WRITE;
-    p[1] = CMD_PEQ_VALUES;
-    p[2] = 0x18; // bLength = 24
-    p[4] = index;
-    // Packed biquad: [b0, b1, b2, -a1, -a2] (the chip's feedback-negated form),
-    // each round(c * 2^30) little-endian, at bytes 7..27.
-    let [b0, b1, b2, a1, a2] = biquad_coeffs(band.kind, band.freq, band.gain, band.q, fs);
-    for (i, c) in [b0, b1, b2, -a1, -a2].into_iter().enumerate() {
-        p[7 + i * 4..11 + i * 4].copy_from_slice(&coeff_bytes(c));
-    }
-    p[27..29].copy_from_slice(&le16(band.freq.round() as i64));
-    p[29..31].copy_from_slice(&le16((band.q * 256.0).round() as i64));
-    p[31..33].copy_from_slice(&le16((band.gain * 256.0).round() as i64));
-    p[33] = type_byte(band.kind);
-    p[35] = CUSTOM_SLOT;
-    p
+    family::write_packet(index, band, fs, CUSTOM_SLOT)
 }
 
 /// Build the apply-all payload that loads the written coefficients into the
@@ -288,63 +209,10 @@ fn global_gain_packet(pregain: f64) -> Vec<u8> {
     vec![CMD_WRITE, CMD_GLOBAL_GAIN, 0x02, 0x00, reg as u8]
 }
 
-/// One biquad coefficient as 4 little-endian bytes: `round(c * 2^30)` kept to its
-/// low 32 bits, mirroring the reference JS encoder's 32-bit wrap.
-fn coeff_bytes(c: f64) -> [u8; 4] {
-    let low32 = (c * COEFF_SCALE).round().rem_euclid(4_294_967_296.0) as u32;
-    low32.to_le_bytes()
-}
-
-/// A signed 16-bit little-endian value (two's-complement low 16 bits).
-fn le16(v: i64) -> [u8; 2] {
-    (v.rem_euclid(65_536) as u16).to_le_bytes()
-}
-
-/// Decode the version reply: ASCII starting at payload byte 3 (the Space Pro
-/// capture shows `"1.0"`). Falls back to the raw numeric form if not text.
-fn decode_version(p: &[u8]) -> String {
-    let text: String = p[3..]
-        .iter()
-        .take_while(|&&b| b != 0)
-        .map(|&b| b as char)
-        .filter(|c| c.is_ascii_graphic() || *c == ' ')
-        .collect();
-    let text = text.trim().to_string();
-    if text.is_empty() {
-        format!("{}.{}.{}", p[3], p[4], p[5])
-    } else {
-        text
-    }
-}
-
-/// Decode a band from a read reply (inverse of [`write_packet`]'s readable fields).
-fn decode_band(p: &[u8]) -> HwBand {
-    let read_i16 = |lo: usize| i16::from_le_bytes([p[lo], p[lo + 1]]) as f64;
-    let freq = u16::from_le_bytes([p[27], p[28]]) as f64;
-    let q = read_i16(29) / 256.0;
-    let gain = read_i16(31) / 256.0;
-    let kind = match p.get(33) {
-        Some(&TYPE_LSQ) => HwFilterType::LowShelf,
-        Some(&TYPE_HSQ) => HwFilterType::HighShelf,
-        _ => HwFilterType::Peak,
-    };
-    HwBand {
-        kind,
-        freq,
-        gain,
-        q,
-    }
-}
-
-/// Whether `FASTPEQ_HW_DRYRUN` is set — log packets instead of writing, for safe
-/// first-contact debugging with an unverified protocol.
-fn dry_run() -> bool {
-    std::env::var_os("FASTPEQ_HW_DRYRUN").is_some_and(|v| !v.is_empty())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fastpeq_core::HwFilterType;
 
     #[test]
     fn write_packet_layout_matches_reference() {
@@ -357,13 +225,13 @@ mod tests {
         let p = write_packet(3, &band, 96_000.0);
         assert_eq!(p.len(), REPORT_LEN);
         assert_eq!(p[0], CMD_WRITE);
-        assert_eq!(p[1], CMD_PEQ_VALUES);
+        assert_eq!(p[1], family::CMD_EQ_BAND);
         assert_eq!(p[2], 0x18);
         assert_eq!(p[4], 3); // band index
         assert_eq!(u16::from_le_bytes([p[27], p[28]]), 1000); // freq
         assert_eq!(u16::from_le_bytes([p[29], p[30]]), 256); // Q * 256
         assert_eq!(i16::from_le_bytes([p[31], p[32]]), 6 * 256); // gain * 256
-        assert_eq!(p[33], TYPE_PK);
+        assert_eq!(p[33], 2); // TYPE_PK
         assert_eq!(p[35], CUSTOM_SLOT); // slot tag — differs from the DHA15's 7
     }
 
@@ -375,22 +243,6 @@ mod tests {
         assert_eq!(global_gain_packet(-7.0), vec![0x01, 0x03, 0x02, 0x00, 0xFE]);
         // Never positive, even for a (nonsensical) boosted request.
         assert_eq!(global_gain_packet(2.0)[4], 0);
-    }
-
-    #[test]
-    fn decode_is_inverse_of_encode_readable_fields() {
-        let band = HwBand {
-            kind: HwFilterType::HighShelf,
-            freq: 8000.0,
-            gain: -3.5,
-            q: 0.7,
-        };
-        let p = write_packet(0, &band, 96_000.0);
-        let back = decode_band(&p);
-        assert_eq!(back.kind, HwFilterType::HighShelf);
-        assert_eq!(back.freq, 8000.0);
-        assert!((back.gain - (-3.5)).abs() < 0.01);
-        assert!((back.q - 0.7).abs() < 0.01);
     }
 
     #[test]
@@ -491,12 +343,18 @@ mod tests {
             Err(e) => println!("{label}: no reply ({e})"),
         };
 
-        dev.send(&[CMD_READ, CMD_PEQ_VALUES, 0x00]).unwrap();
-        dump("bulk EQ read", &dev.read_reply(CMD_READ, CMD_PEQ_VALUES));
+        dev.send(&[CMD_READ, family::CMD_EQ_BAND, 0x00]).unwrap();
+        dump(
+            "bulk EQ read",
+            &dev.read_reply(CMD_READ, family::CMD_EQ_BAND),
+        );
 
-        dev.send(&[CMD_READ, CMD_PEQ_VALUES, 0x00, 0x00, 0, 0x00])
+        dev.send(&[CMD_READ, family::CMD_EQ_BAND, 0x00, 0x00, 0, 0x00])
             .unwrap();
-        dump("band 0 before", &dev.read_reply(CMD_READ, CMD_PEQ_VALUES));
+        dump(
+            "band 0 before",
+            &dev.read_reply(CMD_READ, family::CMD_EQ_BAND),
+        );
 
         // Write a distinctive band into slot index 0 and apply.
         let band = HwBand {
@@ -509,11 +367,11 @@ mod tests {
         dev.send(&apply_packet()).unwrap();
         std::thread::sleep(Duration::from_millis(200));
 
-        dev.send(&[CMD_READ, CMD_PEQ_VALUES, 0x00, 0x00, 0, 0x00])
+        dev.send(&[CMD_READ, family::CMD_EQ_BAND, 0x00, 0x00, 0, 0x00])
             .unwrap();
         dump(
             "band 0 after write+apply",
-            &dev.read_reply(CMD_READ, CMD_PEQ_VALUES),
+            &dev.read_reply(CMD_READ, family::CMD_EQ_BAND),
         );
 
         // Try activating the Custom slot, rewrite, re-read.
@@ -524,16 +382,16 @@ mod tests {
         dev.send(&apply_packet()).unwrap();
         std::thread::sleep(Duration::from_millis(200));
 
-        dev.send(&[CMD_READ, CMD_PEQ_VALUES, 0x00, 0x00, 0, 0x00])
+        dev.send(&[CMD_READ, family::CMD_EQ_BAND, 0x00, 0x00, 0, 0x00])
             .unwrap();
         dump(
             "band 0 after activate(101)+write+apply",
-            &dev.read_reply(CMD_READ, CMD_PEQ_VALUES),
+            &dev.read_reply(CMD_READ, family::CMD_EQ_BAND),
         );
-        dev.send(&[CMD_READ, CMD_PEQ_VALUES, 0x00]).unwrap();
+        dev.send(&[CMD_READ, family::CMD_EQ_BAND, 0x00]).unwrap();
         dump(
             "bulk EQ read after activate",
-            &dev.read_reply(CMD_READ, CMD_PEQ_VALUES),
+            &dev.read_reply(CMD_READ, family::CMD_EQ_BAND),
         );
 
         // Restore a flat band 0 (leaves the device audibly unchanged at 0 dB).
@@ -576,8 +434,8 @@ mod tests {
         };
 
         // Also show the current slot (payload byte 35 of the bulk EQ read).
-        dev.send(&[CMD_READ, CMD_PEQ_VALUES, 0x00]).unwrap();
-        match dev.read_reply(CMD_READ, CMD_PEQ_VALUES) {
+        dev.send(&[CMD_READ, family::CMD_EQ_BAND, 0x00]).unwrap();
+        match dev.read_reply(CMD_READ, family::CMD_EQ_BAND) {
             Ok(p) => println!("current slot (byte 35): {:?}", p.get(35)),
             Err(e) => println!("bulk EQ read: no reply ({e})"),
         }
