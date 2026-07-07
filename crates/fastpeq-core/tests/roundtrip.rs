@@ -196,7 +196,13 @@ fn fractional_values_round_trip_exactly() {
 /// mid-character. They aren't valid directives, so they round-trip as Raw.
 #[test]
 fn non_ascii_lines_are_preserved_not_panicked_on() {
-    for line in ["#中文注释", "Prea😀 x", "Chan😀 y", "Filtre… métal", "Préamp: -3 dB"] {
+    for line in [
+        "#中文注释",
+        "Prea😀 x",
+        "Chan😀 y",
+        "Filtre… métal",
+        "Préamp: -3 dB",
+    ] {
         let config = parse(line);
         assert!(
             matches!(&config.lines[..], [Line::Raw(raw)] if raw == line),

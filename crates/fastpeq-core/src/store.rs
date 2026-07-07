@@ -150,7 +150,10 @@ fn is_safe_name(name: &str) -> bool {
 /// newer Windows also reserves (COM0/LPT0 are not reserved).
 fn is_reserved_device(stem: &str) -> bool {
     let s = stem.trim().to_ascii_uppercase();
-    if matches!(s.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
+    if matches!(
+        s.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
         return true;
     }
     let Some(unit) = s.strip_prefix("COM").or_else(|| s.strip_prefix("LPT")) else {

@@ -385,7 +385,10 @@ mod tests {
 
     impl HardwareEq for MockDev {
         fn push(&mut self, bands: &[HwBand], pregain: f64, commit: bool) -> Result<(), String> {
-            self.0.lock().unwrap().push((bands.to_vec(), pregain, commit));
+            self.0
+                .lock()
+                .unwrap()
+                .push((bands.to_vec(), pregain, commit));
             Ok(())
         }
         fn pull(&mut self) -> Result<Vec<HwBand>, String> {
@@ -467,7 +470,10 @@ mod tests {
             CommitPolicy::Debounced(FLASH_DEBOUNCE),
         );
 
-        assert_eq!(log.lock().unwrap().last(), Some(&(vec![band()], -3.0, true)));
+        assert_eq!(
+            log.lock().unwrap().last(),
+            Some(&(vec![band()], -3.0, true))
+        );
     }
 
     /// Shutdown never invents a flash write: volatile-only traffic stays volatile.
@@ -478,10 +484,7 @@ mod tests {
         let (mut dev, log) = MockDev::new();
         for gain in [1.0, 2.0] {
             tx.send(Command::Push {
-                bands: vec![HwBand {
-                    gain,
-                    ..band()
-                }],
+                bands: vec![HwBand { gain, ..band() }],
                 pregain: 0.0,
                 commit: false,
             })
@@ -535,11 +538,22 @@ mod tests {
         assert_eq!(flashes.len(), 1, "one flash per burst, got {pushes:?}");
         assert_eq!(
             flashes[0],
-            &(vec![HwBand { gain: 3.0, ..band() }], -3.0, true),
+            &(
+                vec![HwBand {
+                    gain: 3.0,
+                    ..band()
+                }],
+                -3.0,
+                true
+            ),
             "the flash must persist the final state"
         );
         // Every state change before the flash was applied volatile.
-        assert!(pushes.iter().any(|(b, _, commit)| !commit && b[0].gain == 3.0));
+        assert!(
+            pushes
+                .iter()
+                .any(|(b, _, commit)| !commit && b[0].gain == 3.0)
+        );
     }
 
     /// Re-committing state the flash already holds (re-clicking the active

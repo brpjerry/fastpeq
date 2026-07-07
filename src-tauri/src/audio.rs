@@ -46,7 +46,9 @@ mod imp {
         CoUninitialize, STGM_READ,
     };
     use windows::Win32::System::Variant::VT_LPWSTR;
-    use windows::core::{GUID, HRESULT, IUnknown, IUnknown_Vtbl, PCWSTR, PWSTR, implement, interface};
+    use windows::core::{
+        GUID, HRESULT, IUnknown, IUnknown_Vtbl, PCWSTR, PWSTR, implement, interface,
+    };
 
     /// CLSID of the policy-config class object that implements `IPolicyConfig`.
     const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
@@ -265,13 +267,17 @@ mod imp {
                 // (the loop below never exits), so the registration stays valid —
                 // mirroring the never-dropped HidApi.
                 let registered = unsafe {
-                    CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                        .and_then(|enumerator| {
-                            let client: IMMNotificationClient = OutputWatcher { tx }.into();
-                            enumerator
-                                .RegisterEndpointNotificationCallback(&client)
-                                .map(|()| (enumerator, client))
-                        })
+                    CoCreateInstance::<_, IMMDeviceEnumerator>(
+                        &MMDeviceEnumerator,
+                        None,
+                        CLSCTX_ALL,
+                    )
+                    .and_then(|enumerator| {
+                        let client: IMMNotificationClient = OutputWatcher { tx }.into();
+                        enumerator
+                            .RegisterEndpointNotificationCallback(&client)
+                            .map(|()| (enumerator, client))
+                    })
                 };
                 let _keep_alive = match registered {
                     Ok(pair) => pair,
@@ -282,7 +288,10 @@ mod imp {
                 };
                 while rx.recv().is_ok() {
                     // Coalesce the burst: wait until no notification for 250 ms.
-                    while rx.recv_timeout(std::time::Duration::from_millis(250)).is_ok() {}
+                    while rx
+                        .recv_timeout(std::time::Duration::from_millis(250))
+                        .is_ok()
+                    {}
                     on_change();
                 }
             });

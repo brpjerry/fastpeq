@@ -48,7 +48,6 @@ impl Config {
             _ => None,
         })
     }
-
 }
 
 /// A single line of an APO configuration.
@@ -239,5 +238,4 @@ mod tests {
         let back: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(back, config);
     }
-
 }

@@ -81,11 +81,11 @@ enum JsonShape {
 /// never interprets them; the shape is the same coarse guard the hotkeys file
 /// has, so a confused caller can't replace a file with garbage.
 const UI_STATE_DOCS: &[(&str, JsonShape)] = &[
-    ("hotkeys", JsonShape::Array),      // global hotkey bindings (dedicated commands)
+    ("hotkeys", JsonShape::Array), // global hotkey bindings (dedicated commands)
     ("preset-view", JsonShape::Object), // per-preset editor view state + measurements
-    ("targets", JsonShape::Array),      // user-imported target curves
-    ("prefs", JsonShape::Object),       // UI preferences (filter set, tone step, …)
-    ("theme", JsonShape::Object),       // accent color
+    ("targets", JsonShape::Array), // user-imported target curves
+    ("prefs", JsonShape::Object),  // UI preferences (filter set, tone step, …)
+    ("theme", JsonShape::Object),  // accent color
 ];
 
 /// The expected shape for an allowlisted key, or an error for anything else
@@ -946,7 +946,6 @@ impl AppState {
         fastpeq_core::apo::write_text_atomic(&ui_state_path(&self.data_dir, key), json)
             .map_err(|e| e.to_string())
     }
-
 }
 
 #[cfg(test)]
