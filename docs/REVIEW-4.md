@@ -6,8 +6,8 @@ clean, svelte-check clean, 224 frontend + all Rust tests green, no TODO/FIXME
 markers. The P1 items below were verified against the real code (item 1 with a
 reproducing test), not just read off the page.
 
-**Status:** 🟨 P1 items (1–3) fixed; item 4 moved to `PRESET-HISTORY.md`; the
-rest open.
+**Status:** ✅ All items worked through — 1–3 and 5–18 fixed; item 4 moved to
+`PRESET-HISTORY.md` (undo-delete ships with preset versioning).
 
 ---
 
