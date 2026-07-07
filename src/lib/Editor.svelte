@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import * as api from "./api";
-  import type { Channel, Config, FilterKind, Line } from "./types";
+  import type { Channel, Config, Line } from "./types";
   import ResponseCurve from "./ResponseCurve.svelte";
   import CurveEditor from "./CurveEditor.svelte";
   import ToneGenerator from "./ToneGenerator.svelte";
@@ -10,7 +10,7 @@
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter } from "./eq";
+  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { getFilterShapes, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
@@ -114,16 +114,8 @@
     };
   });
 
-  // Editable band: gain/q kept as plain numbers; nulled out per-type on save.
-  type Band = {
-    id: number;
-    enabled: boolean;
-    kind: FilterKind;
-    freq: number;
-    gain: number;
-    q: number;
-    channel: Channel;
-  };
+  // The shared editable-band shape (see EditorBand in eq.ts).
+  type Band = EditorBand;
 
   let bands = $state<Band[]>([]);
   let totalPreamp = $state(0); // master preamp — the single source of truth (see below)

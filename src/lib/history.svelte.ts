@@ -1,14 +1,4 @@
-import type { Channel, FilterKind } from "./types";
-
-export type EditorBand = {
-  id: number;
-  enabled: boolean;
-  kind: FilterKind;
-  freq: number;
-  gain: number;
-  q: number;
-  channel: Channel;
-};
+import type { EditorBand } from "./eq";
 
 export type Snapshot = {
   key: string;

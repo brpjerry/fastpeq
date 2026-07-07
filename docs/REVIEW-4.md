@@ -165,10 +165,14 @@ rest open.
   guard; the three sites call it (load additionally gates on `!err`, its
   one genuine difference).
 
-- [ ] 10. **The editor band type is declared three times.** `type Band` in
+- [x] 10. **The editor band type is declared three times.** `type Band` in
   `Editor.svelte`, an identical `type Band` in `CurveEditor.svelte`, and
   `EditorBand` in `history.svelte.ts`. Export one (`EditorBand` already lives
   in the one plain-TS module of the three) and import it everywhere.
+  **Fixed:** one `EditorBand` — placed in `eq.ts` (the leaf module next to
+  `CurveFilter`) rather than history, so the graphs don't import types from
+  an undo module; Editor/CurveEditor alias it as `Band`, FilterList and
+  history import it, and the now-unused `FilterKind` imports were dropped.
 
 - [ ] 11. **`set_hotkey_bindings` re-implements the UI-state validation it sits
   next to.** `hotkeys.json` is exactly a UI-state document with `JsonShape::
