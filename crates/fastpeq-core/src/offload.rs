@@ -165,17 +165,9 @@ pub struct Split {
 pub fn split(config: &Config, profile: &HardwareProfile, mode: OffloadMode) -> Split {
     let fs = profile.sample_rate;
 
-    // Offload candidates with their source line index, in document order.
-    let candidates: Vec<(usize, HwBand)> = config
-        .lines
-        .iter()
-        .enumerate()
-        .filter_map(|(i, line)| match line {
-            Line::Filter(f) if f.enabled && f.channel == Channel::Both => {
-                offload_band(f, profile).map(|band| (i, band))
-            }
-            _ => None,
-        })
+    // Offload candidates keyed by their source line index.
+    let candidates: Vec<(usize, HwBand)> = candidates(config, profile)
+        .map(|c| (c.line_idx, c.band))
         .collect();
 
     let chosen = select(&candidates, profile.max_filters, fs, mode);
@@ -221,23 +213,51 @@ pub fn selected_filter_positions(
 ) -> Vec<usize> {
     // Same candidates as `split`, but keyed by filter position (not line index) so
     // the result maps straight onto the editor's band rows.
-    let mut candidates: Vec<(usize, HwBand)> = Vec::new();
-    let mut filter_pos = 0usize;
-    for line in &config.lines {
-        if let Line::Filter(f) = line {
-            let pos = filter_pos;
-            filter_pos += 1;
-            if f.enabled
-                && f.channel == Channel::Both
-                && let Some(band) = offload_band(f, profile)
-            {
-                candidates.push((pos, band));
-            }
-        }
-    }
+    let candidates: Vec<(usize, HwBand)> = candidates(config, profile)
+        .map(|c| (c.filter_pos, c.band))
+        .collect();
     let mut chosen = select(&candidates, profile.max_filters, profile.sample_rate, mode);
     chosen.sort_unstable();
     chosen
+}
+
+/// One offload candidate: an enabled, both-channel band the device can
+/// represent, with both of the keys the callers need — its config line index
+/// (what [`split`] removes from the software side) and its position among all
+/// `Filter:` lines (what the editor's band rows are numbered by).
+struct Candidate {
+    line_idx: usize,
+    filter_pos: usize,
+    band: HwBand,
+}
+
+/// The offload candidates of `config`, in document order — the one place the
+/// candidacy rule lives, so [`split`] and [`selected_filter_positions`] can
+/// never disagree on which bands are eligible.
+fn candidates<'a>(
+    config: &'a Config,
+    profile: &'a HardwareProfile,
+) -> impl Iterator<Item = Candidate> + 'a {
+    config
+        .lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| match line {
+            Line::Filter(f) => Some((i, f)),
+            _ => None,
+        })
+        .enumerate()
+        .filter_map(|(filter_pos, (line_idx, f))| {
+            if f.enabled && f.channel == Channel::Both {
+                offload_band(f, profile).map(|band| Candidate {
+                    line_idx,
+                    filter_pos,
+                    band,
+                })
+            } else {
+                None
+            }
+        })
 }
 
 /// Choose which candidate line indices go to hardware (up to `max`), per `mode`.

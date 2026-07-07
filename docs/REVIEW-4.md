@@ -190,11 +190,13 @@ rest open.
   `update_presets_dir(&self, dir: Option<PathBuf>)`.
   **Fixed:** exactly that; both public methods are now two-liners over it.
 
-- [ ] 13. **`split` and `selected_filter_positions` build their candidate lists
+- [x] 13. **`split` and `selected_filter_positions` build their candidate lists
   with two hand-written loops** that must stay in sync (same
   enabled/Both/`offload_band` predicate, different keying —
   `offload.rs:169` vs `:224`). A shared iterator yielding `(line_idx,
   filter_pos, band)` lets both keep their keying while sharing the predicate.
+  **Fixed:** a `candidates()` iterator over a small `Candidate { line_idx,
+  filter_pos, band }` struct; each caller maps out the key it needs.
 
 - [ ] 14. **App.svelte hand-rolls a debounce for hotkey registration**
   (`hkTimer`, ~line 154) with the timer variable outliving the effect, while
