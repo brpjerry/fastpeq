@@ -174,12 +174,15 @@ rest open.
   an undo module; Editor/CurveEditor alias it as `Band`, FilterList and
   history import it, and the now-unused `FilterKind` imports were dropped.
 
-- [ ] 11. **`set_hotkey_bindings` re-implements the UI-state validation it sits
+- [x] 11. **`set_hotkey_bindings` re-implements the UI-state validation it sits
   next to.** `hotkeys.json` is exactly a UI-state document with `JsonShape::
   Array` (`state.rs:940` vs the `UI_STATE_DOCS` table). Add `("hotkeys",
   Array)` to the table and make `set_hotkey_bindings`/`hotkey_bindings` thin
   wrappers over `set_ui_state`/`ui_state` (keeping the command names for
   frontend compat) — deletes the ad-hoc validator and its divergent error copy.
+  **Fixed:** exactly that — `("hotkeys", Array)` in the table, both methods
+  delegate, `hotkeys_path` and the ad-hoc validator deleted; same file name
+  and equivalent error messages, so no migration. PERSISTENCE.md updated.
 
 - [ ] 12. **`set_presets_dir` / `reset_presets_dir` are the same function.**
   Both do load-settings → mutate `presets_dir` → save → `build_inner` →
