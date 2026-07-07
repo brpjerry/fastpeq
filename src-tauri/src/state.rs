@@ -404,22 +404,23 @@ impl AppState {
     pub fn set_presets_dir(&self, path: &str) -> Result<(), String> {
         let dir = PathBuf::from(path);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let mut settings = load_settings(&self.data_dir);
-        settings.presets_dir = Some(dir.to_string_lossy().into_owned());
-        save_settings(&self.data_dir, &settings).map_err(|e| e.to_string())?;
-        let mut inner = self.inner.lock().unwrap();
-        *inner = build_inner(&self.data_dir, dir);
-        Ok(())
+        self.update_presets_dir(Some(dir))
     }
 
     /// Reset back to the default directory under the app data folder.
     pub fn reset_presets_dir(&self) -> Result<(), String> {
+        self.update_presets_dir(None)
+    }
+
+    /// Persist the presets-dir choice (`None` = the default) and rebuild the
+    /// manager on it. Persist-first, like [`set_offload_mode`](Self::set_offload_mode):
+    /// a failed settings write leaves the running state untouched.
+    fn update_presets_dir(&self, dir: Option<PathBuf>) -> Result<(), String> {
         let mut settings = load_settings(&self.data_dir);
-        settings.presets_dir = None;
+        settings.presets_dir = dir.as_ref().map(|d| d.to_string_lossy().into_owned());
         save_settings(&self.data_dir, &settings).map_err(|e| e.to_string())?;
-        let dir = self.default_presets_dir();
-        let mut inner = self.inner.lock().unwrap();
-        *inner = build_inner(&self.data_dir, dir);
+        let dir = dir.unwrap_or_else(|| self.default_presets_dir());
+        *self.inner.lock().unwrap() = build_inner(&self.data_dir, dir);
         Ok(())
     }
 

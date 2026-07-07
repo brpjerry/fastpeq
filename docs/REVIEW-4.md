@@ -184,10 +184,11 @@ rest open.
   delegate, `hotkeys_path` and the ad-hoc validator deleted; same file name
   and equivalent error messages, so no migration. PERSISTENCE.md updated.
 
-- [ ] 12. **`set_presets_dir` / `reset_presets_dir` are the same function.**
+- [x] 12. **`set_presets_dir` / `reset_presets_dir` are the same function.**
   Both do load-settings → mutate `presets_dir` → save → `build_inner` →
   replace `inner` (`state.rs:403`). Fold into one
   `update_presets_dir(&self, dir: Option<PathBuf>)`.
+  **Fixed:** exactly that; both public methods are now two-liners over it.
 
 - [ ] 13. **`split` and `selected_filter_positions` build their candidate lists
   with two hand-written loops** that must stay in sync (same
