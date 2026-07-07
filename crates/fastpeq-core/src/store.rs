@@ -145,15 +145,19 @@ fn is_safe_name(name: &str) -> bool {
 }
 
 /// Whether `stem` is a Windows reserved device name (case-insensitive):
-/// CON, PRN, AUX, NUL, COM1–COM9, LPT1–LPT9.
+/// CON, PRN, AUX, NUL, the console devices CONIN$/CONOUT$, and COM/LPT
+/// followed by one digit 1–9 — including the superscript digits ¹ ² ³, which
+/// newer Windows also reserves (COM0/LPT0 are not reserved).
 fn is_reserved_device(stem: &str) -> bool {
     let s = stem.trim().to_ascii_uppercase();
-    if matches!(s.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+    if matches!(s.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
         return true;
     }
-    let b = s.as_bytes();
-    (s.starts_with("COM") || s.starts_with("LPT"))
-        && b.len() == 4
-        && b[3].is_ascii_digit()
-        && b[3] != b'0'
+    let Some(unit) = s.strip_prefix("COM").or_else(|| s.strip_prefix("LPT")) else {
+        return false;
+    };
+    matches!(
+        unit,
+        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+    )
 }

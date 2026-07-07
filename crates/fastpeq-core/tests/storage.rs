@@ -500,6 +500,9 @@ fn store_rejects_unsafe_names() {
     assert!(store.path_for("nul").is_err());
     assert!(store.path_for("COM1").is_err());
     assert!(store.path_for("LPT9.txt").is_err());
+    assert!(store.path_for("CONIN$").is_err());
+    assert!(store.path_for("conout$").is_err());
+    assert!(store.path_for("COM¹").is_err()); // superscript digits count too
     // Trailing dot / space (Windows strips these) and control chars.
     assert!(store.path_for("name.").is_err());
     assert!(store.path_for("name\u{7}").is_err());

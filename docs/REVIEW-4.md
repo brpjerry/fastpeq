@@ -236,10 +236,12 @@ rest open.
   **Fixed:** the `checked_sub` form (worst case: a one-time 60 ms delay on
   the first push).
 
-- [ ] 18. **`is_reserved_device` (`store.rs`) doesn't cover `CONIN$`/`CONOUT$`
+- [x] 18. **`is_reserved_device` (`store.rs`) doesn't cover `CONIN$`/`CONOUT$`
   or the superscript-digit COM names (`COM¹`…`COM³`)** that newer Windows also
   reserves. Genuinely obscure; note it in the comment or extend the check —
   either is fine, silence isn't.
+  **Fixed:** extended (which also replaced the byte-index digit check with a
+  str match, so the superscripts fit naturally), with test cases.
 
 ---
 
