@@ -30,6 +30,9 @@ vi.mock("./api", () => ({
   offloadSelection: vi.fn(() => Promise.resolve([])),
   loadUiState: vi.fn(() => Promise.resolve(null)),
   saveUiState: vi.fn(() => Promise.resolve()),
+  presetHistory: vi.fn(() => Promise.resolve([])),
+  getRevision: vi.fn(),
+  restoreRevision: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -703,5 +706,60 @@ describe("Editor loudness-matched compare", () => {
     await waitFor(() =>
       expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto"),
     );
+  });
+});
+
+describe("Editor history browser", () => {
+  const REV = { id: "1783300000000-save", savedAtMs: Date.now() - 2 * 60_000, op: "save" as const };
+
+  it("lists revisions, auditions one matched, and returns to the edit", async () => {
+    vi.mocked(api.presetHistory).mockResolvedValue([REV]);
+    vi.mocked(api.getRevision).mockResolvedValue(cfg(0, [[500, 6, 1]]));
+    const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    await fireEvent.click(container.querySelector(".hist-btn")!);
+    await waitFor(() => expect(document.querySelector(".hist-menu .hist-item")).toBeTruthy());
+    const item = document.querySelector(".hist-menu .hist-item")!;
+    expect(item.textContent).toContain("2 min ago");
+    expect(item.textContent).toContain("overwritten by save");
+
+    // Audition: the revision plays with an injected (matched) master preamp,
+    // the editor locks like a compare, and the badge says history.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(item);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const onB = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    const filt = onB.lines.find((l) => l.kind === "Filter");
+    expect(filt && filt.kind === "Filter" && filt.value.freq).toBe(500);
+    const pre = onB.lines.find((l) => l.kind === "Preamp" && l.value.channel.kind === "both");
+    expect(pre && pre.kind === "Preamp" && pre.value.gain).toBeLessThan(0);
+    expect(container.querySelector(".live")!.textContent).toContain("history");
+    expect(container.querySelector(".comparing")).toBeTruthy();
+
+    // Clicking the playing row again returns to the edit, dirty-free.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(document.querySelector(".hist-menu .hist-item")!);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    expect(container.querySelector(".live")!.textContent).toContain("live");
+    expect(container.querySelector<HTMLButtonElement>(".primary")!.textContent).toContain("Saved"); // not dirtied
+  });
+
+  it("Restore writes the revision back and reloads the editor", async () => {
+    vi.mocked(api.presetHistory).mockResolvedValue([REV]);
+    vi.mocked(api.getRevision).mockResolvedValue(cfg(0, [[500, 6, 1]]));
+    const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    const loadsBefore = vi.mocked(api.getPreset).mock.calls.length;
+
+    await fireEvent.click(container.querySelector(".hist-btn")!);
+    await waitFor(() => expect(document.querySelector(".hist-menu .hist-restore")).toBeTruthy());
+    await fireEvent.click(document.querySelector(".hist-menu .hist-restore")!);
+
+    await waitFor(() => expect(api.restoreRevision).toHaveBeenCalledWith("Test", REV.id));
+    // The editor reloaded the (restored) preset file...
+    await waitFor(() => expect(vi.mocked(api.getPreset).mock.calls.length).toBe(loadsBefore + 1));
+    // ...and the menu is gone.
+    expect(document.querySelector(".hist-menu .hist-item")).toBeNull();
   });
 });

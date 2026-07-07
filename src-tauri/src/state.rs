@@ -623,6 +623,20 @@ impl AppState {
         Ok(())
     }
 
+    /// A preset's history revisions, newest first (for the history browser).
+    pub fn preset_history(&self, name: &str) -> Result<Vec<fastpeq_core::Revision>, String> {
+        self.manager()
+            .preset_history(name)
+            .map_err(|e| e.to_string())
+    }
+
+    /// One revision, parsed — the history browser's preview ghost.
+    pub fn get_revision(&self, name: &str, id: &str) -> Result<Config, String> {
+        self.manager()
+            .load_revision(name, id)
+            .map_err(|e| e.to_string())
+    }
+
     /// Load a preset as a structured config (for the parametric editor).
     pub fn load_config(&self, name: &str) -> Result<Config, String> {
         self.manager().load_preset(name).map_err(|e| e.to_string())

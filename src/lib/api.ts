@@ -19,6 +19,17 @@ export const deletePreset = (name: string) => invoke<string | null>("delete_pres
 /** Restore a preset-history revision into the preset file (undo-delete). */
 export const restoreRevision = (name: string, id: string) =>
   invoke<void>("restore_revision", { name, id });
+/** What displaced a history revision's content. */
+export type RevisionOp = "save" | "delete" | "restore";
+/** One preset-history revision (normalized snapshot), newest first from the list. */
+export interface Revision {
+  id: string;
+  savedAtMs: number;
+  op: RevisionOp;
+}
+export const presetHistory = (name: string) => invoke<Revision[]>("preset_history", { name });
+export const getRevision = (name: string, id: string) =>
+  invoke<Config>("get_revision", { name, id });
 export const renamePreset = (from: string, to: string) =>
   invoke<void>("rename_preset", { from, to });
 export type Category = string; // free-form: speaker / headphone / iem / estat / earbud / …

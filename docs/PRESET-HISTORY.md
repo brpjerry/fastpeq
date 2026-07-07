@@ -1,7 +1,8 @@
 # Preset history — versioning & undo plan
 
-**Status:** 🟨 Phases 1 (core history), 2 (undo-delete toast), and 3
-(loudness-matched compare) implemented; 4–5 open. Deviations from the sketches:
+**Status:** ✅ Phases 1–4 implemented (core history, undo-delete toast,
+loudness-matched compare, history browser); Phase 5 (retention settings etc.)
+deliberately deferred until asked for. Deviations from the sketches:
 Phase 2 needed no `restorePresetView` — the view-state clear is simply
 *deferred* to toast expiry (the toast's `onExpire`), so an undo finds the entry
 untouched. Phase 3's session semantics got sharpened during implementation:

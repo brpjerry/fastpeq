@@ -97,6 +97,25 @@ pub fn restore_revision(
     Ok(())
 }
 
+/// A preset's history revisions, newest first (the history browser's list).
+#[tauri::command]
+pub fn preset_history(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Vec<fastpeq_core::Revision>, String> {
+    state.preset_history(&name)
+}
+
+/// One history revision, parsed — for the browser's preview/audition.
+#[tauri::command]
+pub fn get_revision(
+    state: State<'_, AppState>,
+    name: String,
+    id: String,
+) -> Result<Config, String> {
+    state.get_revision(&name, &id)
+}
+
 #[tauri::command]
 pub fn get_preset(state: State<'_, AppState>, name: String) -> Result<Config, String> {
     state.load_config(&name)
