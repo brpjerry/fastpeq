@@ -30,6 +30,9 @@ vi.mock("./api", () => ({
   offloadSelection: vi.fn(() => Promise.resolve([])),
   loadUiState: vi.fn(() => Promise.resolve(null)),
   saveUiState: vi.fn(() => Promise.resolve()),
+  presetHistory: vi.fn(() => Promise.resolve([])),
+  getRevision: vi.fn(),
+  restoreRevision: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -631,5 +634,132 @@ describe("Editor", () => {
     const onA = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
     expect(onA.lines.filter((l) => l.kind === "Filter").length).toBe(2);
     expect(container.querySelector(".comparing")).toBeNull();
+  });
+});
+
+describe("Editor loudness-matched compare", () => {
+  it("volume-matches the sides, shows the offset, and lets the switch opt out", async () => {
+    // Saved: a +6 dB peak at 3 kHz. The edit deletes it, so the working side
+    // (flat) is audibly LOUDER than the saved side on its anti-clip preamp.
+    const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".band .remove")!);
+    const compareBtn = container.querySelector<HTMLButtonElement>(".compare-btn")!;
+    await waitFor(() => expect(compareBtn.disabled).toBe(false));
+
+    // Enter compare: the saved side auditions on an injected anti-clip preamp
+    // (the file had none), and the session arms — red Auto switch, offset label.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(compareBtn);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const onB = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    const bPre = onB.lines.find(
+      (l) => l.kind === "Preamp" && l.value.channel.kind === "both",
+    );
+    expect(bPre && bPre.kind === "Preamp" && bPre.value.gain).toBeLessThan(0);
+    // The saved side is the quieter one — no extra offset on it.
+    expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto (−0.0 dB)");
+
+    // Flip back to the edit: it is the louder side, so it carries the extra
+    // attenuation — a negative master preamp even though the edit's is 0.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(compareBtn);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const onA = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    const aPre = onA.lines.find(
+      (l) => l.kind === "Preamp" && l.value.channel.kind === "both",
+    );
+    expect(aPre && aPre.kind === "Preamp" && aPre.value.gain).toBeLessThan(0);
+    const label = container.querySelector(".pside .sw-label")!.textContent!;
+    expect(label).toMatch(/^Auto \(−\d+\.\d dB\)$/);
+    expect(label).not.toBe("Auto (−0.0 dB)"); // a real offset on the loud side
+
+    // The switch opts out: raw preamps (the edit's true 0 dB — no preamp
+    // line), plain "Auto" label again.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(container.querySelector(".pside .switch input")!);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const raw = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(
+      raw.lines.some((l) => l.kind === "Preamp" && l.value.channel.kind === "both"),
+    ).toBe(false);
+    expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto");
+  });
+
+  it("identical-sounding sides match with a zero offset", async () => {
+    // The edit only adds a 0 dB band — audibly identical, so matching applies
+    // the same anti-clip preamp to both sides and no extra offset.
+    const { container } = renderEditor(cfg(-10, [[3000, 6, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".band-actions .add")!);
+    const compareBtn = container.querySelector<HTMLButtonElement>(".compare-btn")!;
+    await waitFor(() => expect(compareBtn.disabled).toBe(false));
+
+    await fireEvent.click(compareBtn);
+    await waitFor(() =>
+      expect(container.querySelector(".pside .sw-label")!.textContent).toBe(
+        "Auto (−0.0 dB)",
+      ),
+    );
+    // Esc exits AND disarms the session: the label returns to plain Auto.
+    await fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto"),
+    );
+  });
+});
+
+describe("Editor history browser", () => {
+  const REV = { id: "1783300000000-save", savedAtMs: Date.now() - 2 * 60_000, op: "save" as const };
+
+  it("lists revisions, auditions one matched, and returns to the edit", async () => {
+    vi.mocked(api.presetHistory).mockResolvedValue([REV]);
+    vi.mocked(api.getRevision).mockResolvedValue(cfg(0, [[500, 6, 1]]));
+    const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    await fireEvent.click(container.querySelector(".hist-btn")!);
+    await waitFor(() => expect(document.querySelector(".hist-menu .hist-item")).toBeTruthy());
+    const item = document.querySelector(".hist-menu .hist-item")!;
+    expect(item.textContent).toContain("2 min ago");
+    expect(item.textContent).toContain("overwritten by save");
+
+    // Audition: the revision plays with an injected (matched) master preamp,
+    // the editor locks like a compare, and the badge says history.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(item);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const onB = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    const filt = onB.lines.find((l) => l.kind === "Filter");
+    expect(filt && filt.kind === "Filter" && filt.value.freq).toBe(500);
+    const pre = onB.lines.find((l) => l.kind === "Preamp" && l.value.channel.kind === "both");
+    expect(pre && pre.kind === "Preamp" && pre.value.gain).toBeLessThan(0);
+    expect(container.querySelector(".live")!.textContent).toContain("history");
+    expect(container.querySelector(".comparing")).toBeTruthy();
+
+    // Clicking the playing row again returns to the edit, dirty-free.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(document.querySelector(".hist-menu .hist-item")!);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    expect(container.querySelector(".live")!.textContent).toContain("live");
+    expect(container.querySelector<HTMLButtonElement>(".primary")!.textContent).toContain("Saved"); // not dirtied
+  });
+
+  it("Restore writes the revision back and reloads the editor", async () => {
+    vi.mocked(api.presetHistory).mockResolvedValue([REV]);
+    vi.mocked(api.getRevision).mockResolvedValue(cfg(0, [[500, 6, 1]]));
+    const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    const loadsBefore = vi.mocked(api.getPreset).mock.calls.length;
+
+    await fireEvent.click(container.querySelector(".hist-btn")!);
+    await waitFor(() => expect(document.querySelector(".hist-menu .hist-restore")).toBeTruthy());
+    await fireEvent.click(document.querySelector(".hist-menu .hist-restore")!);
+
+    await waitFor(() => expect(api.restoreRevision).toHaveBeenCalledWith("Test", REV.id));
+    // The editor reloaded the (restored) preset file...
+    await waitFor(() => expect(vi.mocked(api.getPreset).mock.calls.length).toBe(loadsBefore + 1));
+    // ...and the menu is gone.
+    expect(document.querySelector(".hist-menu .hist-item")).toBeNull();
   });
 });

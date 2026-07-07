@@ -58,15 +58,17 @@ pub fn capture_current(
     Ok(())
 }
 
+/// Delete a preset. Resolves to the id of its `delete` history revision (the
+/// undo handle), or `null` when nothing could be snapshotted.
 #[tauri::command]
 pub fn delete_preset(
     app: AppHandle,
     state: State<'_, AppState>,
     name: String,
-) -> Result<(), String> {
-    state.delete(&name)?;
+) -> Result<Option<String>, String> {
+    let revision = state.delete(&name)?;
     let _ = tray::refresh(&app);
-    Ok(())
+    Ok(revision)
 }
 
 #[tauri::command]
@@ -79,6 +81,39 @@ pub fn rename_preset(
     state.rename(&from, &to)?;
     let _ = tray::refresh(&app);
     Ok(())
+}
+
+/// Restore a preset-history revision into the preset file — the undo-delete
+/// path, and later the history browser's Restore.
+#[tauri::command]
+pub fn restore_revision(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    id: String,
+) -> Result<(), String> {
+    state.restore_revision(&name, &id)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+/// A preset's history revisions, newest first (the history browser's list).
+#[tauri::command]
+pub fn preset_history(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Vec<fastpeq_core::Revision>, String> {
+    state.preset_history(&name)
+}
+
+/// One history revision, parsed — for the browser's preview/audition.
+#[tauri::command]
+pub fn get_revision(
+    state: State<'_, AppState>,
+    name: String,
+    id: String,
+) -> Result<Config, String> {
+    state.get_revision(&name, &id)
 }
 
 #[tauri::command]

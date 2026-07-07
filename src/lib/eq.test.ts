@@ -7,6 +7,8 @@ import {
   defaultQ,
   responseCurve,
   peakGainDb,
+  aWeightDb,
+  loudnessDb,
   toneFilters,
   type CurveFilter,
 } from "./eq";
@@ -83,5 +85,25 @@ describe("toneFilters", () => {
     expect(bass).toMatchObject({ kind: "LowShelfQ", freq: 105, gain: 4, enabled: true });
     expect(mid).toMatchObject({ kind: "Peak", freq: 1000, gain: 0, enabled: false });
     expect(treble).toMatchObject({ kind: "HighShelfQ", freq: 4000, gain: -2, enabled: true });
+  });
+});
+
+describe("aWeightDb / loudnessDb", () => {
+  it("matches the IEC 61672 reference points", () => {
+    expect(aWeightDb(1000)).toBeCloseTo(0, 6); // normalised exactly at 1 kHz
+    expect(aWeightDb(100)).toBeCloseTo(-19.1, 1);
+    expect(aWeightDb(10000)).toBeCloseTo(-2.5, 1);
+  });
+
+  it("tracks a preamp shift 1:1", () => {
+    expect(loudnessDb([], 0) - loudnessDb([], -3)).toBeCloseTo(3, 6);
+  });
+
+  it("hears a mid boost as louder than an equal bass boost", () => {
+    const flat = loudnessDb([], 0);
+    const bassGain = loudnessDb([peak(60, 6, 1)], 0) - flat;
+    const midGain = loudnessDb([peak(3000, 6, 1)], 0) - flat;
+    expect(midGain).toBeGreaterThan(bassGain); // A-weighting discounts the bass
+    expect(bassGain).toBeGreaterThanOrEqual(0);
   });
 });

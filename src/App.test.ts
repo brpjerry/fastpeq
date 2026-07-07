@@ -85,7 +85,8 @@ vi.mock("./lib/api", () => {
     applyPreset: ok(),
     toggleBypass: ok(),
     captureCurrent: ok(),
-    deletePreset: ok(),
+    deletePreset: vi.fn(() => Promise.resolve(null)),
+    restoreRevision: ok(),
     renamePreset: ok(),
     setCategory: ok(),
     savePreset: ok(),
@@ -562,5 +563,47 @@ describe("startup offload detection", () => {
     await waitFor(() => expect(rows(container).length).toBe(2));
     expect(queryByText(/Connecting to your hardware/)).toBeNull();
     expect(container.querySelector(".spinner")).toBeNull();
+  });
+});
+
+describe("App undo-delete", () => {
+  it("offers Undo when delete returns a revision, and restores on click", async () => {
+    withLibrary();
+    vi.mocked(api.deletePreset).mockResolvedValue("1783300512345-delete");
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await fireEvent.click(rowFor(container, "Sennheiser HD600").querySelector(".danger.icon")!);
+    await waitFor(() => expect(container.querySelector(".toast")).toBeTruthy());
+    expect(container.querySelector(".toast")!.textContent).toContain("Deleted");
+
+    const undo = container.querySelector(".toast-action")!;
+    expect(undo.textContent).toBe("Undo");
+    await fireEvent.click(undo);
+
+    await waitFor(() =>
+      expect(api.restoreRevision).toHaveBeenCalledWith("Sennheiser HD600", "1783300512345-delete"),
+    );
+    // The category captured before the delete is re-applied on undo.
+    await waitFor(() =>
+      expect(api.setCategory).toHaveBeenCalledWith("Sennheiser HD600", "headphone"),
+    );
+    await waitFor(() => expect(container.querySelector(".toast")!.textContent).toContain("Restored"));
+    // Taking the action consumed the Undo button.
+    expect(container.querySelector(".toast-action")).toBeNull();
+  });
+
+  it("shows a plain toast (no dead Undo button) when nothing was snapshotted", async () => {
+    withLibrary();
+    vi.mocked(api.deletePreset).mockResolvedValue(null);
+    vi.mocked(api.restoreRevision).mockClear(); // call counts persist across tests here
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await fireEvent.click(rowFor(container, "64 Audio U12t").querySelector(".danger.icon")!);
+    await waitFor(() => expect(container.querySelector(".toast")).toBeTruthy());
+    expect(container.querySelector(".toast")!.textContent).toContain("Deleted");
+    expect(container.querySelector(".toast-action")).toBeNull();
+    expect(api.restoreRevision).not.toHaveBeenCalled();
   });
 });
