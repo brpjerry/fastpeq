@@ -153,7 +153,7 @@ rest open.
   the duplicated codec tests were deduped into family tests while each
   driver keeps its own byte-layout test (they pin the differing slot byte).
 
-- [ ] 9. **Editor.svelte re-asserts the live config with the same guarded call
+- [x] 9. **Editor.svelte re-asserts the live config with the same guarded call
   in three places.** `api.applyLive(buildConfig(false), livePregain).catch(...)`
   under (a variant of) `(effectiveAuto || offloadActive) && !loading &&
   !comparing` appears in the `hwBandIdx` effect (~line 109), `load()`'s
@@ -161,6 +161,9 @@ rest open.
   `reassertLive()` helper (the guard included) so the condition can't drift
   between the three — two of the past P1 bugs (#REVIEW-3 items 1–2) lived in
   exactly this logic.
+  **Fixed:** `reassertLive()` owns the `loading`/`comparing`/derived-stage
+  guard; the three sites call it (load additionally gates on `!err`, its
+  one genuine difference).
 
 - [ ] 10. **The editor band type is declared three times.** `type Band` in
   `Editor.svelte`, an identical `type Band` in `CurveEditor.svelte`, and
