@@ -34,6 +34,7 @@ vi.mock("./api", () => ({
   presetHistory: vi.fn(() => Promise.resolve([])),
   getRevision: vi.fn(),
   restoreRevision: vi.fn(() => Promise.resolve()),
+  setRevisionTag: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -711,7 +712,12 @@ describe("Editor loudness-matched compare", () => {
 });
 
 describe("Editor history browser", () => {
-  const REV = { id: "1783300000000-save", savedAtMs: Date.now() - 2 * 60_000, op: "save" as const };
+  const REV = {
+    id: "1783300000000-save",
+    savedAtMs: Date.now() - 2 * 60_000,
+    op: "save" as const,
+    tag: null,
+  };
 
   it("lists revisions as informational rows (no audition-on-click)", async () => {
     vi.mocked(api.presetHistory).mockResolvedValue([REV]);
@@ -767,5 +773,80 @@ describe("Editor history browser", () => {
     const saved = vi.mocked(api.savePreset).mock.calls.at(-1)![1] as Config;
     const savedFilt = saved.lines.find((l) => l.kind === "Filter");
     expect(savedFilt && savedFilt.kind === "Filter" && savedFilt.value.freq).toBe(500);
+  });
+});
+
+describe("Editor version tags", () => {
+  const REV = {
+    id: "1783300000000-save",
+    savedAtMs: Date.now() - 60_000,
+    op: "save" as const,
+    tag: null as string | null,
+  };
+  const TAG_LINE = { kind: "Raw" as const, value: "# fastpeq:tag=Warm" };
+  const hasTag = (c: Config) =>
+    c.lines.some((l) => l.kind === "Raw" && l.value.startsWith("# fastpeq:tag="));
+
+  it("shows a tag after vX and edits it via the pencil", async () => {
+    vi.mocked(api.presetHistory).mockResolvedValue([{ ...REV, tag: "Warm" }]);
+    const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".hist-btn")!);
+    await waitFor(() => expect(document.querySelector(".hist-menu .hist-item")).toBeTruthy());
+
+    const item = document.querySelector(".hist-menu .hist-item")!;
+    expect(item.querySelector(".hist-ver")!.textContent).toBe("v1");
+    expect(item.querySelector(".hist-tag")!.textContent).toBe("Warm");
+
+    await fireEvent.click(document.querySelector(".hist-tag-btn")!);
+    const input = document.querySelector<HTMLInputElement>(".hist-tag-input")!;
+    expect(input.value).toBe("Warm");
+    await fireEvent.input(input, { target: { value: "V-shaped" } });
+    vi.mocked(api.presetHistory).mockResolvedValue([{ ...REV, tag: "V-shaped" }]);
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(api.setRevisionTag).toHaveBeenCalledWith("Test", REV.id, "V-shaped"),
+    );
+    await waitFor(() =>
+      expect(document.querySelector(".hist-menu .hist-tag")!.textContent).toBe("V-shaped"),
+    );
+  });
+
+  it("restore carries the tag into the live config; a changed save moves it back", async () => {
+    vi.mocked(api.presetHistory).mockResolvedValue([{ ...REV, tag: "Warm" }]);
+    vi.mocked(api.getRevision).mockResolvedValue({
+      lines: [TAG_LINE, ...cfg(0, [[500, 6, 1]]).lines],
+    });
+    const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    await fireEvent.click(container.querySelector(".hist-btn")!);
+    await waitFor(() => expect(document.querySelector(".hist-menu .hist-restore")).toBeTruthy());
+
+    // Restore: the tag rides into the live config with its content.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(document.querySelector(".hist-menu .hist-restore")!);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    expect(hasTag(vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config)).toBe(true);
+
+    // Saving the restored version unchanged keeps the tag with it (in the file).
+    vi.mocked(api.savePreset).mockClear();
+    await fireEvent.click(container.querySelector<HTMLButtonElement>(".primary")!);
+    await waitFor(() => expect(api.savePreset).toHaveBeenCalled());
+    expect(hasTag(vi.mocked(api.savePreset).mock.calls.at(-1)![1] as Config)).toBe(true);
+
+    // A further change: the save excludes the tag (it stays on the displaced
+    // snapshot) and the live config is scrubbed right after.
+    await fireEvent.click(container.querySelector(".band .remove")!);
+    vi.mocked(api.savePreset).mockClear();
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(container.querySelector<HTMLButtonElement>(".primary")!);
+    await waitFor(() => expect(api.savePreset).toHaveBeenCalled());
+    expect(hasTag(vi.mocked(api.savePreset).mock.calls.at(-1)![1] as Config)).toBe(false);
+    await waitFor(() => {
+      const applies = vi.mocked(api.applyLive).mock.calls;
+      expect(applies.length).toBeGreaterThan(0);
+      expect(hasTag(applies.at(-1)![0] as Config)).toBe(false); // scrubbed
+    });
   });
 });

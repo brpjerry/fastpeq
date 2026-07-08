@@ -428,12 +428,19 @@
       balance = parsed.balance;
       hadPreamp = parsed.hadPreamp;
       bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
-      rawLines = parsed.raw;
+      // A saved-but-unchanged restore leaves its version tag in the preset
+      // file — pick it up so the association survives an app restart.
+      const { tag, rest } = extractTag(parsed.raw);
+      rawLines = rest;
+      restoredTag = tag;
+      tagBaseKey = tag ? eqKey() : "";
       savedConfig = cfg; // the loaded file is the "saved" baseline (B) to compare against
     } catch (e) {
       err = String(e);
       bands = [];
       rawLines = [];
+      restoredTag = "";
+      tagBaseKey = "";
       savedConfig = null;
     } finally {
       loading = false;
@@ -601,6 +608,36 @@
     matchOff = false;
   }
 
+  // ── Version tags ────────────────────────────────────────────────────────────
+  // A revision can carry a user-given name as a `# fastpeq:tag=` comment that
+  // rides with its content. Restoring a tagged version brings the tag along
+  // into the live config.txt; it stays with the content through an unchanged
+  // save, and when a *changed* save displaces that content, the tag goes back
+  // to the version's snapshot (the backend keeps it) and is scrubbed from the
+  // live config. `tagBaseKey` is the content signature the tag describes, so
+  // the editor knows whether the working state still IS the tagged version.
+  const TAG_PREFIX = "# fastpeq:tag=";
+  let restoredTag = $state("");
+  let tagBaseKey = $state("");
+
+  // Content identity for the tag (preamp excluded — it's derived, like the
+  // history normal form).
+  const eqKey = () =>
+    JSON.stringify({
+      b: bands.map((b) => [b.enabled, b.kind, b.freq, b.gain, b.q, b.channel.kind]),
+      balance,
+      raw: rawLines,
+    });
+
+  /** Split a parsed config's raw lines into its tag and the rest. */
+  function extractTag(raw: string[]): { tag: string; rest: string[] } {
+    const line = raw.find((l) => l.trim().startsWith(TAG_PREFIX));
+    return {
+      tag: line ? line.trim().slice(TAG_PREFIX.length).trim() : "",
+      rest: raw.filter((l) => !l.trim().startsWith(TAG_PREFIX)),
+    };
+  }
+
   // ── History browser ─────────────────────────────────────────────────────────
   // Lists the preset's revisions. Rows are informational (version + creation
   // date); hearing an old version is what Restore is for — it live-loads into
@@ -631,6 +668,27 @@
   }
   function closeHistory() {
     histOpen = false;
+    editingTag = null;
+  }
+
+  // Inline tag editing (the pencil): Enter/blur commits, Esc cancels.
+  let editingTag = $state<{ id: string; value: string; prior: string } | null>(null);
+
+  function focusTagInput(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
+  async function commitTagEdit() {
+    const edit = editingTag;
+    editingTag = null;
+    if (!edit || edit.value.trim() === edit.prior) return;
+    try {
+      await api.setRevisionTag(name, edit.id, edit.value.trim());
+      histList = await api.presetHistory(name); // pick up the new tag
+    } catch (e) {
+      err = String(e);
+    }
   }
 
   /** Load a revision into the editor as an UNSAVED edit: it plays live and
@@ -647,13 +705,18 @@
       histOpen = false;
       const parsed = parseConfigEq(config);
       bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
-      rawLines = parsed.raw;
+      // The version's tag rides along: it goes into the live config.txt with
+      // this content (buildConfig adds the comment line).
+      const { tag, rest } = extractTag(parsed.raw);
+      rawLines = rest;
       balance = parsed.balance;
       hadPreamp = parsed.hadPreamp; // snapshots carry no master preamp
       // Recomputed anti-clip value, like a saved restore would get — the
       // snapshot has no preamp of its own.
       totalPreamp = computeAutoPreamp(parsed.filters as CurveFilter[], parsed.balance);
       deviceManual = null;
+      restoredTag = tag;
+      tagBaseKey = tag ? eqKey() : "";
       schedule(); // live + dirty — Save persists it (Ctrl+Z can take it back)
     } catch (e) {
       err = String(e);
@@ -685,6 +748,13 @@
 
   function buildConfig(forSave = false): Config {
     const lines: Line[] = [];
+    // The version tag rides with its content: always into the live config.txt;
+    // into the preset file only while the content still IS the tagged version
+    // (a changed save leaves the tag on the displaced snapshot instead — see
+    // the version-tags section above).
+    if (restoredTag && (!forSave || eqKey() === tagBaseKey)) {
+      lines.push({ kind: "Raw", value: `${TAG_PREFIX}${restoredTag}` });
+    }
     for (const r of rawLines) lines.push({ kind: "Raw", value: r });
     // Save writes the master preamp (the source of truth — req 6). A live preview
     // under offload writes only the APO-stage preamp; the device pregain rides
@@ -830,6 +900,14 @@
       matchOff = false;
       err = "";
       onSaved?.();
+      if (restoredTag && eqKey() !== tagBaseKey) {
+        // The content moved on: the tag stayed on the displaced version's
+        // snapshot (the backend record keeps it) — scrub it from the live
+        // config.txt too, so the new content doesn't wear an old name.
+        restoredTag = "";
+        tagBaseKey = "";
+        api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
+      }
     } catch (e) {
       err = String(e);
     } finally {
@@ -1130,18 +1208,45 @@
          tooltip; the label carries its creation date. Rows are informational —
          Restore is the (non-destructive) way to hear a version. -->
     <div class="hist-row" title="{OP_LABEL[rev.op]} · {timeAgo(rev.savedAtMs)}">
-      <span class="hist-item">
-        <span class="hist-ver">v{histList.length - i}</span>
-        <span class="hist-what">{longDate(rev.savedAtMs)}</span>
-      </span>
-      <button
-        class="hist-restore"
-        onclick={() => restoreRevision(rev)}
-        disabled={busy}
-        title="Load this version into the editor — nothing is written until you click Save (Ctrl+Z takes it back)"
-      >
-        Restore
-      </button>
+      {#if editingTag?.id === rev.id}
+        <input
+          class="hist-tag-input"
+          maxlength="60"
+          placeholder="Name this version"
+          bind:value={editingTag.value}
+          use:focusTagInput
+          onblur={commitTagEdit}
+          onkeydown={(e) => {
+            if (e.key === "Enter") commitTagEdit();
+            else if (e.key === "Escape") {
+              e.stopPropagation(); // don't also collapse/exit anything behind us
+              editingTag = null;
+            }
+          }}
+        />
+      {:else}
+        <span class="hist-item">
+          <span class="hist-ver">v{histList.length - i}</span>
+          {#if rev.tag}<span class="hist-tag">{rev.tag}</span>{/if}
+          <span class="hist-what">{longDate(rev.savedAtMs)}</span>
+        </span>
+        <button
+          class="hist-tag-btn"
+          onclick={() => (editingTag = { id: rev.id, value: rev.tag ?? "", prior: rev.tag ?? "" })}
+          title="Name this version"
+          aria-label="Name this version"
+        >
+          &#9998;
+        </button>
+        <button
+          class="hist-restore"
+          onclick={() => restoreRevision(rev)}
+          disabled={busy}
+          title="Load this version into the editor — nothing is written until you click Save (Ctrl+Z takes it back)"
+        >
+          Restore
+        </button>
+      {/if}
     </div>
   {/each}
 </FloatingMenu>
@@ -1243,6 +1348,31 @@
   :global(.hist-menu) .hist-what {
     font-size: 11px;
     color: var(--muted);
+  }
+  /* The user's name for a version, between vX and the date. */
+  :global(.hist-menu) .hist-tag {
+    font-size: 12px;
+    color: var(--accent);
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  :global(.hist-menu) .hist-tag-btn {
+    flex: none;
+    padding: 2px 6px;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--muted);
+  }
+  :global(.hist-menu) .hist-tag-btn:hover {
+    color: var(--text);
+  }
+  :global(.hist-menu) .hist-tag-input {
+    flex: 1;
+    min-width: 180px;
+    margin: 2px 4px;
+    padding: 3px 6px;
+    font-size: 12px;
   }
   :global(.hist-menu) .hist-restore {
     flex: none;

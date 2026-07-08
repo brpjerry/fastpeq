@@ -176,6 +176,19 @@ safety net, not the payload.
 | `restore_revision(name, id)` | Restores; invalidates the active-preset cache; refreshes the tray. |
 | `delete_preset` (existing) | Return type becomes `Option<String>` — the id of the `delete` revision — so the undo toast can restore precisely what it deleted without a follow-up query. |
 
+### Version tags
+
+A revision can carry a user-given name, shown after "vX" in the history menu
+and edited there via a pencil (blank by default for new revisions). The tag
+is a `# fastpeq:tag=<text>` comment that **rides with its content**: it lives
+in the revision file, travels into `config.txt` (and, through an unchanged
+save, the preset file) when that version is restored, and when a *changed*
+save displaces the tagged content, the tag stays on the displaced snapshot
+and is scrubbed from the live config — new content never wears an old name.
+Tags are metadata, not EQ: `normalize()` strips them, so they never affect
+the dedupe/uniqueness invariants, and a tag-only difference is not a content
+change.
+
 ## Phases
 
 ### Phase 1 — the safety net (core only, no UI) · effort M
