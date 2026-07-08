@@ -1,6 +1,16 @@
 # Preset history — versioning & undo plan
 
-**Status:** 📋 planned — nothing implemented yet.
+**Status:** ✅ Phases 1–4 implemented (core history, undo-delete toast,
+loudness-matched compare, history browser); Phase 5 (retention settings etc.)
+deliberately deferred until asked for. Deviations from the sketches:
+Phase 2 needed no `restorePresetView` — the view-state clear is simply
+*deferred* to toast expiry (the toast's `onExpire`), so an undo finds the entry
+untouched. Phase 3's session semantics got sharpened during implementation:
+the matching session **outlives individual A⇄B flips** (the Compare button
+flips sides within it) and ends on Esc, Save, or a preset (re)load — otherwise
+the louder-side offset would vanish exactly when flipping back to the edit,
+defeating the match. The label shows the *audible side's* extra offset
+(`Auto (−0.0 dB)` on the quieter side).
 
 Every preset mutation today is destructive: Save overwrites the file, Delete
 removes it (plus its category and per-preset view state) on a single
@@ -25,7 +35,7 @@ general mechanism.
 ## Non-goals
 
 - **Not git** and not a diff store — presets are ~1 KB; whole-file snapshots
-  are simpler, byte-faithful, and trivially restorable. No new dependencies.
+  are simpler and trivially restorable. No new dependencies.
 - **No history for the sidecars** (`.categories.json`, `.tone.json`) or the
   UI-state docs — the undo-delete flow carries the category/view state through
   the toast instead (see Phase 2).
@@ -54,9 +64,16 @@ general mechanism.
 
 ### Revision files
 
-- **Content:** the preset file's **prior bytes, copied verbatim** — not a
-  parse/serialize round-trip. History must be byte-faithful for the same
-  reason `Line::Raw` exists: we never mangle what we didn't model.
+- **Content:** the preset's prior EQ, **normalized** — parse the prior file,
+  drop the master (`Both`-channel) `Preamp:` line and every **no-op filter**
+  (a gain-type filter sitting at 0 dB — exactly what the editor's
+  "Remove 0 dB" button calls "no effect"), and serialize that. The master
+  preamp is *derived* state (Auto Preamp rewrites it; compare mode recomputes
+  it — see loudness matching below), so replaying an old value is noise, not
+  history. Balance trims (one-sided preamps), disabled bands with real
+  settings, and unmodeled `Line::Raw` lines (comments, `Include:`,
+  `Device:` …) are all kept verbatim through the parse/serialize round-trip —
+  normalization strips only what is audibly and semantically inert.
 - **Name:** `<unix-millis>-<op>.txt`, e.g. `1783300512345-save.txt`.
   Numerically sortable, self-describing, no index file to corrupt. If a
   millisecond collides (two ops in one ms), bump until unique.
@@ -68,6 +85,28 @@ general mechanism.
     itself undoable).
 - **Writes are atomic** via the existing temp-file + rename writer.
 
+### Uniqueness — history never holds duplicates
+
+Comparisons happen on the **normalized** form on both sides (the current
+preset is normalized in memory before comparing, so its preamp and no-op
+filters never make two contents read as "different"). Two invariants,
+enforced at record time:
+
+1. **No two revisions with the same normalized content.** Recording a
+   revision that matches an existing one *removes the older copy* — the
+   content keeps its most recent position in the timeline instead of
+   appearing twice.
+2. **No revision matching the preset's current normalized content.** The
+   canonical case: restore an old snapshot, then hit Save — the preset file
+   now *is* that snapshot, so the old revision file is removed rather than
+   left as a duplicate of the live preset (the restore already recorded the
+   pre-restore state, so nothing is lost).
+
+Consequence for restore: a restored preset comes back with its master preamp
+**recomputed** (the Auto-Preamp anti-clip value over the restored bands), not
+replayed — snapshots don't carry one. This is deliberate; a hand-set manual
+preamp is the one thing history does not preserve.
+
 ### What gets recorded, where in the code
 
 All in `Manager` (crates/fastpeq-core), the same layer that keeps
@@ -75,11 +114,11 @@ All in `Manager` (crates/fastpeq-core), the same layer that keeps
 
 | Operation | History action |
 | --- | --- |
-| `save_preset` over an existing file | Record prior bytes as `save` — **skipped when byte-identical** to the newest revision (no snapshot spam from re-saves). |
+| `save_preset` over an existing file | Record the prior content (normalized) as `save` — **skipped when its normalized form matches the new content** (no snapshot spam from re-saves), and any older revision it duplicates is removed (uniqueness invariant above). |
 | `save_preset`, file absent | Nothing (imports and new presets have no prior state). |
-| `delete_preset` | Record prior bytes as `delete`, then delete. |
+| `delete_preset` | Record the prior content (normalized) as `delete`, then delete. |
 | `rename_preset` | Rename `.history/<from>/` → `.history/<to>/` (merge file-by-file if the target dir exists — e.g. renaming onto a previously-deleted name). No snapshot; content didn't change. |
-| `restore_revision` (new) | Record the *current* file (if any) as `restore`, then atomically write the revision's bytes to `<name>.txt`. |
+| `restore_revision` (new) | Record the *current* content (if any) as `restore`, then write the revision back to `<name>.txt` with the master preamp recomputed (anti-clip over the restored bands). The restored revision file itself is removed once it matches the live preset (invariant 2). |
 
 ### Retention
 
@@ -103,12 +142,22 @@ pub struct Revision {
 }
 
 impl PresetHistory {
-    pub fn record(&self, name: &str, prior_bytes: &[u8], op: RevisionOp) -> io::Result<String>;
+    /// Normalizes `prior`, drops duplicates per the uniqueness invariants
+    /// (against existing revisions AND against `current`), then records.
+    /// Returns the new revision id, or None when nothing needed recording.
+    pub fn record(&self, name: &str, prior: &Config, current: &Config, op: RevisionOp)
+        -> io::Result<Option<String>>;
     pub fn list(&self, name: &str) -> io::Result<Vec<Revision>>;   // newest first
-    pub fn load(&self, name: &str, id: &str) -> io::Result<Vec<u8>>;
+    pub fn load(&self, name: &str, id: &str) -> io::Result<Config>;
     pub fn rename(&self, from: &str, to: &str) -> io::Result<()>;  // merge-move
     fn prune(&self, name: &str) -> io::Result<()>;                 // called by record
 }
+
+/// The normal form snapshots are stored and compared in: master preamp and
+/// no-op (0 dB gain-type) filters removed; everything else — balance trims,
+/// disabled bands, raw lines — untouched. Lives in fastpeq-core beside the
+/// tone/provenance strip helpers.
+pub fn normalize(config: &Config) -> Config;
 ```
 
 `Manager` gains `restore_revision(name, id) -> io::Result<()>`,
@@ -126,6 +175,19 @@ safety net, not the payload.
 | `get_revision(name, id) -> Config` | Parsed, for the curve ghost preview. |
 | `restore_revision(name, id)` | Restores; invalidates the active-preset cache; refreshes the tray. |
 | `delete_preset` (existing) | Return type becomes `Option<String>` — the id of the `delete` revision — so the undo toast can restore precisely what it deleted without a follow-up query. |
+
+### Version tags
+
+A revision can carry a user-given name, shown after "vX" in the history menu
+and edited there via a pencil (blank by default for new revisions). The tag
+is a `# fastpeq:tag=<text>` comment that **rides with its content**: it lives
+in the revision file, travels into `config.txt` (and, through an unchanged
+save, the preset file) when that version is restored, and when a *changed*
+save displaces the tagged content, the tag stays on the displaced snapshot
+and is scrubbed from the live config — new content never wears an old name.
+Tags are metadata, not EQ: `normalize()` strips them, so they never affect
+the dedupe/uniqueness invariants, and a tag-only difference is not a content
+change.
 
 ## Phases
 
@@ -153,29 +215,79 @@ Replaces the "confirm delete" idea entirely:
    entry (new `restorePresetView(name, entry)` beside the existing
    rename/clear helpers), `reload()`.
 
-### Phase 3 — history browser in the editor · effort M
+### Phase 3 — loudness-matched compare · effort M
+
+Louder reads as "better", so an A/B where one side carries more level is a
+biased test. This phase fixes that for **today's saved-version A/B compare**
+and everything built on it (the history preview in Phase 4):
+
+- **Entering compare force-enables Auto Preamp** for both sides — an
+  effective override exactly like offload's `forceAutoPreamp`, never
+  overwriting the user's stored pref — so each side gets its anti-clip
+  master preamp and neither replays a stale manual value.
+- **On top of that, an extra offset volume-matches the sides by audible
+  level:** estimate each side's perceived loudness as the **A-weighted
+  power mean of its magnitude response** over the probe grid, and attenuate
+  the louder side by the difference X. Attenuation-only, so matching can
+  never introduce clipping.
+- **UI:** while matching is active the PreampRow **"Auto" switch turns red**
+  and its label reads **"Auto (−X dB)"**, X being the extra offset applied to
+  the currently-audible side (one decimal; plain "Auto" when it rounds to
+  0.0). Toggling the switch **off** during compare disables *both* the
+  forced auto preamp and the offset — an explicit opt-out for when the level
+  difference is the thing being judged; toggling back on re-engages both.
+  Exiting compare restores normal Auto behavior (stored pref, no offset).
+- Implementation notes: the IEC 61672 A-weighting curve as `aWeightDb(f)` in
+  eq.ts beside the response math; loudness proxy
+  `L = 10·log10( mean_i 10^((resp(fᵢ)+A(fᵢ))/10) )` over `FREQS`;
+  `X = L_louder − L_quieter`, applied as extra master-preamp attenuation
+  through the existing `applyLive` path. Unit-test the weighting at
+  reference points (A(1 kHz) = 0, A(100 Hz) ≈ −19.1, A(10 kHz) ≈ −2.5 dB)
+  and the matcher on two curves with a known level gap.
+
+### Phase 4 — history browser in the editor · effort M
 
 - A **History** action (clock icon) in the editor header, next to undo/redo.
-- A panel/menu listing revisions: relative time + what happened
-  ("2 h ago · overwritten by save", "yesterday · deleted"). Selecting one
-  draws it as a faded ghost on the graph — the A/B-compare `reference` prop
-  and `parseConfigEq` plumbing already do exactly this for the saved version,
-  so the preview is nearly free.
-- **Restore** writes it back (undoable, because restore snapshots first) and
-  reloads the editor. While previewing, editing is locked — same
-  `comparing`-style lock the editor already has.
+- A panel/menu listing revisions: version number (v1 = the oldest snapshot;
+  the preset list shows the current content's `vN` beside the name) plus the
+  creation date ("July 3rd, 2026"); what displaced the version and how long
+  ago live in the row tooltip.
+- Rows are informational — there is no separate audition-on-click mode.
+  (The first implementation auditioned revisions through the Phase 3
+  matcher; once Restore became a non-destructive live-load, the audition
+  path was redundant and was removed.) The Phase 3 loudness matching
+  remains for the saved-version A/B compare.
+- **Restore** loads the revision into the editor as an *unsaved* edit — it
+  plays live and lights Save, but nothing reaches the preset file until Save
+  is clicked (and Ctrl+Z can take it back). The master preamp is recomputed,
+  not replayed. Undo-delete is the exception: there is no editor state to
+  load into, so it uses the backend `restore_revision`, which writes the file
+  (snapshotting the displaced content first). While previewing, editing is
+  locked — same `comparing`-style lock the editor already has.
 
-### Phase 4 (optional, on demand)
+### Phase 5 (optional, on demand)
 
 Retention setting, "Clear history", disk-usage line in Settings; maybe
 "restore as copy" (write to a new name instead of overwriting).
 
 ## Edge cases to cover in tests
 
-- **Byte fidelity:** a preset with raw/unmodeled lines (comments, `Include:`,
-  odd spacing, non-ASCII) survives record → restore byte-identical.
-- **Dedupe:** save with identical bytes records nothing; save → save → save
-  with two distinct contents records exactly two revisions.
+- **Raw-line fidelity:** a preset with unmodeled lines (comments, `Include:`,
+  non-ASCII) survives record → restore with those lines verbatim — the
+  normalization strips *only* the master preamp and no-op filters.
+- **Normalization:** a snapshot of a preset with a master preamp, a balance
+  trim, a 0 dB peaking band, and a disabled −3 dB band contains no preamp and
+  no 0 dB band but keeps the trim and the disabled band.
+- **Dedupe:** save with content that normalizes equal (e.g. only the preamp
+  or a 0 dB band differs) records nothing; save → save → save with two
+  distinct contents records exactly two revisions.
+- **Uniqueness (the restore → save case):** restore revision R, then Save
+  unchanged — R's file is removed; history holds no revision equal to the
+  live preset and no two equal revisions, ever (property worth asserting
+  after every mutation in the integration flows).
+- **Restore preamp:** the restored preset's master preamp is the recomputed
+  anti-clip value for its bands, regardless of what the file had when
+  snapshotted.
 - **Prune:** 31st revision drops the oldest; newest 30 remain in order.
 - **Rename:** history follows; merging into an existing history dir keeps
   both sets; case-only rename works (same dir on Windows).

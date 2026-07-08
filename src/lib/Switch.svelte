@@ -8,6 +8,7 @@
     compact = false,
     disabled = false,
     title = "",
+    accent = "",
   }: {
     checked: boolean;
     onChange: (value: boolean) => void;
@@ -15,10 +16,13 @@
     compact?: boolean;
     disabled?: boolean;
     title?: string;
+    /** Override the checked-track color (e.g. red while compare-mode loudness
+     *  matching is active). Empty = the theme accent. */
+    accent?: string;
   } = $props();
 </script>
 
-<label class="switch" class:compact {title}>
+<label class="switch" class:compact {title} style:--sw-accent={accent || undefined}>
   <input type="checkbox" {checked} {disabled} onchange={(e) => onChange(e.currentTarget.checked)} />
   <span class="track"><span class="thumb"></span></span>
   {#if label}<span class="sw-label">{label}</span>{/if}
@@ -65,8 +69,8 @@
       background 0.15s ease;
   }
   .switch input:checked + .track {
-    background: var(--accent);
-    border-color: var(--accent);
+    background: var(--sw-accent, var(--accent));
+    border-color: var(--sw-accent, var(--accent));
   }
   .switch input:checked + .track .thumb {
     transform: translateX(16px);

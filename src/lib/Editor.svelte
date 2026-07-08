@@ -7,10 +7,13 @@
   import CurveEditor from "./CurveEditor.svelte";
   import ToneGenerator from "./ToneGenerator.svelte";
   import GraphTools from "./GraphTools.svelte";
+  import FloatingMenu from "./FloatingMenu.svelte";
+  import { anchorBelow, type Anchor } from "./floating";
+  import { longDate, timeAgo } from "./time";
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
+  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, loudnessDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { getFilterShapes, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
@@ -34,6 +37,7 @@
     name,
     reloadToken,
     onApplied,
+    onSaved,
     tone = { bass: 0, mid: 0, treble: 0, invert: false, swap: false },
     bypassed = false,
     forceAutoPreamp = false,
@@ -46,6 +50,9 @@
     name: string;
     reloadToken: number;
     onApplied: (name: string) => void;
+    /** A save landed (it may have minted a history revision — the parent
+     * refreshes the preset list's version badges). */
+    onSaved?: () => void;
     tone?: api.Tone;
     bypassed?: boolean;
     /** Hardware offload's Min. APO preamp mode forces Auto Preamp on (and locked). */
@@ -137,19 +144,34 @@
   // on the warning never fires. Persisted with the other UI prefs.
   const autoPreamp = $derived(getAutoPreamp());
 
-  // Auto Preamp is on either by the user's toggle or because hardware offload's
-  // Min. APO preamp mode forces it. The forced state never overwrites the user's
-  // stored preference — it just overrides the effective behavior while active.
-  const effectiveAuto = $derived(forceAutoPreamp || autoPreamp);
+  // Loudness-matching compare session flags (see the A/B compare section for
+  // the machinery): armed on the first Compare entry, `matchOff` = the user's
+  // per-session opt-out via the Auto switch.
+  let matchArmed = $state(false);
+  let matchOff = $state(false);
+
+  // Auto Preamp is on by the user's toggle, because hardware offload's Min. APO
+  // preamp mode forces it, or because a loudness-matching compare session is
+  // running (both sides audition on their anti-clip preamp — unless the user
+  // opted out via the switch). None of the forced states overwrite the user's
+  // stored preference — they just override the effective behavior while active.
+  const effectiveAuto = $derived(
+    matchArmed ? forceAutoPreamp || !matchOff : forceAutoPreamp || autoPreamp,
+  );
 
   // Auto-preamp value for a band set: the lowest (≤ 0) master preamp that keeps the
   // summed boost — those bands plus the global tone overlay — from clipping.
-  function computeAutoPreamp(forBands: CurveFilter[] = bands as CurveFilter[]): number {
-    const bandsPeak = peakGainDb(forBands, 0, balance);
+  // `bal` defaults to the working edit's balance; the compare matcher passes the
+  // saved version's own.
+  function computeAutoPreamp(
+    forBands: CurveFilter[] = bands as CurveFilter[],
+    bal: number = balance,
+  ): number {
+    const bandsPeak = peakGainDb(forBands, 0, bal);
     const combinedPeak = peakGainDb(
       [...forBands, ...toneFilters(tone.bass, tone.mid, tone.treble)] as CurveFilter[],
       0,
-      balance,
+      bal,
     );
     const requiredPeak = Math.max(bandsPeak + getToneHeadroom(), combinedPeak);
     return Math.round(Math.min(0, -requiredPeak) * 10) / 10;
@@ -227,10 +249,17 @@
   // clamp isn't written back to `totalPreamp`). Auto minimizes it; Hardware Only pins
   // it flat; off offload it's simply the master preamp.
   const apoPreamp = $derived.by(() => {
-    if (hardwareOnly) return 0;
-    if (!offloadActive) return effectiveAuto ? apoAntiClip : totalPreamp;
-    if (effectiveAuto) return apoAntiClip;
-    return Math.min(round1(totalPreamp - hwPregain), apoAntiClip);
+    if (hardwareOnly) return 0; // APO is flat; matching can't trim here (device-only)
+    const base = !offloadActive
+      ? effectiveAuto
+        ? apoAntiClip
+        : totalPreamp
+      : effectiveAuto
+        ? apoAntiClip
+        : Math.min(round1(totalPreamp - hwPregain), apoAntiClip);
+    // The compare matcher's extra attenuation on the working edit (0 when the
+    // saved side is the louder one, or matching is off).
+    return round1(base - (matchInfo?.aOffset ?? 0));
   });
 
   // The combined attenuation actually applied — both stages under offload, else just
@@ -262,6 +291,19 @@
   // Auto off recomputes the split from the total: drop the device override so both
   // stages derive from `totalPreamp` again (with the even split).
   function setAutoPreamp(v: boolean) {
+    // During a matching session the switch is the opt-out: off disables both
+    // the forced Auto and the loudness offset (raw preamps on both sides), on
+    // re-engages them. The user's stored preference is never touched.
+    if (matchArmed) {
+      matchOff = !v;
+      if (comparing) {
+        const cfg = matchOff ? savedConfig : auditionConfig();
+        if (cfg) api.applyLive(cfg).catch((e) => (err = String(e)));
+      } else {
+        schedule();
+      }
+      return;
+    }
     deviceManual = null;
     saveAutoPreamp(v);
     schedule();
@@ -373,6 +415,8 @@
     loading = true;
     dirty = false;
     comparing = false; // a fresh preset is live; nothing to compare against yet
+    matchArmed = false; // ...and any matching session ends with it
+    matchOff = false;
     totalPreamp = 0;
     deviceManual = null;
     balance = 0;
@@ -384,12 +428,19 @@
       balance = parsed.balance;
       hadPreamp = parsed.hadPreamp;
       bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
-      rawLines = parsed.raw;
+      // A saved-but-unchanged restore leaves its version tag in the preset
+      // file — pick it up so the association survives an app restart.
+      const { tag, rest } = extractTag(parsed.raw);
+      rawLines = rest;
+      restoredTag = tag;
+      tagBaseKey = tag ? eqKey() : "";
       savedConfig = cfg; // the loaded file is the "saved" baseline (B) to compare against
     } catch (e) {
       err = String(e);
       bands = [];
       rawLines = [];
+      restoredTag = "";
+      tagBaseKey = "";
       savedConfig = null;
     } finally {
       loading = false;
@@ -476,24 +527,201 @@
   let savedConfig = $state<Config | null>(null);
   let comparing = $state(false);
 
+  // Loudness-matching session (state flags declared up top, near effectiveAuto):
+  // louder reads as "better", so an unmatched A/B is biased. Entering Compare
+  // arms the session — both sides audition on their anti-clip Auto preamp, and
+  // the louder side (by A-weighted power mean of its response) is attenuated
+  // by the difference. The session outlives individual A⇄B flips (the button)
+  // and ends on Esc, Save, or a preset (re)load; the Auto switch turns red
+  // showing the audible side's extra offset, and toggling it off opts out
+  // (raw preamps) for the session.
+
   const canCompare = $derived(dirty && savedConfig !== null);
   // Graph-ready filters/preamp/balance of the saved version — parsed exactly
   // like load(), via the shared parseConfigEq.
   const savedCurve = $derived(savedConfig ? parseConfigEq(savedConfig) : null);
-  // The faded ghost trace passed to the graphs — only while actually comparing.
-  const compareRef = $derived(comparing ? savedCurve : null);
+
+  // The matcher: each side's anti-clip preamp plus the extra attenuation the
+  // louder side needs (attenuation-only, so matching can never clip).
+  const matchInfo = $derived.by(() => {
+    if (!matchArmed || matchOff || !savedCurve) return null;
+    const aBands = effectiveBands as CurveFilter[];
+    const autoA = computeAutoPreamp(aBands);
+    const autoB = computeAutoPreamp(savedCurve.filters, savedCurve.balance);
+    const la = loudnessDb(aBands, autoA);
+    const lb = loudnessDb(savedCurve.filters, autoB);
+    const x = round1(Math.abs(la - lb));
+    return {
+      aOffset: la > lb ? x : 0,
+      bOffset: lb > la ? x : 0,
+      bPreamp: round1(autoB - (lb > la ? x : 0)),
+    };
+  });
+  // The extra offset on the side currently audible — the switch label's "−X dB".
+  const matchOffset = $derived(
+    matchInfo ? (comparing ? matchInfo.bOffset : matchInfo.aOffset) : 0,
+  );
+
+  // The faded ghost trace passed to the graphs — only while actually comparing,
+  // at the preamp it is actually auditioned with.
+  const compareRef = $derived(
+    comparing && savedCurve
+      ? matchInfo
+        ? { ...savedCurve, preamp: matchInfo.bPreamp }
+        : savedCurve
+      : null,
+  );
+
+  // The saved version as auditioned: its master preamp replaced by the matched
+  // anti-clip value (balance trims and everything else stay).
+  function auditionConfig(): Config | null {
+    if (!savedConfig || !matchInfo) return savedConfig;
+    const lines: Line[] = savedConfig.lines.filter(
+      (l) => !(l.kind === "Preamp" && l.value.channel.kind === "both"),
+    );
+    lines.unshift({
+      kind: "Preamp",
+      value: { gain: matchInfo.bPreamp, channel: { kind: "both" } },
+    });
+    return { lines };
+  }
 
   function setCompare(on: boolean) {
     if (on === comparing || (on && !canCompare)) return;
+    if (on && !matchArmed) {
+      matchArmed = true; // first entry arms the matching session
+      matchOff = false;
+    }
     comparing = on;
-    if (comparing && savedConfig) {
-      api.applyLive(savedConfig).catch((e) => (err = String(e))); // hear the saved version
+    if (comparing) {
+      const cfg = auditionConfig();
+      if (cfg) api.applyLive(cfg).catch((e) => (err = String(e))); // hear the saved version
     } else {
-      schedule(); // back to the working edit
+      schedule(); // back to the working edit (still matched while armed)
     }
   }
   const toggleCompare = () => setCompare(!comparing);
-  const exitCompare = () => setCompare(false);
+  // Esc ends the whole session, not just the B audition.
+  function exitCompare() {
+    setCompare(false);
+    matchArmed = false;
+    matchOff = false;
+  }
+
+  // ── Version tags ────────────────────────────────────────────────────────────
+  // A revision can carry a user-given name as a `# fastpeq:tag=` comment that
+  // rides with its content. Restoring a tagged version brings the tag along
+  // into the live config.txt; it stays with the content through an unchanged
+  // save, and when a *changed* save displaces that content, the tag goes back
+  // to the version's snapshot (the backend keeps it) and is scrubbed from the
+  // live config. `tagBaseKey` is the content signature the tag describes, so
+  // the editor knows whether the working state still IS the tagged version.
+  const TAG_PREFIX = "# fastpeq:tag=";
+  let restoredTag = $state("");
+  let tagBaseKey = $state("");
+
+  // Content identity for the tag (preamp excluded — it's derived, like the
+  // history normal form).
+  const eqKey = () =>
+    JSON.stringify({
+      b: bands.map((b) => [b.enabled, b.kind, b.freq, b.gain, b.q, b.channel.kind]),
+      balance,
+      raw: rawLines,
+    });
+
+  /** Split a parsed config's raw lines into its tag and the rest. */
+  function extractTag(raw: string[]): { tag: string; rest: string[] } {
+    const line = raw.find((l) => l.trim().startsWith(TAG_PREFIX));
+    return {
+      tag: line ? line.trim().slice(TAG_PREFIX.length).trim() : "",
+      rest: raw.filter((l) => !l.trim().startsWith(TAG_PREFIX)),
+    };
+  }
+
+  // ── History browser ─────────────────────────────────────────────────────────
+  // Lists the preset's revisions. Rows are informational (version + creation
+  // date); hearing an old version is what Restore is for — it live-loads into
+  // the editor without writing anything, so there's no separate audition mode.
+  let histOpen = $state(false);
+  let histList = $state<api.Revision[]>([]);
+  let histAnchor = $state<Anchor | null>(null);
+  let histBtn = $state<HTMLButtonElement | null>(null);
+
+  const OP_LABEL: Record<api.RevisionOp, string> = {
+    save: "overwritten by save",
+    delete: "deleted",
+    restore: "overwritten by restore",
+  };
+
+  async function toggleHistory() {
+    if (histOpen) {
+      closeHistory();
+      return;
+    }
+    try {
+      histList = await api.presetHistory(name);
+      if (histBtn) histAnchor = anchorBelow(histBtn);
+      histOpen = true;
+    } catch (e) {
+      err = String(e);
+    }
+  }
+  function closeHistory() {
+    histOpen = false;
+    editingTag = null;
+  }
+
+  // Inline tag editing (the pencil): Enter/blur commits, Esc cancels.
+  let editingTag = $state<{ id: string; value: string; prior: string } | null>(null);
+
+  function focusTagInput(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
+  async function commitTagEdit() {
+    const edit = editingTag;
+    editingTag = null;
+    if (!edit || edit.value.trim() === edit.prior) return;
+    try {
+      await api.setRevisionTag(name, edit.id, edit.value.trim());
+      histList = await api.presetHistory(name); // pick up the new tag
+    } catch (e) {
+      err = String(e);
+    }
+  }
+
+  /** Load a revision into the editor as an UNSAVED edit: it plays live and
+   *  lights Save, but only reaches the preset file when Save is clicked —
+   *  restoring never writes by itself. (Undo-delete still uses the backend
+   *  `restore_revision`, where there is no editor state to load into.) */
+  async function restoreRevision(rev: api.Revision) {
+    try {
+      const config = await api.getRevision(name, rev.id);
+      // End any compare session — we're replacing the edit it compared.
+      comparing = false;
+      matchArmed = false;
+      matchOff = false;
+      histOpen = false;
+      const parsed = parseConfigEq(config);
+      bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
+      // The version's tag rides along: it goes into the live config.txt with
+      // this content (buildConfig adds the comment line).
+      const { tag, rest } = extractTag(parsed.raw);
+      rawLines = rest;
+      balance = parsed.balance;
+      hadPreamp = parsed.hadPreamp; // snapshots carry no master preamp
+      // Recomputed anti-clip value, like a saved restore would get — the
+      // snapshot has no preamp of its own.
+      totalPreamp = computeAutoPreamp(parsed.filters as CurveFilter[], parsed.balance);
+      deviceManual = null;
+      restoredTag = tag;
+      tagBaseKey = tag ? eqKey() : "";
+      schedule(); // live + dirty — Save persists it (Ctrl+Z can take it back)
+    } catch (e) {
+      err = String(e);
+    }
+  }
 
   // Ctrl+Z / Ctrl+Y undo-redo and Ctrl+` to toggle compare, skipped while a real
   // text field is focused so their native behaviour still works. (Esc is handled
@@ -520,6 +748,13 @@
 
   function buildConfig(forSave = false): Config {
     const lines: Line[] = [];
+    // The version tag rides with its content: always into the live config.txt;
+    // into the preset file only while the content still IS the tagged version
+    // (a changed save leaves the tag on the displaced snapshot instead — see
+    // the version-tags section above).
+    if (restoredTag && (!forSave || eqKey() === tagBaseKey)) {
+      lines.push({ kind: "Raw", value: `${TAG_PREFIX}${restoredTag}` });
+    }
     for (const r of rawLines) lines.push({ kind: "Raw", value: r });
     // Save writes the master preamp (the source of truth — req 6). A live preview
     // under offload writes only the APO-stage preamp; the device pregain rides
@@ -661,7 +896,18 @@
       await api.savePreset(name, config);
       savedConfig = config; // the new baseline for A/B compare
       dirty = false;
+      matchArmed = false; // A and B are one again — the matching session is over
+      matchOff = false;
       err = "";
+      onSaved?.();
+      if (restoredTag && eqKey() !== tagBaseKey) {
+        // The content moved on: the tag stayed on the displaced version's
+        // snapshot (the backend record keeps it) — scrub it from the live
+        // config.txt too, so the new content doesn't wear an old name.
+        restoredTag = "";
+        tagBaseKey = "";
+        api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
+      }
     } catch (e) {
       err = String(e);
     } finally {
@@ -749,6 +995,19 @@
     </svg>
   </button>
   <button
+    bind:this={histBtn}
+    class="icon-btn hist-btn"
+    class:on={histOpen}
+    onclick={toggleHistory}
+    title="History — preview and restore earlier versions"
+    aria-label="Preset history"
+  >
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  </button>
+  <button
     class="compare-btn"
     class:on={comparing}
     onclick={toggleCompare}
@@ -814,6 +1073,8 @@
     userPregain={hwUserPregain}
     {apoPreamp}
     {hwPregain}
+    matchArmed={matchArmed && !matchOff}
+    {matchOffset}
     onSetPreamp={setMasterPreamp}
     onSetApo={setApoPreamp}
     onSetDevice={setDevicePreamp}
@@ -925,6 +1186,71 @@
   </div>
 {/if}
 
+<!-- History browser: revisions newest first; click to audition (loudness-
+     matched), Restore to make one current again. -->
+<FloatingMenu
+  class="hist-menu"
+  open={histOpen}
+  anchor={histAnchor}
+  onDismiss={closeHistory}
+  ignore={histBtn}
+  zIndex={120}
+  maxHeight="60vh"
+>
+  {#if !histList.length}
+    <div class="hist-empty">
+      No history yet — versions appear when a save replaces this preset.
+    </div>
+  {/if}
+  {#each histList as rev, i (rev.id)}
+    <!-- Versions count up from the oldest snapshot (v1); the list is newest
+         first. What displaced the version, and how long ago, live in the
+         tooltip; the label carries its creation date. Rows are informational —
+         Restore is the (non-destructive) way to hear a version. -->
+    <div class="hist-row" title="{OP_LABEL[rev.op]} · {timeAgo(rev.savedAtMs)}">
+      {#if editingTag?.id === rev.id}
+        <input
+          class="hist-tag-input"
+          maxlength="60"
+          placeholder="Name this version"
+          bind:value={editingTag.value}
+          use:focusTagInput
+          onblur={commitTagEdit}
+          onkeydown={(e) => {
+            if (e.key === "Enter") commitTagEdit();
+            else if (e.key === "Escape") {
+              e.stopPropagation(); // don't also collapse/exit anything behind us
+              editingTag = null;
+            }
+          }}
+        />
+      {:else}
+        <span class="hist-item">
+          <span class="hist-ver">v{histList.length - i}</span>
+          {#if rev.tag}<span class="hist-tag">{rev.tag}</span>{/if}
+          <span class="hist-what">{longDate(rev.savedAtMs)}</span>
+        </span>
+        <button
+          class="hist-tag-btn"
+          onclick={() => (editingTag = { id: rev.id, value: rev.tag ?? "", prior: rev.tag ?? "" })}
+          title="Name this version"
+          aria-label="Name this version"
+        >
+          &#9998;
+        </button>
+        <button
+          class="hist-restore"
+          onclick={() => restoreRevision(rev)}
+          disabled={busy}
+          title="Load this version into the editor — nothing is written until you click Save (Ctrl+Z takes it back)"
+        >
+          Restore
+        </button>
+      {/if}
+    </div>
+  {/each}
+</FloatingMenu>
+
 <style>
   .actions {
     display: flex;
@@ -985,6 +1311,73 @@
     color: #e0a458;
     white-space: nowrap;
     cursor: help;
+  }
+
+  .hist-btn.on {
+    color: var(--accent);
+  }
+  /* History rows: audition target + a per-row Restore. Class is :global-safe —
+     the menu portals through FloatingMenu, outside this component's tree. */
+  :global(.hist-menu) .hist-empty {
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    max-width: 240px;
+  }
+  :global(.hist-menu) .hist-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: 6px;
+  }
+  :global(.hist-menu) .hist-item {
+    flex: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 8px;
+    white-space: nowrap;
+  }
+  :global(.hist-menu) .hist-ver {
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  :global(.hist-menu) .hist-what {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  /* The user's name for a version, between vX and the date. */
+  :global(.hist-menu) .hist-tag {
+    font-size: 12px;
+    color: var(--accent);
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  :global(.hist-menu) .hist-tag-btn {
+    flex: none;
+    padding: 2px 6px;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--muted);
+  }
+  :global(.hist-menu) .hist-tag-btn:hover {
+    color: var(--text);
+  }
+  :global(.hist-menu) .hist-tag-input {
+    flex: 1;
+    min-width: 180px;
+    margin: 2px 4px;
+    padding: 3px 6px;
+    font-size: 12px;
+  }
+  :global(.hist-menu) .hist-restore {
+    flex: none;
+    padding: 2px 8px;
+    font-size: 11px;
   }
 
   /* Square icon button (expand / collapse). */
