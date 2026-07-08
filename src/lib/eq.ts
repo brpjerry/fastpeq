@@ -340,6 +340,42 @@ export function toneFilters(bass: number, mid: number, treble: number): CurveFil
   }));
 }
 
+// IEC 61672 A-weighting, normalised so A(1 kHz) = 0 dB exactly.
+function aWeightRaw(f: number): number {
+  const f2 = f * f;
+  const ra =
+    (12194 ** 2 * f2 * f2) /
+    ((f2 + 20.6 ** 2) * Math.sqrt((f2 + 107.7 ** 2) * (f2 + 737.9 ** 2)) * (f2 + 12194 ** 2));
+  return 20 * Math.log10(ra);
+}
+const A_WEIGHT_1K = aWeightRaw(1000);
+
+/** A-weighting (dB) at `f` — how much quieter a tone there *sounds* than its
+ *  level suggests (≈ −19.1 dB at 100 Hz, 0 at 1 kHz, ≈ −2.5 dB at 10 kHz). */
+export function aWeightDb(f: number): number {
+  return aWeightRaw(f) - A_WEIGHT_1K;
+}
+
+/**
+ * Perceived level (dB) of a response: the A-weighted power mean over the probe
+ * grid — the loudness proxy compare-mode volume matching uses. Only the
+ * *difference* between two values is meaningful (a flat response reads
+ * slightly negative because A-weighting attenuates the spectrum edges); a
+ * preamp shift moves it 1:1.
+ */
+export function loudnessDb(
+  filters: CurveFilter[],
+  preamp: number,
+  freqs: number[] = FREQS,
+): number {
+  const resp = responseCurve(filters, preamp, freqs);
+  let sum = 0;
+  for (let i = 0; i < resp.length; i++) {
+    sum += Math.pow(10, (resp[i] + aWeightDb(freqs[i])) / 10);
+  }
+  return 10 * Math.log10(sum / resp.length);
+}
+
 /**
  * Peak combined gain (dB) over the audible band, taken as the louder of the two
  * channels. Above 0 dB the summed boost can exceed full scale, so Equalizer APO

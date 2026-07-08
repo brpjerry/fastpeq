@@ -593,12 +593,16 @@ impl AppState {
         Ok(())
     }
 
-    pub fn delete(&self, name: &str) -> Result<(), String> {
-        self.manager()
+    /// Delete a preset. Returns the id of its `delete` history revision — the
+    /// undo handle for the frontend's toast — or `None` when nothing could be
+    /// snapshotted (no Undo is offered then).
+    pub fn delete(&self, name: &str) -> Result<Option<String>, String> {
+        let revision = self
+            .manager()
             .delete_preset(name)
             .map_err(|e| e.to_string())?;
         self.invalidate_active(); // a deleted preset can no longer be "active"
-        Ok(())
+        Ok(revision)
     }
 
     pub fn rename(&self, from: &str, to: &str) -> Result<(), String> {
@@ -607,6 +611,43 @@ impl AppState {
             .map_err(|e| e.to_string())?;
         self.invalidate_active(); // the active preset's name may have changed
         Ok(())
+    }
+
+    /// Restore a history revision into the preset file (undo-delete, or the
+    /// history browser's Restore).
+    pub fn restore_revision(&self, name: &str, id: &str) -> Result<(), String> {
+        self.manager()
+            .restore_revision(name, id)
+            .map_err(|e| e.to_string())?;
+        self.invalidate_active(); // the restored preset may (re)match the live stamp
+        Ok(())
+    }
+
+    /// A preset's history revisions, newest first (for the history browser).
+    pub fn preset_history(&self, name: &str) -> Result<Vec<fastpeq_core::Revision>, String> {
+        self.manager()
+            .preset_history(name)
+            .map_err(|e| e.to_string())
+    }
+
+    /// One revision, parsed — the history browser's preview ghost.
+    pub fn get_revision(&self, name: &str, id: &str) -> Result<Config, String> {
+        self.manager()
+            .load_revision(name, id)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Revision counts per preset — the preset list's "vN" badges (the current
+    /// content is version `count + 1`).
+    pub fn preset_versions(&self) -> Result<BTreeMap<String, usize>, String> {
+        self.manager().history_counts().map_err(|e| e.to_string())
+    }
+
+    /// Set (or clear, with an empty string) a revision's user tag.
+    pub fn set_revision_tag(&self, name: &str, id: &str, tag: &str) -> Result<(), String> {
+        self.manager()
+            .set_revision_tag(name, id, tag)
+            .map_err(|e| e.to_string())
     }
 
     /// Load a preset as a structured config (for the parametric editor).

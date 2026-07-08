@@ -13,6 +13,7 @@
 
 pub mod apo;
 pub mod category;
+pub mod history;
 pub mod manager;
 pub mod offload;
 pub mod peace;
@@ -23,6 +24,7 @@ pub mod tone;
 pub use apo::env;
 pub use apo::{Channel, Config, Filter, FilterKind, Line, parse, serialize};
 pub use category::Category;
+pub use history::{PresetHistory, Revision, RevisionOp};
 pub use manager::{ImportReport, Manager};
 pub use offload::{
     HardwareProfile, HwBand, HwFilterType, OffloadMode, Split, biquad_coeffs, peak_gain_db, split,

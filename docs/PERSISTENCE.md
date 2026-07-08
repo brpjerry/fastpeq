@@ -99,6 +99,7 @@ files.
 | --- | --- | --- |
 | `<Name>.txt` | Native APO config text | One preset per file — deliberately plain APO text so presets are shareable/importable as-is. The parse/serialize round-trip is the core invariant (`parse(serialize(c)) == c`); unmodeled lines survive as `Line::Raw`. Presets **never** contain a provenance stamp (stripped on save) or the tone overlay (stripped on capture). |
 | `.categories.json` | JSON object | Preset name → device-type category (`headphone`, `iem`, `speaker`, …). Tracks renames and deletes. |
+| `.history/<name>/<unix-ms>-<op>.txt` | Native APO config text | Per-preset version history (see `PRESET-HISTORY.md`): the content each save/delete/restore displaced, **normalized** (master preamp, no-op filters, and stamp stripped; trims/disabled bands/raw lines verbatim), plus an optional user **version tag** as a `# fastpeq:tag=` comment that rides with its content (into `config.txt`/the preset file on restore, back to the snapshot when displaced). Content-unique per preset (tags don't count as content), newest 30 kept, renames follow. History failures never fail the user's operation. |
 | `.tone.json` | JSON object | The global tone overlay's knob values: `bass`/`mid`/`treble` (dB) + `invert`/`swap`. The sidecar is the persistence layer; `AppState` holds a cache so live knob drags don't re-read it. Written even while Hardware Only offload keeps the overlay out of the live config (`Manager::save_tone`), so the knobs come back when the mode changes. |
 
 ## The live `config.txt` (APO's config dir)
