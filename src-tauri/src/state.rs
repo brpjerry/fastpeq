@@ -637,6 +637,19 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
+    /// Revision counts per preset — the preset list's "vN" badges (the current
+    /// content is version `count + 1`).
+    pub fn preset_versions(&self) -> Result<BTreeMap<String, usize>, String> {
+        self.manager().history_counts().map_err(|e| e.to_string())
+    }
+
+    /// Set (or clear, with an empty string) a revision's user tag.
+    pub fn set_revision_tag(&self, name: &str, id: &str, tag: &str) -> Result<(), String> {
+        self.manager()
+            .set_revision_tag(name, id, tag)
+            .map_err(|e| e.to_string())
+    }
+
     /// Load a preset as a structured config (for the parametric editor).
     pub fn load_config(&self, name: &str) -> Result<Config, String> {
         self.manager().load_preset(name).map_err(|e| e.to_string())

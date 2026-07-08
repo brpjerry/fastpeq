@@ -9,7 +9,7 @@
   import GraphTools from "./GraphTools.svelte";
   import FloatingMenu from "./FloatingMenu.svelte";
   import { anchorBelow, type Anchor } from "./floating";
-  import { timeAgo } from "./time";
+  import { longDate, timeAgo } from "./time";
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
@@ -37,6 +37,7 @@
     name,
     reloadToken,
     onApplied,
+    onSaved,
     tone = { bass: 0, mid: 0, treble: 0, invert: false, swap: false },
     bypassed = false,
     forceAutoPreamp = false,
@@ -49,6 +50,9 @@
     name: string;
     reloadToken: number;
     onApplied: (name: string) => void;
+    /** A save landed (it may have minted a history revision — the parent
+     * refreshes the preset list's version badges). */
+    onSaved?: () => void;
     tone?: api.Tone;
     bypassed?: boolean;
     /** Hardware offload's Min. APO preamp mode forces Auto Preamp on (and locked). */
@@ -424,12 +428,19 @@
       balance = parsed.balance;
       hadPreamp = parsed.hadPreamp;
       bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
-      rawLines = parsed.raw;
+      // A saved-but-unchanged restore leaves its version tag in the preset
+      // file — pick it up so the association survives an app restart.
+      const { tag, rest } = extractTag(parsed.raw);
+      rawLines = rest;
+      restoredTag = tag;
+      tagBaseKey = tag ? eqKey() : "";
       savedConfig = cfg; // the loaded file is the "saved" baseline (B) to compare against
     } catch (e) {
       err = String(e);
       bands = [];
       rawLines = [];
+      restoredTag = "";
+      tagBaseKey = "";
       savedConfig = null;
     } finally {
       loading = false;
@@ -525,16 +536,10 @@
   // showing the audible side's extra offset, and toggling it off opts out
   // (raw preamps) for the session.
 
-  // A history revision being auditioned takes the saved version's place as
-  // the "B side" — same lock, same ghost, same loudness matching.
-  let previewRev = $state<{ id: string; config: Config } | null>(null);
-
-  const canCompare = $derived(dirty && savedConfig !== null && previewRev === null);
-  // What the B side *is* right now: the previewed revision, else the saved file.
-  const auditionSource = $derived(previewRev ? previewRev.config : savedConfig);
-  // Graph-ready filters/preamp/balance of the B side — parsed exactly like
-  // load(), via the shared parseConfigEq.
-  const savedCurve = $derived(auditionSource ? parseConfigEq(auditionSource) : null);
+  const canCompare = $derived(dirty && savedConfig !== null);
+  // Graph-ready filters/preamp/balance of the saved version — parsed exactly
+  // like load(), via the shared parseConfigEq.
+  const savedCurve = $derived(savedConfig ? parseConfigEq(savedConfig) : null);
 
   // The matcher: each side's anti-clip preamp plus the extra attenuation the
   // louder side needs (attenuation-only, so matching can never clip).
@@ -567,11 +572,11 @@
       : null,
   );
 
-  // The B side as auditioned: its master preamp replaced by the matched
+  // The saved version as auditioned: its master preamp replaced by the matched
   // anti-clip value (balance trims and everything else stay).
   function auditionConfig(): Config | null {
-    if (!auditionSource || !matchInfo) return auditionSource;
-    const lines: Line[] = auditionSource.lines.filter(
+    if (!savedConfig || !matchInfo) return savedConfig;
+    const lines: Line[] = savedConfig.lines.filter(
       (l) => !(l.kind === "Preamp" && l.value.channel.kind === "both"),
     );
     lines.unshift({
@@ -598,20 +603,45 @@
   const toggleCompare = () => setCompare(!comparing);
   // Esc ends the whole session, not just the B audition.
   function exitCompare() {
-    if (previewRev) {
-      stopPreview();
-      return;
-    }
     setCompare(false);
     matchArmed = false;
     matchOff = false;
   }
 
+  // ── Version tags ────────────────────────────────────────────────────────────
+  // A revision can carry a user-given name as a `# fastpeq:tag=` comment that
+  // rides with its content. Restoring a tagged version brings the tag along
+  // into the live config.txt; it stays with the content through an unchanged
+  // save, and when a *changed* save displaces that content, the tag goes back
+  // to the version's snapshot (the backend keeps it) and is scrubbed from the
+  // live config. `tagBaseKey` is the content signature the tag describes, so
+  // the editor knows whether the working state still IS the tagged version.
+  const TAG_PREFIX = "# fastpeq:tag=";
+  let restoredTag = $state("");
+  let tagBaseKey = $state("");
+
+  // Content identity for the tag (preamp excluded — it's derived, like the
+  // history normal form).
+  const eqKey = () =>
+    JSON.stringify({
+      b: bands.map((b) => [b.enabled, b.kind, b.freq, b.gain, b.q, b.channel.kind]),
+      balance,
+      raw: rawLines,
+    });
+
+  /** Split a parsed config's raw lines into its tag and the rest. */
+  function extractTag(raw: string[]): { tag: string; rest: string[] } {
+    const line = raw.find((l) => l.trim().startsWith(TAG_PREFIX));
+    return {
+      tag: line ? line.trim().slice(TAG_PREFIX.length).trim() : "",
+      rest: raw.filter((l) => !l.trim().startsWith(TAG_PREFIX)),
+    };
+  }
+
   // ── History browser ─────────────────────────────────────────────────────────
-  // Lists the preset's revisions; selecting one auditions it through the
-  // loudness-matched compare above (so an old version can't win just by being
-  // louder), and Restore writes it back (undoable — the backend snapshots the
-  // current content first and recomputes the master preamp).
+  // Lists the preset's revisions. Rows are informational (version + creation
+  // date); hearing an old version is what Restore is for — it live-loads into
+  // the editor without writing anything, so there's no separate audition mode.
   let histOpen = $state(false);
   let histList = $state<api.Revision[]>([]);
   let histAnchor = $state<Anchor | null>(null);
@@ -638,57 +668,58 @@
   }
   function closeHistory() {
     histOpen = false;
-    if (previewRev) stopPreview();
+    editingTag = null;
   }
 
-  /** Audition a revision (or stop, when it's the one already playing). */
-  async function previewRevision(rev: api.Revision) {
-    if (previewRev?.id === rev.id) {
-      stopPreview();
-      return;
-    }
+  // Inline tag editing (the pencil): Enter/blur commits, Esc cancels.
+  let editingTag = $state<{ id: string; value: string; prior: string } | null>(null);
+
+  function focusTagInput(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
+  async function commitTagEdit() {
+    const edit = editingTag;
+    editingTag = null;
+    if (!edit || edit.value.trim() === edit.prior) return;
     try {
-      const config = await api.getRevision(name, rev.id);
-      if (!matchArmed) {
-        matchArmed = true; // previews are loudness-matched like any compare
-        matchOff = false;
-      }
-      previewRev = { id: rev.id, config };
-      comparing = true; // same editing lock / ghost as the saved-version compare
-      const cfg = auditionConfig();
-      if (cfg) api.applyLive(cfg).catch((e) => (err = String(e)));
+      await api.setRevisionTag(name, edit.id, edit.value.trim());
+      histList = await api.presetHistory(name); // pick up the new tag
     } catch (e) {
       err = String(e);
     }
   }
 
-  function stopPreview() {
-    previewRev = null;
-    comparing = false;
-    matchArmed = false;
-    matchOff = false;
-    // Direct re-assert (never schedule): previewing must not dirty a clean editor.
-    api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
-  }
-
-  /** Make a revision the preset's content again, and put it on the air. */
+  /** Load a revision into the editor as an UNSAVED edit: it plays live and
+   *  lights Save, but only reaches the preset file when Save is clicked —
+   *  restoring never writes by itself. (Undo-delete still uses the backend
+   *  `restore_revision`, where there is no editor state to load into.) */
   async function restoreRevision(rev: api.Revision) {
-    busy = true;
     try {
-      await api.restoreRevision(name, rev.id);
-      previewRev = null;
+      const config = await api.getRevision(name, rev.id);
+      // End any compare session — we're replacing the edit it compared.
       comparing = false;
       matchArmed = false;
       matchOff = false;
       histOpen = false;
-      await load(name); // reload the editor at the restored content
-      // The user chose this version — make it what's playing, dirty-free.
-      api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
-      onApplied(name);
+      const parsed = parseConfigEq(config);
+      bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
+      // The version's tag rides along: it goes into the live config.txt with
+      // this content (buildConfig adds the comment line).
+      const { tag, rest } = extractTag(parsed.raw);
+      rawLines = rest;
+      balance = parsed.balance;
+      hadPreamp = parsed.hadPreamp; // snapshots carry no master preamp
+      // Recomputed anti-clip value, like a saved restore would get — the
+      // snapshot has no preamp of its own.
+      totalPreamp = computeAutoPreamp(parsed.filters as CurveFilter[], parsed.balance);
+      deviceManual = null;
+      restoredTag = tag;
+      tagBaseKey = tag ? eqKey() : "";
+      schedule(); // live + dirty — Save persists it (Ctrl+Z can take it back)
     } catch (e) {
       err = String(e);
-    } finally {
-      busy = false;
     }
   }
 
@@ -717,6 +748,13 @@
 
   function buildConfig(forSave = false): Config {
     const lines: Line[] = [];
+    // The version tag rides with its content: always into the live config.txt;
+    // into the preset file only while the content still IS the tagged version
+    // (a changed save leaves the tag on the displaced snapshot instead — see
+    // the version-tags section above).
+    if (restoredTag && (!forSave || eqKey() === tagBaseKey)) {
+      lines.push({ kind: "Raw", value: `${TAG_PREFIX}${restoredTag}` });
+    }
     for (const r of rawLines) lines.push({ kind: "Raw", value: r });
     // Save writes the master preamp (the source of truth — req 6). A live preview
     // under offload writes only the APO-stage preamp; the device pregain rides
@@ -861,6 +899,15 @@
       matchArmed = false; // A and B are one again — the matching session is over
       matchOff = false;
       err = "";
+      onSaved?.();
+      if (restoredTag && eqKey() !== tagBaseKey) {
+        // The content moved on: the tag stayed on the displaced version's
+        // snapshot (the backend record keeps it) — scrub it from the live
+        // config.txt too, so the new content doesn't wear an old name.
+        restoredTag = "";
+        tagBaseKey = "";
+        api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
+      }
     } catch (e) {
       err = String(e);
     } finally {
@@ -919,23 +966,13 @@
     class:error={!!err}
     class:comparing={comparing && !err}
     class:bypassed={bypassed && !err && !comparing}
-    title={previewRev
-      ? "Hearing a history version — click it again (or Esc) to return to your edit"
-      : comparing
-        ? "Hearing the saved version — toggle Compare off to return to your edit"
-        : bypassed
-          ? "Filters are bypassed — preamp kept, EQ off"
-          : "Changes apply to Equalizer APO instantly"}
+    title={comparing
+      ? "Hearing the saved version — toggle Compare off to return to your edit"
+      : bypassed
+        ? "Filters are bypassed — preamp kept, EQ off"
+        : "Changes apply to Equalizer APO instantly"}
   >
-    {err
-      ? "● error"
-      : previewRev
-        ? "● history"
-        : comparing
-          ? "● saved"
-          : bypassed
-            ? "● bypassed"
-            : "● live"}
+    {err ? "● error" : comparing ? "● saved" : bypassed ? "● bypassed" : "● live"}
   </span>
   {#if clipping}
     <span
@@ -1165,26 +1202,51 @@
       No history yet — versions appear when a save replaces this preset.
     </div>
   {/if}
-  {#each histList as rev (rev.id)}
-    <div class="hist-row" class:sel={previewRev?.id === rev.id}>
-      <button
-        class="hist-item"
-        onclick={() => previewRevision(rev)}
-        title={previewRev?.id === rev.id
-          ? "Playing — click to return to your edit"
-          : "Preview: hear this version (volume-matched)"}
-      >
-        <span class="hist-when">{timeAgo(rev.savedAtMs)}</span>
-        <span class="hist-what">{OP_LABEL[rev.op]}</span>
-      </button>
-      <button
-        class="hist-restore"
-        onclick={() => restoreRevision(rev)}
-        disabled={busy}
-        title="Make this version the preset again (undoable — the current content is snapshotted first)"
-      >
-        Restore
-      </button>
+  {#each histList as rev, i (rev.id)}
+    <!-- Versions count up from the oldest snapshot (v1); the list is newest
+         first. What displaced the version, and how long ago, live in the
+         tooltip; the label carries its creation date. Rows are informational —
+         Restore is the (non-destructive) way to hear a version. -->
+    <div class="hist-row" title="{OP_LABEL[rev.op]} · {timeAgo(rev.savedAtMs)}">
+      {#if editingTag?.id === rev.id}
+        <input
+          class="hist-tag-input"
+          maxlength="60"
+          placeholder="Name this version"
+          bind:value={editingTag.value}
+          use:focusTagInput
+          onblur={commitTagEdit}
+          onkeydown={(e) => {
+            if (e.key === "Enter") commitTagEdit();
+            else if (e.key === "Escape") {
+              e.stopPropagation(); // don't also collapse/exit anything behind us
+              editingTag = null;
+            }
+          }}
+        />
+      {:else}
+        <span class="hist-item">
+          <span class="hist-ver">v{histList.length - i}</span>
+          {#if rev.tag}<span class="hist-tag">{rev.tag}</span>{/if}
+          <span class="hist-what">{longDate(rev.savedAtMs)}</span>
+        </span>
+        <button
+          class="hist-tag-btn"
+          onclick={() => (editingTag = { id: rev.id, value: rev.tag ?? "", prior: rev.tag ?? "" })}
+          title="Name this version"
+          aria-label="Name this version"
+        >
+          &#9998;
+        </button>
+        <button
+          class="hist-restore"
+          onclick={() => restoreRevision(rev)}
+          disabled={busy}
+          title="Load this version into the editor — nothing is written until you click Save (Ctrl+Z takes it back)"
+        >
+          Restore
+        </button>
+      {/if}
     </div>
   {/each}
 </FloatingMenu>
@@ -1269,31 +1331,48 @@
     padding: 2px 4px;
     border-radius: 6px;
   }
-  :global(.hist-menu) .hist-row.sel {
-    background: var(--panel-2);
-  }
   :global(.hist-menu) .hist-item {
     flex: 1;
     display: flex;
     align-items: baseline;
     gap: 8px;
-    border: none;
-    background: transparent;
     padding: 5px 8px;
-    text-align: left;
     white-space: nowrap;
   }
-  :global(.hist-menu) .hist-row.sel .hist-when {
-    color: var(--accent);
-    font-weight: 600;
-  }
-  :global(.hist-menu) .hist-when {
+  :global(.hist-menu) .hist-ver {
     font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
     color: var(--text);
   }
   :global(.hist-menu) .hist-what {
     font-size: 11px;
     color: var(--muted);
+  }
+  /* The user's name for a version, between vX and the date. */
+  :global(.hist-menu) .hist-tag {
+    font-size: 12px;
+    color: var(--accent);
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  :global(.hist-menu) .hist-tag-btn {
+    flex: none;
+    padding: 2px 6px;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--muted);
+  }
+  :global(.hist-menu) .hist-tag-btn:hover {
+    color: var(--text);
+  }
+  :global(.hist-menu) .hist-tag-input {
+    flex: 1;
+    min-width: 180px;
+    margin: 2px 4px;
+    padding: 3px 6px;
+    font-size: 12px;
   }
   :global(.hist-menu) .hist-restore {
     flex: none;

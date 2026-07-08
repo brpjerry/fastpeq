@@ -50,6 +50,7 @@ vi.mock("./lib/api", () => {
     presetsDir: vi.fn(),
     listPresets: vi.fn(),
     presetCategories: vi.fn(),
+    presetVersions: vi.fn(() => Promise.resolve({})),
     activePreset: vi.fn(),
     bypassed: vi.fn(),
     getTone: vi.fn(),
@@ -110,8 +111,14 @@ vi.mock("./lib/api", () => {
 
 const FLAT_TONE = { bass: 0, mid: 0, treble: 0, invert: false, swap: false };
 const rows = (root: ParentNode) => [...root.querySelectorAll(".presets li:not(.empty)")];
+// Match on the name alone — the label may carry a version badge (".ver").
 const rowFor = (root: ParentNode, name: string) =>
-  rows(root).find((li) => li.querySelector(".name")?.textContent?.trim() === name)!;
+  rows(root).find((li) => {
+    const label = li.querySelector(".name");
+    if (!label) return false;
+    const badge = label.querySelector(".ver")?.textContent ?? "";
+    return label.textContent!.replace(badge, "").trim() === name;
+  })!;
 
 beforeEach(() => {
   vi.mocked(api.apoStatus).mockResolvedValue({ installed: true, config_path: "C:/config.txt", error: null });
@@ -121,6 +128,7 @@ beforeEach(() => {
   vi.mocked(api.activePreset).mockResolvedValue(null); // no active preset → no Editor rendered
   vi.mocked(api.listPresets).mockResolvedValue([]);
   vi.mocked(api.presetCategories).mockResolvedValue({});
+  vi.mocked(api.presetVersions).mockResolvedValue({}); // per-test: mocks leak across tests here
   // Offload off by default; tests that engage it override this per-test.
   vi.mocked(api.hardwareStatus).mockResolvedValue({
     enabled: false,
@@ -144,6 +152,16 @@ function withLibrary() {
 }
 
 describe("App preset list", () => {
+  it("shows a small version badge only for presets with history", async () => {
+    withLibrary();
+    vi.mocked(api.presetVersions).mockResolvedValue({ "Sennheiser HD600": 2 });
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    // Two revisions -> the current content is v3.
+    expect(rowFor(container, "Sennheiser HD600").querySelector(".ver")!.textContent).toBe("v3");
+    expect(rowFor(container, "64 Audio U12t").querySelector(".ver")).toBeNull();
+  });
+
   it("renders presets from the backend", async () => {
     withLibrary();
     const { container } = render(App);

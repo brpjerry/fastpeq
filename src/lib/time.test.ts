@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { timeAgo } from "./time";
+import { longDate, timeAgo } from "./time";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -18,5 +18,23 @@ describe("timeAgo", () => {
   it("falls back to a date past a month, and never reads the future", () => {
     expect(timeAgo(NOW - 45 * DAY, NOW)).toMatch(/\d/); // locale date
     expect(timeAgo(NOW + 10 * MIN, NOW)).toBe("just now"); // clock skew clamps
+  });
+});
+
+describe("longDate", () => {
+  const at = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).getTime();
+
+  it("formats as 'Month Nth, Year' with correct ordinals", () => {
+    expect(longDate(at(2026, 7, 3))).toBe("July 3rd, 2026");
+    expect(longDate(at(2026, 1, 1))).toBe("January 1st, 2026");
+    expect(longDate(at(2026, 2, 2))).toBe("February 2nd, 2026");
+    expect(longDate(at(2026, 3, 4))).toBe("March 4th, 2026");
+    expect(longDate(at(2026, 8, 21))).toBe("August 21st, 2026");
+  });
+
+  it("keeps the teens on 'th'", () => {
+    expect(longDate(at(2026, 5, 11))).toBe("May 11th, 2026");
+    expect(longDate(at(2026, 5, 12))).toBe("May 12th, 2026");
+    expect(longDate(at(2026, 5, 13))).toBe("May 13th, 2026");
   });
 });

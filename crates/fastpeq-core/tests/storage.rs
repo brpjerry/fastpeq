@@ -775,3 +775,41 @@ fn rename_carries_history_along() {
     // The moved revision still loads.
     manager.load_revision("New", &moved[0].id).unwrap();
 }
+
+#[test]
+fn a_save_keeps_the_displaced_contents_tag_on_its_snapshot() {
+    let (_apo, _presets, manager) = history_manager("hist-tag");
+
+    // The preset file holds tagged content (the state after restoring a
+    // tagged version and saving it unchanged: the tag rides with the content).
+    let tagged = Config {
+        lines: vec![
+            Line::Raw("# fastpeq:tag=Warm".into()),
+            Line::Filter(Filter::peak(1000.0, 3.0, 1.0)),
+        ],
+    };
+    manager.save_preset("P", &tagged).unwrap();
+
+    // Saving a real change displaces it; the snapshot keeps the tag, the new
+    // file doesn't have one.
+    let changed = Config {
+        lines: vec![Line::Filter(Filter::peak(2000.0, -2.0, 1.0))],
+    };
+    manager.save_preset("P", &changed).unwrap();
+
+    let revs = manager.preset_history("P").unwrap();
+    assert_eq!(revs.len(), 1);
+    assert_eq!(revs[0].tag.as_deref(), Some("Warm"));
+    assert_eq!(
+        fastpeq_core::history::tag_of(&manager.load_preset("P").unwrap()),
+        None
+    );
+
+    // A tag-only difference is not a content change: re-saving the same EQ
+    // without its tag records nothing new.
+    let untagged_same = Config {
+        lines: vec![Line::Filter(Filter::peak(2000.0, -2.0, 1.0))],
+    };
+    manager.save_preset("P", &untagged_same).unwrap();
+    assert_eq!(manager.preset_history("P").unwrap().len(), 1);
+}

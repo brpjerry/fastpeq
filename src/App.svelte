@@ -22,6 +22,7 @@
   let status = $state<api.ApoStatus | null>(null);
   let presets = $state<string[]>([]);
   let categories = $state<Record<string, string>>({});
+  let versions = $state<Record<string, number>>({}); // history counts → "vN" badges
   let active = $state<string | null>(null);
   let selected = $state<string | null>(null);
   let toast = $state<Toast | null>(null); // see showToast below
@@ -148,6 +149,12 @@
     api.listAudioDevices().then((d) => (devices = d)).catch(() => {});
   }
 
+  // A save can mint a new history revision, moving the preset's "vN" badge —
+  // refresh just the counts (the editor calls this; full reloads cover the rest).
+  function refreshVersions() {
+    api.presetVersions().then((v) => (versions = v)).catch(() => {});
+  }
+
   // (Re)register the global hotkeys whenever the list changes, debounced so a
   // burst of edits (typing a key) doesn't thrash OS registration. Reading
   // `accelerators()` at fire time picks up the final state of the burst.
@@ -175,15 +182,17 @@
     // The backend works with or without Equalizer APO (without it, presets run
     // against a private config dir and only hardware offload is audible), so
     // the library always loads — the banner explains the difference.
-    const [pres, cats, act, byp, tn] = await Promise.all([
+    const [pres, cats, vers, act, byp, tn] = await Promise.all([
       api.listPresets(),
       api.presetCategories(),
+      api.presetVersions(),
       api.activePreset(),
       api.bypassed(), // backend owns bypass state (tray/hotkey too)
       api.getTone(),
     ]);
     presets = pres;
     categories = cats;
+    versions = vers;
     active = act;
     isBypassed = byp;
     tone = tn;
@@ -596,6 +605,7 @@
     <PresetsPanel
       {presets}
       {categories}
+      {versions}
       {active}
       {selected}
       {isBypassed}
@@ -629,6 +639,7 @@
           active = n;
           isBypassed = false;
         }}
+        onSaved={refreshVersions}
       />
     {:else}
       <section class="panel">

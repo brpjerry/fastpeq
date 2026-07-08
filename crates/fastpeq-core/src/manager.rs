@@ -121,6 +121,16 @@ impl Manager {
         self.history().list(name)
     }
 
+    /// Revision counts per preset — the preset list's version badges.
+    pub fn history_counts(&self) -> io::Result<BTreeMap<String, usize>> {
+        self.history().counts()
+    }
+
+    /// Set (or clear, with a string that trims to empty) a revision's user tag.
+    pub fn set_revision_tag(&self, name: &str, id: &str, tag: &str) -> io::Result<()> {
+        self.history().set_tag(name, id, tag)
+    }
+
     /// One revision, parsed — for the history browser's preview ghost.
     pub fn load_revision(&self, name: &str, id: &str) -> io::Result<Config> {
         self.history().load(name, id)
