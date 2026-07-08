@@ -721,7 +721,7 @@ describe("Editor history browser", () => {
     await fireEvent.click(container.querySelector(".hist-btn")!);
     await waitFor(() => expect(document.querySelector(".hist-menu .hist-item")).toBeTruthy());
     const item = document.querySelector(".hist-menu .hist-item")!;
-    expect(item.textContent).toContain("2 min ago");
+    expect(item.textContent).toContain("v1"); // one revision -> the oldest is v1
     expect(item.textContent).toContain("overwritten by save");
 
     // Audition: the revision plays with an injected (matched) master preamp,

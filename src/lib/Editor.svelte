@@ -1165,8 +1165,14 @@
       No history yet — versions appear when a save replaces this preset.
     </div>
   {/if}
-  {#each histList as rev (rev.id)}
-    <div class="hist-row" class:sel={previewRev?.id === rev.id}>
+  {#each histList as rev, i (rev.id)}
+    <!-- Versions count up from the oldest snapshot (v1); the list is newest
+         first. The absolute time lives in the tooltip. -->
+    <div
+      class="hist-row"
+      class:sel={previewRev?.id === rev.id}
+      title="{new Date(rev.savedAtMs).toLocaleString()} · {timeAgo(rev.savedAtMs)}"
+    >
       <button
         class="hist-item"
         onclick={() => previewRevision(rev)}
@@ -1174,7 +1180,7 @@
           ? "Playing — click to return to your edit"
           : "Preview: hear this version (volume-matched)"}
       >
-        <span class="hist-when">{timeAgo(rev.savedAtMs)}</span>
+        <span class="hist-ver">v{histList.length - i}</span>
         <span class="hist-what">{OP_LABEL[rev.op]}</span>
       </button>
       <button
@@ -1283,12 +1289,13 @@
     text-align: left;
     white-space: nowrap;
   }
-  :global(.hist-menu) .hist-row.sel .hist-when {
+  :global(.hist-menu) .hist-row.sel .hist-ver {
     color: var(--accent);
-    font-weight: 600;
   }
-  :global(.hist-menu) .hist-when {
+  :global(.hist-menu) .hist-ver {
     font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
     color: var(--text);
   }
   :global(.hist-menu) .hist-what {
