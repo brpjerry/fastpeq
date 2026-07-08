@@ -27,11 +27,14 @@ fastpeq-core = { path = "../crates/fastpeq-core" }
 fastpeq-hw = { path = "../crates/fastpeq-hw" }
 
 # Windows audio-endpoint enumeration + default-device switching (the "switch
-# output device" hotkey action). Pinned to the same major already in the tree via
-# Tauri's deps. IMMDeviceEnumerator/IPropertyStore come from these features; the
-# undocumented IPolicyConfig is declared by hand in `audio.rs`.
+# output device" hotkey action). `windows` and `windows-core` must move in
+# lockstep: the `#[interface]`/`#[implement]` macros in `audio.rs` only compile
+# when both crates are the same major (Tauri pulls in an older major
+# transitively, which is fine — that copy isn't the one our code links against).
+# IMMDeviceEnumerator/IPropertyStore come from these features; the undocumented
+# IPolicyConfig is declared by hand in `audio.rs`.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
@@ -41,5 +44,5 @@ windows = { version = "0.61", features = [
     "Win32_UI_Shell_PropertiesSystem",
 ] }
 # Pulled in directly so the `#[interface]` macro (which emits `windows_core::…`
-# paths for the hand-declared IPolicyConfig) resolves. Same version as above.
-windows-core = "0.61"
+# paths for the hand-declared IPolicyConfig) resolves. Must match `windows` above.
+windows-core = "0.62"
