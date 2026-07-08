@@ -737,12 +737,33 @@ describe("Editor history browser", () => {
     expect(container.querySelector(".live")!.textContent).toContain("history");
     expect(container.querySelector(".comparing")).toBeTruthy();
 
-    // Clicking the playing row again returns to the edit, dirty-free.
+    // Second click: same revision at RAW levels — the injected matched preamp
+    // is gone (this revision has none of its own) and the red matching is off.
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(document.querySelector(".hist-menu .hist-item")!);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const raw = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(
+      raw.lines.some((l) => l.kind === "Preamp" && l.value.channel.kind === "both"),
+    ).toBe(false);
+    expect(container.querySelector(".live")!.textContent).toContain("history"); // still auditioning
+    expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto"); // matching off
+
+    // Third click: back to the edit, dirty-free — and the opt-out reset, so a
+    // fresh audition starts matched again.
     vi.mocked(api.applyLive).mockClear();
     await fireEvent.click(document.querySelector(".hist-menu .hist-item")!);
     await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
     expect(container.querySelector(".live")!.textContent).toContain("live");
     expect(container.querySelector<HTMLButtonElement>(".primary")!.textContent).toContain("Saved"); // not dirtied
+
+    vi.mocked(api.applyLive).mockClear();
+    await fireEvent.click(document.querySelector(".hist-menu .hist-item")!);
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const again = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(
+      again.lines.some((l) => l.kind === "Preamp" && l.value.channel.kind === "both"),
+    ).toBe(true); // matched once more
   });
 
   it("Restore writes the revision back and reloads the editor", async () => {

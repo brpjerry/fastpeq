@@ -645,18 +645,27 @@
     if (previewRev) stopPreview();
   }
 
-  /** Audition a revision (or stop, when it's the one already playing). */
+  /** The click cycle on a history row: 1) audition it loudness-matched,
+   *  2) the same revision at raw levels (the red matching toggled off),
+   *  3) back to the edit. The return click is about switching back, not the
+   *  preamp — the opt-out resets, so the next audition starts matched again. */
   async function previewRevision(rev: api.Revision) {
     if (previewRev?.id === rev.id) {
-      stopPreview();
+      if (!matchOff) {
+        // Second click: keep this revision playing, drop the matching.
+        matchOff = true;
+        const cfg = auditionConfig(); // matchInfo is now null → the raw config
+        if (cfg) api.applyLive(cfg).catch((e) => (err = String(e)));
+      } else {
+        // Third click: back to the edit (stopPreview resets the opt-out).
+        stopPreview();
+      }
       return;
     }
     try {
       const config = await api.getRevision(name, rev.id);
-      if (!matchArmed) {
-        matchArmed = true; // previews are loudness-matched like any compare
-        matchOff = false;
-      }
+      matchArmed = true; // every fresh audition starts loudness-matched
+      matchOff = false;
       previewRev = { id: rev.id, config };
       comparing = true; // same editing lock / ghost as the saved-version compare
       const cfg = auditionConfig();
@@ -1182,7 +1191,9 @@
         class="hist-item"
         onclick={() => previewRevision(rev)}
         title={previewRev?.id === rev.id
-          ? "Playing — click to return to your edit"
+          ? matchOff
+            ? "Playing at raw levels — click to return to your edit"
+            : "Playing volume-matched — click to hear raw levels"
           : "Preview: hear this version (volume-matched)"}
       >
         <span class="hist-ver">v{histList.length - i}</span>
