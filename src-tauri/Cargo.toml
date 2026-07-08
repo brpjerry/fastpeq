@@ -42,4 +42,4 @@ windows = { version = "0.61", features = [
 ] }
 # Pulled in directly so the `#[interface]` macro (which emits `windows_core::…`
 # paths for the hand-declared IPolicyConfig) resolves. Same version as above.
-windows-core = "0.61"
+windows-core = "0.62"
