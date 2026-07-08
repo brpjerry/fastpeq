@@ -15,16 +15,17 @@
   import { parseRew, normalize, downsample } from "./lib/measurement";
   import { getToneStep, defaultBandCount, initPrefs } from "./lib/prefs.svelte";
   import { initTheme } from "./lib/theme";
-  import { createTrailingThrottle } from "./lib/throttle";
+  import { createDebounce, createTrailingThrottle } from "./lib/throttle";
   import { getHotkeys, accelerators, initHotkeys } from "./lib/hotkeys.svelte";
   import { OSD_EVENT, payloadForHotkey } from "./lib/osd";
 
   let status = $state<api.ApoStatus | null>(null);
   let presets = $state<string[]>([]);
   let categories = $state<Record<string, string>>({});
+  let versions = $state<Record<string, number>>({}); // history counts → "vN" badges
   let active = $state<string | null>(null);
   let selected = $state<string | null>(null);
-  let message = $state("");
+  let toast = $state<Toast | null>(null); // see showToast below
   let busy = $state(false);
   let showSettings = $state(false);
   let showHotkeys = $state(false);
@@ -148,19 +149,22 @@
     api.listAudioDevices().then((d) => (devices = d)).catch(() => {});
   }
 
+  // A save can mint a new history revision, moving the preset's "vN" badge —
+  // refresh just the counts (the editor calls this; full reloads cover the rest).
+  function refreshVersions() {
+    api.presetVersions().then((v) => (versions = v)).catch(() => {});
+  }
+
   // (Re)register the global hotkeys whenever the list changes, debounced so a
-  // burst of edits (typing a key) doesn't thrash OS registration. `accelerators()`
-  // reads the store, so this re-runs on every add/edit/remove/reorder.
-  let hkTimer: ReturnType<typeof setTimeout> | null = null;
+  // burst of edits (typing a key) doesn't thrash OS registration. Reading
+  // `accelerators()` at fire time picks up the final state of the burst.
+  const hotkeyRegistration = createDebounce(() => {
+    api.setHotkeys(accelerators()).then((f) => (failedHotkeys = f)).catch(() => {});
+  }, 300);
   $effect(() => {
-    const accs = accelerators();
-    if (hkTimer) clearTimeout(hkTimer);
-    hkTimer = setTimeout(() => {
-      api.setHotkeys(accs).then((f) => (failedHotkeys = f)).catch(() => {});
-    }, 300);
-    return () => {
-      if (hkTimer) clearTimeout(hkTimer);
-    };
+    void accelerators(); // dependency: re-runs on every add/edit/remove/reorder
+    hotkeyRegistration.schedule();
+    return () => hotkeyRegistration.cancel(); // also drops a pending run on unmount
   });
 
   async function reload() {
@@ -178,15 +182,17 @@
     // The backend works with or without Equalizer APO (without it, presets run
     // against a private config dir and only hardware offload is audible), so
     // the library always loads — the banner explains the difference.
-    const [pres, cats, act, byp, tn] = await Promise.all([
+    const [pres, cats, vers, act, byp, tn] = await Promise.all([
       api.listPresets(),
       api.presetCategories(),
+      api.presetVersions(),
       api.activePreset(),
       api.bypassed(), // backend owns bypass state (tray/hotkey too)
       api.getTone(),
     ]);
     presets = pres;
     categories = cats;
+    versions = vers;
     active = act;
     isBypassed = byp;
     tone = tn;
@@ -210,10 +216,32 @@
   }
 
   function flash(m: string) {
-    message = m;
-    setTimeout(() => {
-      if (message === m) message = "";
-    }, 2600);
+    showToast({ text: m });
+  }
+
+  // A toast can carry an action (Undo) and a deferred cleanup: `onExpire` runs
+  // when the toast times out or is replaced — but NOT when the action is taken.
+  // That's what lets delete postpone clearing the per-preset view state until
+  // the undo window has passed.
+  type Toast = { text: string; action?: { label: string; run: () => void }; onExpire?: () => void };
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function showToast(next: Toast | null, ms = 2600) {
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = null;
+    toast?.onExpire?.(); // a replaced toast still gets its deferred cleanup
+    toast = next;
+    if (next) toastTimer = setTimeout(() => showToast(null), ms);
+  }
+
+  function runToastAction() {
+    const t = toast;
+    if (!t?.action) return;
+    // Taking the action consumes the toast without the expiry cleanup.
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = null;
+    toast = null;
+    t.action.run();
   }
 
   async function guard(action: () => Promise<void>) {
@@ -336,13 +364,39 @@
       }
     });
 
+  // Deleting is a single click, so it's undoable: the backend snapshots the
+  // preset into its history and returns the revision id; the toast offers Undo
+  // for a beat. The per-preset view state (imported measurement, target) is
+  // cleared only when the toast expires, so an undo finds it intact.
   const remove = (name: string) =>
     guard(async () => {
-      await api.deletePreset(name);
-      clearPresetView(name); // drop its curve-editor view state too
+      const category = categories[name] ?? null;
+      const revision = await api.deletePreset(name);
       if (selected === name) selected = null;
-      flash(`Deleted “${name}”`);
       await reload();
+      if (revision) {
+        showToast(
+          {
+            text: `Deleted “${name}”`,
+            action: { label: "Undo", run: () => undoDelete(name, revision, category) },
+            onExpire: () => clearPresetView(name),
+          },
+          8000,
+        );
+      } else {
+        // Nothing was snapshotted (history unavailable) — no dead Undo button.
+        clearPresetView(name);
+        flash(`Deleted “${name}”`);
+      }
+    });
+
+  const undoDelete = (name: string, revision: string, category: string | null) =>
+    guard(async () => {
+      await api.restoreRevision(name, revision);
+      if (category !== null) await api.setCategory(name, category);
+      await reload();
+      selected = name; // bring the resurrected preset back into the editor
+      flash(`Restored “${name}”`);
     });
 
 
@@ -443,7 +497,10 @@
     const onFocus = () => {
       reload();
       loadDevices();
-      refreshOffload(); // follow an output-device change made while we were away
+      // Belt-and-braces resync: output changes are normally caught live by the
+      // backend's OS watcher (which emits fastpeq:changed), this covers anything
+      // missed while we were away.
+      refreshOffload();
     };
     window.addEventListener("focus", onFocus);
     return () => {
@@ -548,6 +605,7 @@
     <PresetsPanel
       {presets}
       {categories}
+      {versions}
       {active}
       {selected}
       {isBypassed}
@@ -581,6 +639,7 @@
           active = n;
           isBypassed = false;
         }}
+        onSaved={refreshVersions}
       />
     {:else}
       <section class="panel">
@@ -591,8 +650,13 @@
   </div>
   {/if}
 
-{#if message}
-    <div class="toast">{message}</div>
+{#if toast}
+    <div class="toast">
+      <span>{toast.text}</span>
+      {#if toast.action}
+        <button class="toast-action" onclick={runToastAction}>{toast.action.label}</button>
+      {/if}
+    </div>
   {/if}
 </main>
 
@@ -692,6 +756,25 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  /* Layout for the action variant (Undo); position/skin come from app.css. */
+  .toast {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .toast-action {
+    flex: none;
+    padding: 3px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .toast-action:hover {
+    background: var(--accent);
+    color: #fff;
   }
 
   .workspace {

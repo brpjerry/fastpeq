@@ -143,6 +143,11 @@
     {:else if active && status?.device}
       Offloading to <strong>{status.device.name}</strong>{#if status.version}
         · firmware {status.version}{/if}.
+    {:else if status?.device}
+      <!-- A session exists but the device connection is down (unplugged,
+           worker error) — distinct from "this output can't offload at all". -->
+      On, but the connection to <strong>{status.device.name}</strong> is down —
+      nothing is offloaded.
     {:else}
       On, but the active output isn't a supported device — nothing is offloaded.
     {/if}

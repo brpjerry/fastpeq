@@ -67,6 +67,10 @@ pub mod hid;
 #[cfg(windows)]
 mod moondrop;
 #[cfg(windows)]
+mod moondrop_family;
+#[cfg(windows)]
+mod protocol;
+#[cfg(windows)]
 mod walkplay;
 mod worker;
 

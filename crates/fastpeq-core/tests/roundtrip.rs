@@ -188,3 +188,26 @@ fn fractional_values_round_trip_exactly() {
     let original = "Filter 1: ON PK Fc 1234.5 Hz Gain -2.7 dB Q 4.318";
     assert_eq!(serialize(&parse(original)), original);
 }
+
+/// Non-ASCII text must never panic the parser (config.txt is user-editable and
+/// comments in any language are legitimate). Each line here puts a multi-byte
+/// character across one of the prefix-check byte offsets (6 for "Filter",
+/// 7 for "Preamp:", 8 for "Channel:"), which a byte-index slice would split
+/// mid-character. They aren't valid directives, so they round-trip as Raw.
+#[test]
+fn non_ascii_lines_are_preserved_not_panicked_on() {
+    for line in [
+        "#中文注释",
+        "Prea😀 x",
+        "Chan😀 y",
+        "Filtre… métal",
+        "Préamp: -3 dB",
+    ] {
+        let config = parse(line);
+        assert!(
+            matches!(&config.lines[..], [Line::Raw(raw)] if raw == line),
+            "{line:?} should be preserved verbatim as Raw: {config:?}"
+        );
+        assert_eq!(serialize(&config), line);
+    }
+}

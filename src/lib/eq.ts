@@ -94,6 +94,21 @@ export interface CurveFilter {
   channel: Channel;
 }
 
+/** An editable band as the editor, its graphs, and the undo history hold it:
+ *  a [CurveFilter] whose gain/q are always plain numbers (defaulted per type
+ *  on load, nulled back out per type on save) plus a stable id for keyed
+ *  lists, drag targets, and history snapshots. The one definition — Editor,
+ *  CurveEditor, and history all alias this. */
+export type EditorBand = {
+  id: number;
+  enabled: boolean;
+  kind: FilterKind;
+  freq: number;
+  gain: number;
+  q: number;
+  channel: Channel;
+};
+
 /** Whether a channel contributes to the given side's response. */
 export const inChannel = (c: Channel, side: "left" | "right") =>
   c.kind === "both" || c.kind === side;
@@ -323,6 +338,42 @@ export function toneFilters(bass: number, mid: number, treble: number): CurveFil
     q: s.q,
     channel: { kind: "both" } as Channel,
   }));
+}
+
+// IEC 61672 A-weighting, normalised so A(1 kHz) = 0 dB exactly.
+function aWeightRaw(f: number): number {
+  const f2 = f * f;
+  const ra =
+    (12194 ** 2 * f2 * f2) /
+    ((f2 + 20.6 ** 2) * Math.sqrt((f2 + 107.7 ** 2) * (f2 + 737.9 ** 2)) * (f2 + 12194 ** 2));
+  return 20 * Math.log10(ra);
+}
+const A_WEIGHT_1K = aWeightRaw(1000);
+
+/** A-weighting (dB) at `f` — how much quieter a tone there *sounds* than its
+ *  level suggests (≈ −19.1 dB at 100 Hz, 0 at 1 kHz, ≈ −2.5 dB at 10 kHz). */
+export function aWeightDb(f: number): number {
+  return aWeightRaw(f) - A_WEIGHT_1K;
+}
+
+/**
+ * Perceived level (dB) of a response: the A-weighted power mean over the probe
+ * grid — the loudness proxy compare-mode volume matching uses. Only the
+ * *difference* between two values is meaningful (a flat response reads
+ * slightly negative because A-weighting attenuates the spectrum edges); a
+ * preamp shift moves it 1:1.
+ */
+export function loudnessDb(
+  filters: CurveFilter[],
+  preamp: number,
+  freqs: number[] = FREQS,
+): number {
+  const resp = responseCurve(filters, preamp, freqs);
+  let sum = 0;
+  for (let i = 0; i < resp.length; i++) {
+    sum += Math.pow(10, (resp[i] + aWeightDb(freqs[i])) / 10);
+  }
+  return 10 * Math.log10(sum / resp.length);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTrailingThrottle } from "./throttle";
+import { createDebounce, createTrailingThrottle } from "./throttle";
 
 describe("createTrailingThrottle", () => {
   beforeEach(() => {
@@ -64,5 +64,50 @@ describe("createTrailingThrottle", () => {
     expect(fn).toHaveBeenCalledTimes(2); // pending call was absorbed
     t.schedule(); // window reset by flush at its call time
     expect(fn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("createDebounce", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("has no leading call and fires once the burst settles", () => {
+    const fn = vi.fn();
+    const d = createDebounce(fn, 300);
+    d.schedule();
+    expect(fn).not.toHaveBeenCalled();
+    d.schedule();
+    d.schedule();
+    vi.advanceTimersByTime(299);
+    expect(fn).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fn).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(500);
+    expect(fn).toHaveBeenCalledTimes(1); // nothing left pending
+  });
+
+  it("each schedule restarts the timer", () => {
+    const fn = vi.fn();
+    const d = createDebounce(fn, 300);
+    d.schedule();
+    vi.advanceTimersByTime(200);
+    d.schedule(); // restart at t=200
+    vi.advanceTimersByTime(200);
+    expect(fn).not.toHaveBeenCalled(); // t=400 < 200+300
+    vi.advanceTimersByTime(100);
+    expect(fn).toHaveBeenCalledTimes(1); // t=500
+  });
+
+  it("cancel drops the pending run", () => {
+    const fn = vi.fn();
+    const d = createDebounce(fn, 300);
+    d.schedule();
+    d.cancel();
+    vi.advanceTimersByTime(1000);
+    expect(fn).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@
     kindHasQ,
     type BandView,
     type CurveFilter,
+    type EditorBand,
   } from "./eq";
   import { sampleAt, type MeasPoint } from "./measurement";
   import {
@@ -26,17 +27,10 @@
     type PlotBox,
   } from "./graph";
   import { gapDb, targetValueAt, compensateCurve } from "./curve";
-  import type { Channel, FilterKind } from "./types";
+  import type { Channel } from "./types";
 
-  type Band = {
-    id: number;
-    enabled: boolean;
-    kind: FilterKind;
-    freq: number;
-    gain: number;
-    q: number;
-    channel: Channel;
-  };
+  // The shared editable-band shape (see EditorBand in eq.ts).
+  type Band = EditorBand;
 
   let {
     bands,
