@@ -126,6 +126,11 @@ impl Manager {
         self.history().counts()
     }
 
+    /// Set (or clear, with a string that trims to empty) a revision's user tag.
+    pub fn set_revision_tag(&self, name: &str, id: &str, tag: &str) -> io::Result<()> {
+        self.history().set_tag(name, id, tag)
+    }
+
     /// One revision, parsed — for the history browser's preview ghost.
     pub fn load_revision(&self, name: &str, id: &str) -> io::Result<Config> {
         self.history().load(name, id)

@@ -194,6 +194,7 @@ pub fn run() {
             commands::preset_history,
             commands::get_revision,
             commands::preset_versions,
+            commands::set_revision_tag,
             commands::get_preset,
             commands::save_preset,
             commands::apply_live,

@@ -76,6 +76,43 @@ pub struct Revision {
     pub id: String,
     pub saved_at_ms: u64,
     pub op: RevisionOp,
+    /// The user's name for this version, if any (see [`tag_of`]).
+    pub tag: Option<String>,
+}
+
+/// The version-tag marker: a user-editable name for a revision, carried as a
+/// comment (`# fastpeq:tag=<text>`) so it rides revision files, the preset
+/// file, and `config.txt` the way the provenance stamp does. It is metadata,
+/// not content — [`normalize`] strips it, so a tag never affects the dedupe
+/// invariants; it simply travels with the content it describes.
+const TAG_PREFIX: &str = "# fastpeq:tag=";
+
+/// The version tag recorded in `config`, if any (empty tags read as none).
+pub fn tag_of(config: &Config) -> Option<String> {
+    config.lines.iter().find_map(|l| match l {
+        Line::Raw(s) => s
+            .trim()
+            .strip_prefix(TAG_PREFIX)
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty()),
+        _ => None,
+    })
+}
+
+/// `config` with its version tag replaced by `tag` — or removed, when `tag`
+/// trims to empty. The tag leads the file, like the provenance stamp.
+pub fn with_tag(config: &Config, tag: &str) -> Config {
+    let tag = tag.trim();
+    let mut lines: Vec<Line> = Vec::with_capacity(config.lines.len() + 1);
+    if !tag.is_empty() {
+        lines.push(Line::Raw(format!("{TAG_PREFIX}{tag}")));
+    }
+    lines.extend(config.lines.iter().filter(|l| !is_tag(l)).cloned());
+    Config { lines }
+}
+
+fn is_tag(line: &Line) -> bool {
+    matches!(line, Line::Raw(s) if s.trim().starts_with(TAG_PREFIX))
 }
 
 /// A preset's EQ in the **normal form** snapshots are stored and compared in:
@@ -100,6 +137,7 @@ pub fn normalize(config: &Config) -> Config {
                     ..
                 } => false,
                 Line::Filter(f) => !is_noop_filter(f),
+                Line::Raw(_) => !is_tag(l), // version tags are metadata, not EQ
                 _ => true,
             })
             .collect(),
@@ -165,9 +203,35 @@ impl PresetHistory {
         }
 
         let id = unique_id(&dir, op);
-        writer::write_text_atomic(&rev_path(&dir, &id), &text)?;
+        // The stored file re-attaches the displaced content's tag — metadata
+        // rides with its content, even though the comparisons above ignore it.
+        let stored = match tag_of(prior) {
+            Some(tag) => {
+                let mut s = serialize(&with_tag(&normalize(prior), &tag));
+                s.push('\n');
+                s
+            }
+            None => text,
+        };
+        writer::write_text_atomic(&rev_path(&dir, &id), &stored)?;
         self.prune(name)?;
         Ok(id)
+    }
+
+    /// Set a revision's tag — or clear it, with a string that trims to empty.
+    pub fn set_tag(&self, name: &str, id: &str, tag: &str) -> io::Result<()> {
+        let dir = self.preset_dir(name)?;
+        if parse_id(id).is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid revision id: {id:?}"),
+            ));
+        }
+        let path = rev_path(&dir, id);
+        let text = fs::read_to_string(&path)?;
+        let mut out = serialize(&with_tag(&parse(&text), tag));
+        out.push('\n');
+        writer::write_text_atomic(&path, &out)
     }
 
     /// Invariant 2: remove every revision whose content matches `current` (the
@@ -195,7 +259,13 @@ impl PresetHistory {
         };
         let mut revisions: Vec<Revision> = entries
             .flatten()
-            .filter_map(|e| parse_revision(&e.path()))
+            .filter_map(|e| {
+                let mut rev = parse_revision(&e.path())?;
+                rev.tag = fs::read_to_string(e.path())
+                    .ok()
+                    .and_then(|text| tag_of(&parse(&text)));
+                Some(rev)
+            })
             .collect();
         revisions.sort_by(|a, b| b.saved_at_ms.cmp(&a.saved_at_ms).then(b.id.cmp(&a.id)));
         Ok(revisions)
@@ -308,6 +378,7 @@ fn parse_revision(path: &Path) -> Option<Revision> {
         id: stem.to_string(),
         saved_at_ms,
         op,
+        tag: None, // filled by list(), which reads the file anyway
     })
 }
 
@@ -517,6 +588,75 @@ mod tests {
             &oldest.lines[0],
             Line::Filter(f) if f.freq == 103.0
         ));
+    }
+
+    #[test]
+    fn tags_ride_with_content_but_are_not_identity() {
+        // tag_of / with_tag round-trip; empty clears.
+        let base = Config {
+            lines: vec![peak(1000.0, 3.0)],
+        };
+        let tagged = with_tag(&base, "Warm bass");
+        assert_eq!(tag_of(&tagged).as_deref(), Some("Warm bass"));
+        assert_eq!(with_tag(&tagged, ""), base);
+        // Metadata, not content: normalize strips it.
+        assert_eq!(normalize(&tagged), normalize(&base));
+
+        // A recorded snapshot keeps the displaced content's tag…
+        let tmp = tempdir("tags");
+        let history = PresetHistory::new(tmp.path());
+        let id = history.record("P", &tagged, RevisionOp::Save).unwrap();
+        assert_eq!(
+            history.list("P").unwrap()[0].tag.as_deref(),
+            Some("Warm bass")
+        );
+        assert_eq!(
+            tag_of(&history.load("P", &id).unwrap()).as_deref(),
+            Some("Warm bass")
+        );
+
+        // …and the tag doesn't defeat the dedupe: recording the same content
+        // under a different tag replaces the old copy (newest tag wins).
+        let retagged = with_tag(&base, "Renamed");
+        let id2 = history.record("P", &retagged, RevisionOp::Save).unwrap();
+        let listed = history.list("P").unwrap();
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert_eq!(listed[0].id, id2);
+        assert_eq!(listed[0].tag.as_deref(), Some("Renamed"));
+    }
+
+    #[test]
+    fn set_tag_names_and_clears_a_revision() {
+        let tmp = tempdir("settag");
+        let history = PresetHistory::new(tmp.path());
+        let id = history
+            .record(
+                "P",
+                &Config {
+                    lines: vec![peak(1000.0, 3.0)],
+                },
+                RevisionOp::Save,
+            )
+            .unwrap();
+        assert_eq!(history.list("P").unwrap()[0].tag, None); // default: untagged
+
+        history.set_tag("P", &id, "  V-shaped  ").unwrap();
+        assert_eq!(
+            history.list("P").unwrap()[0].tag.as_deref(),
+            Some("V-shaped") // trimmed
+        );
+        // The EQ content is untouched by tagging.
+        assert_eq!(
+            normalize(&history.load("P", &id).unwrap()),
+            Config {
+                lines: vec![peak(1000.0, 3.0)],
+            }
+        );
+
+        history.set_tag("P", &id, "").unwrap();
+        assert_eq!(history.list("P").unwrap()[0].tag, None);
+        // Ids are validated like load's.
+        assert!(history.set_tag("P", "../../evil", "x").is_err());
     }
 
     #[test]

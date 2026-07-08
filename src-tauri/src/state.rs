@@ -643,6 +643,13 @@ impl AppState {
         self.manager().history_counts().map_err(|e| e.to_string())
     }
 
+    /// Set (or clear, with an empty string) a revision's user tag.
+    pub fn set_revision_tag(&self, name: &str, id: &str, tag: &str) -> Result<(), String> {
+        self.manager()
+            .set_revision_tag(name, id, tag)
+            .map_err(|e| e.to_string())
+    }
+
     /// Load a preset as a structured config (for the parametric editor).
     pub fn load_config(&self, name: &str) -> Result<Config, String> {
         self.manager().load_preset(name).map_err(|e| e.to_string())
