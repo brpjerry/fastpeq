@@ -235,14 +235,15 @@ and everything built on it (the history preview in Phase 4):
 ### Phase 4 — history browser in the editor · effort M
 
 - A **History** action (clock icon) in the editor header, next to undo/redo.
-- A panel/menu listing revisions: relative time + what happened
-  ("2 h ago · overwritten by save", "yesterday · deleted"). Selecting one
-  draws it as a faded ghost on the graph — the A/B-compare `reference` prop
-  and `parseConfigEq` plumbing already do exactly this for the saved version,
-  so the preview is nearly free.
-- Auditioning a revision goes through the Phase 3 loudness-matched compare,
-  so "the old version sounds better" can't just mean "the old version was
-  louder".
+- A panel/menu listing revisions: version number (v1 = the oldest snapshot;
+  the preset list shows the current content's `vN` beside the name) plus the
+  creation date ("July 3rd, 2026"); what displaced the version and how long
+  ago live in the row tooltip.
+- Rows are informational — there is no separate audition-on-click mode.
+  (The first implementation auditioned revisions through the Phase 3
+  matcher; once Restore became a non-destructive live-load, the audition
+  path was redundant and was removed.) The Phase 3 loudness matching
+  remains for the saved-version A/B compare.
 - **Restore** loads the revision into the editor as an *unsaved* edit — it
   plays live and lights Save, but nothing reaches the preset file until Save
   is clicked (and Ctrl+Z can take it back). The master preamp is recomputed,

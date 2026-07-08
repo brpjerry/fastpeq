@@ -713,9 +713,9 @@ describe("Editor loudness-matched compare", () => {
 describe("Editor history browser", () => {
   const REV = { id: "1783300000000-save", savedAtMs: Date.now() - 2 * 60_000, op: "save" as const };
 
-  it("lists revisions, auditions one matched, and returns to the edit", async () => {
+  it("lists revisions as informational rows (no audition-on-click)", async () => {
     vi.mocked(api.presetHistory).mockResolvedValue([REV]);
-    vi.mocked(api.getRevision).mockResolvedValue(cfg(0, [[500, 6, 1]]));
+    vi.mocked(api.getRevision).mockClear();
     const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));
 
@@ -723,48 +723,16 @@ describe("Editor history browser", () => {
     await waitFor(() => expect(document.querySelector(".hist-menu .hist-item")).toBeTruthy());
     const item = document.querySelector(".hist-menu .hist-item")!;
     expect(item.textContent).toContain("v1"); // one revision -> the oldest is v1
-    expect(item.textContent).toContain(longDate(REV.savedAtMs)); // creation date, not the op
+    expect(item.textContent).toContain(longDate(REV.savedAtMs)); // creation date
 
-    // Audition: the revision plays with an injected (matched) master preamp,
-    // the editor locks like a compare, and the badge says history.
+    // Rows don't audition: clicking one fetches nothing, plays nothing, and
+    // the editor stays live and unlocked (Restore is the way to hear it).
     vi.mocked(api.applyLive).mockClear();
     await fireEvent.click(item);
-    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
-    const onB = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
-    const filt = onB.lines.find((l) => l.kind === "Filter");
-    expect(filt && filt.kind === "Filter" && filt.value.freq).toBe(500);
-    const pre = onB.lines.find((l) => l.kind === "Preamp" && l.value.channel.kind === "both");
-    expect(pre && pre.kind === "Preamp" && pre.value.gain).toBeLessThan(0);
-    expect(container.querySelector(".live")!.textContent).toContain("history");
-    expect(container.querySelector(".comparing")).toBeTruthy();
-
-    // Second click: same revision at RAW levels — the injected matched preamp
-    // is gone (this revision has none of its own) and the red matching is off.
-    vi.mocked(api.applyLive).mockClear();
-    await fireEvent.click(document.querySelector(".hist-menu .hist-item")!);
-    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
-    const raw = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
-    expect(
-      raw.lines.some((l) => l.kind === "Preamp" && l.value.channel.kind === "both"),
-    ).toBe(false);
-    expect(container.querySelector(".live")!.textContent).toContain("history"); // still auditioning
-    expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto"); // matching off
-
-    // Third click: back to the edit, dirty-free — and the opt-out reset, so a
-    // fresh audition starts matched again.
-    vi.mocked(api.applyLive).mockClear();
-    await fireEvent.click(document.querySelector(".hist-menu .hist-item")!);
-    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    expect(api.applyLive).not.toHaveBeenCalled();
+    expect(api.getRevision).not.toHaveBeenCalled();
     expect(container.querySelector(".live")!.textContent).toContain("live");
-    expect(container.querySelector<HTMLButtonElement>(".primary")!.textContent).toContain("Saved"); // not dirtied
-
-    vi.mocked(api.applyLive).mockClear();
-    await fireEvent.click(document.querySelector(".hist-menu .hist-item")!);
-    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
-    const again = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
-    expect(
-      again.lines.some((l) => l.kind === "Preamp" && l.value.channel.kind === "both"),
-    ).toBe(true); // matched once more
+    expect(container.querySelector(".comparing")).toBeNull();
   });
 
   it("Restore loads the revision as an unsaved edit; only Save persists it", async () => {

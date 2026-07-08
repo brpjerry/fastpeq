@@ -529,16 +529,10 @@
   // showing the audible side's extra offset, and toggling it off opts out
   // (raw preamps) for the session.
 
-  // A history revision being auditioned takes the saved version's place as
-  // the "B side" — same lock, same ghost, same loudness matching.
-  let previewRev = $state<{ id: string; config: Config } | null>(null);
-
-  const canCompare = $derived(dirty && savedConfig !== null && previewRev === null);
-  // What the B side *is* right now: the previewed revision, else the saved file.
-  const auditionSource = $derived(previewRev ? previewRev.config : savedConfig);
-  // Graph-ready filters/preamp/balance of the B side — parsed exactly like
-  // load(), via the shared parseConfigEq.
-  const savedCurve = $derived(auditionSource ? parseConfigEq(auditionSource) : null);
+  const canCompare = $derived(dirty && savedConfig !== null);
+  // Graph-ready filters/preamp/balance of the saved version — parsed exactly
+  // like load(), via the shared parseConfigEq.
+  const savedCurve = $derived(savedConfig ? parseConfigEq(savedConfig) : null);
 
   // The matcher: each side's anti-clip preamp plus the extra attenuation the
   // louder side needs (attenuation-only, so matching can never clip).
@@ -571,11 +565,11 @@
       : null,
   );
 
-  // The B side as auditioned: its master preamp replaced by the matched
+  // The saved version as auditioned: its master preamp replaced by the matched
   // anti-clip value (balance trims and everything else stay).
   function auditionConfig(): Config | null {
-    if (!auditionSource || !matchInfo) return auditionSource;
-    const lines: Line[] = auditionSource.lines.filter(
+    if (!savedConfig || !matchInfo) return savedConfig;
+    const lines: Line[] = savedConfig.lines.filter(
       (l) => !(l.kind === "Preamp" && l.value.channel.kind === "both"),
     );
     lines.unshift({
@@ -602,20 +596,15 @@
   const toggleCompare = () => setCompare(!comparing);
   // Esc ends the whole session, not just the B audition.
   function exitCompare() {
-    if (previewRev) {
-      stopPreview();
-      return;
-    }
     setCompare(false);
     matchArmed = false;
     matchOff = false;
   }
 
   // ── History browser ─────────────────────────────────────────────────────────
-  // Lists the preset's revisions; selecting one auditions it through the
-  // loudness-matched compare above (so an old version can't win just by being
-  // louder), and Restore writes it back (undoable — the backend snapshots the
-  // current content first and recomputes the master preamp).
+  // Lists the preset's revisions. Rows are informational (version + creation
+  // date); hearing an old version is what Restore is for — it live-loads into
+  // the editor without writing anything, so there's no separate audition mode.
   let histOpen = $state(false);
   let histList = $state<api.Revision[]>([]);
   let histAnchor = $state<Anchor | null>(null);
@@ -642,46 +631,6 @@
   }
   function closeHistory() {
     histOpen = false;
-    if (previewRev) stopPreview();
-  }
-
-  /** The click cycle on a history row: 1) audition it loudness-matched,
-   *  2) the same revision at raw levels (the red matching toggled off),
-   *  3) back to the edit. The return click is about switching back, not the
-   *  preamp — the opt-out resets, so the next audition starts matched again. */
-  async function previewRevision(rev: api.Revision) {
-    if (previewRev?.id === rev.id) {
-      if (!matchOff) {
-        // Second click: keep this revision playing, drop the matching.
-        matchOff = true;
-        const cfg = auditionConfig(); // matchInfo is now null → the raw config
-        if (cfg) api.applyLive(cfg).catch((e) => (err = String(e)));
-      } else {
-        // Third click: back to the edit (stopPreview resets the opt-out).
-        stopPreview();
-      }
-      return;
-    }
-    try {
-      const config = await api.getRevision(name, rev.id);
-      matchArmed = true; // every fresh audition starts loudness-matched
-      matchOff = false;
-      previewRev = { id: rev.id, config };
-      comparing = true; // same editing lock / ghost as the saved-version compare
-      const cfg = auditionConfig();
-      if (cfg) api.applyLive(cfg).catch((e) => (err = String(e)));
-    } catch (e) {
-      err = String(e);
-    }
-  }
-
-  function stopPreview() {
-    previewRev = null;
-    comparing = false;
-    matchArmed = false;
-    matchOff = false;
-    // Direct re-assert (never schedule): previewing must not dirty a clean editor.
-    api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
   }
 
   /** Load a revision into the editor as an UNSAVED edit: it plays live and
@@ -690,10 +639,8 @@
    *  `restore_revision`, where there is no editor state to load into.) */
   async function restoreRevision(rev: api.Revision) {
     try {
-      const config =
-        previewRev?.id === rev.id ? previewRev.config : await api.getRevision(name, rev.id);
-      // End any audition without re-asserting the old edit — we're replacing it.
-      previewRev = null;
+      const config = await api.getRevision(name, rev.id);
+      // End any compare session — we're replacing the edit it compared.
       comparing = false;
       matchArmed = false;
       matchOff = false;
@@ -941,23 +888,13 @@
     class:error={!!err}
     class:comparing={comparing && !err}
     class:bypassed={bypassed && !err && !comparing}
-    title={previewRev
-      ? "Hearing a history version — click it again (or Esc) to return to your edit"
-      : comparing
-        ? "Hearing the saved version — toggle Compare off to return to your edit"
-        : bypassed
-          ? "Filters are bypassed — preamp kept, EQ off"
-          : "Changes apply to Equalizer APO instantly"}
+    title={comparing
+      ? "Hearing the saved version — toggle Compare off to return to your edit"
+      : bypassed
+        ? "Filters are bypassed — preamp kept, EQ off"
+        : "Changes apply to Equalizer APO instantly"}
   >
-    {err
-      ? "● error"
-      : previewRev
-        ? "● history"
-        : comparing
-          ? "● saved"
-          : bypassed
-            ? "● bypassed"
-            : "● live"}
+    {err ? "● error" : comparing ? "● saved" : bypassed ? "● bypassed" : "● live"}
   </span>
   {#if clipping}
     <span
@@ -1190,24 +1127,13 @@
   {#each histList as rev, i (rev.id)}
     <!-- Versions count up from the oldest snapshot (v1); the list is newest
          first. What displaced the version, and how long ago, live in the
-         tooltip; the label carries its creation date. -->
-    <div
-      class="hist-row"
-      class:sel={previewRev?.id === rev.id}
-      title="{OP_LABEL[rev.op]} · {timeAgo(rev.savedAtMs)}"
-    >
-      <button
-        class="hist-item"
-        onclick={() => previewRevision(rev)}
-        title={previewRev?.id === rev.id
-          ? matchOff
-            ? "Playing at raw levels — click to return to your edit"
-            : "Playing volume-matched — click to hear raw levels"
-          : "Preview: hear this version (volume-matched)"}
-      >
+         tooltip; the label carries its creation date. Rows are informational —
+         Restore is the (non-destructive) way to hear a version. -->
+    <div class="hist-row" title="{OP_LABEL[rev.op]} · {timeAgo(rev.savedAtMs)}">
+      <span class="hist-item">
         <span class="hist-ver">v{histList.length - i}</span>
         <span class="hist-what">{longDate(rev.savedAtMs)}</span>
-      </button>
+      </span>
       <button
         class="hist-restore"
         onclick={() => restoreRevision(rev)}
@@ -1300,22 +1226,13 @@
     padding: 2px 4px;
     border-radius: 6px;
   }
-  :global(.hist-menu) .hist-row.sel {
-    background: var(--panel-2);
-  }
   :global(.hist-menu) .hist-item {
     flex: 1;
     display: flex;
     align-items: baseline;
     gap: 8px;
-    border: none;
-    background: transparent;
     padding: 5px 8px;
-    text-align: left;
     white-space: nowrap;
-  }
-  :global(.hist-menu) .hist-row.sel .hist-ver {
-    color: var(--accent);
   }
   :global(.hist-menu) .hist-ver {
     font-size: 12px;
