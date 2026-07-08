@@ -9,7 +9,7 @@
   import GraphTools from "./GraphTools.svelte";
   import FloatingMenu from "./FloatingMenu.svelte";
   import { anchorBelow, type Anchor } from "./floating";
-  import { timeAgo } from "./time";
+  import { longDate, timeAgo } from "./time";
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
@@ -1189,11 +1189,12 @@
   {/if}
   {#each histList as rev, i (rev.id)}
     <!-- Versions count up from the oldest snapshot (v1); the list is newest
-         first. The absolute time lives in the tooltip. -->
+         first. What displaced the version, and how long ago, live in the
+         tooltip; the label carries its creation date. -->
     <div
       class="hist-row"
       class:sel={previewRev?.id === rev.id}
-      title="{new Date(rev.savedAtMs).toLocaleString()} · {timeAgo(rev.savedAtMs)}"
+      title="{OP_LABEL[rev.op]} · {timeAgo(rev.savedAtMs)}"
     >
       <button
         class="hist-item"
@@ -1205,7 +1206,7 @@
           : "Preview: hear this version (volume-matched)"}
       >
         <span class="hist-ver">v{histList.length - i}</span>
-        <span class="hist-what">{OP_LABEL[rev.op]}</span>
+        <span class="hist-what">{longDate(rev.savedAtMs)}</span>
       </button>
       <button
         class="hist-restore"

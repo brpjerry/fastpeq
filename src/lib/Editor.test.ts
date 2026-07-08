@@ -17,6 +17,7 @@ import {
   getShowMeasRef,
   getTargetOffset,
 } from "./preset-view.svelte";
+import { longDate } from "./time";
 import Editor from "./Editor.svelte";
 
 // The IPC calls the Editor (and the stores it persists through — prefs,
@@ -722,7 +723,7 @@ describe("Editor history browser", () => {
     await waitFor(() => expect(document.querySelector(".hist-menu .hist-item")).toBeTruthy());
     const item = document.querySelector(".hist-menu .hist-item")!;
     expect(item.textContent).toContain("v1"); // one revision -> the oldest is v1
-    expect(item.textContent).toContain("overwritten by save");
+    expect(item.textContent).toContain(longDate(REV.savedAtMs)); // creation date, not the op
 
     // Audition: the revision plays with an injected (matched) master preamp,
     // the editor locks like a compare, and the badge says history.
