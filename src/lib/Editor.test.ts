@@ -766,21 +766,37 @@ describe("Editor history browser", () => {
     ).toBe(true); // matched once more
   });
 
-  it("Restore writes the revision back and reloads the editor", async () => {
+  it("Restore loads the revision as an unsaved edit; only Save persists it", async () => {
     vi.mocked(api.presetHistory).mockResolvedValue([REV]);
     vi.mocked(api.getRevision).mockResolvedValue(cfg(0, [[500, 6, 1]]));
+    vi.mocked(api.restoreRevision).mockClear();
+    vi.mocked(api.savePreset).mockClear();
     const { container } = renderEditor(cfg(0, [[3000, 6, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));
-    const loadsBefore = vi.mocked(api.getPreset).mock.calls.length;
 
     await fireEvent.click(container.querySelector(".hist-btn")!);
     await waitFor(() => expect(document.querySelector(".hist-menu .hist-restore")).toBeTruthy());
+    vi.mocked(api.applyLive).mockClear();
     await fireEvent.click(document.querySelector(".hist-menu .hist-restore")!);
 
-    await waitFor(() => expect(api.restoreRevision).toHaveBeenCalledWith("Test", REV.id));
-    // The editor reloaded the (restored) preset file...
-    await waitFor(() => expect(vi.mocked(api.getPreset).mock.calls.length).toBe(loadsBefore + 1));
-    // ...and the menu is gone.
-    expect(document.querySelector(".hist-menu .hist-item")).toBeNull();
+    // Nothing was written: no backend restore, no save — the revision landed
+    // in the editor as a dirty live edit instead.
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    expect(api.restoreRevision).not.toHaveBeenCalled();
+    expect(api.savePreset).not.toHaveBeenCalled();
+    const live = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    const filt = live.lines.find((l) => l.kind === "Filter");
+    expect(filt && filt.kind === "Filter" && filt.value.freq).toBe(500);
+    expect(document.querySelector(".hist-menu .hist-item")).toBeNull(); // menu closed
+    const saveBtn = container.querySelector<HTMLButtonElement>(".primary")!;
+    expect(saveBtn.textContent).toContain("Save"); // dirty
+    expect(saveBtn.disabled).toBe(false);
+
+    // Only the Save click persists it.
+    await fireEvent.click(saveBtn);
+    await waitFor(() => expect(api.savePreset).toHaveBeenCalled());
+    const saved = vi.mocked(api.savePreset).mock.calls.at(-1)![1] as Config;
+    const savedFilt = saved.lines.find((l) => l.kind === "Filter");
+    expect(savedFilt && savedFilt.kind === "Filter" && savedFilt.value.freq).toBe(500);
   });
 });

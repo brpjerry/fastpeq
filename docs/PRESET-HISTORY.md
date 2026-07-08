@@ -243,10 +243,13 @@ and everything built on it (the history preview in Phase 4):
 - Auditioning a revision goes through the Phase 3 loudness-matched compare,
   so "the old version sounds better" can't just mean "the old version was
   louder".
-- **Restore** writes it back (undoable, because restore snapshots first; the
-  master preamp is recomputed, not replayed) and reloads the editor. While
-  previewing, editing is locked — same `comparing`-style lock the editor
-  already has.
+- **Restore** loads the revision into the editor as an *unsaved* edit — it
+  plays live and lights Save, but nothing reaches the preset file until Save
+  is clicked (and Ctrl+Z can take it back). The master preamp is recomputed,
+  not replayed. Undo-delete is the exception: there is no editor state to
+  load into, so it uses the backend `restore_revision`, which writes the file
+  (snapshotting the displaced content first). While previewing, editing is
+  locked — same `comparing`-style lock the editor already has.
 
 ### Phase 5 (optional, on demand)
 

@@ -684,24 +684,32 @@
     api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
   }
 
-  /** Make a revision the preset's content again, and put it on the air. */
+  /** Load a revision into the editor as an UNSAVED edit: it plays live and
+   *  lights Save, but only reaches the preset file when Save is clicked —
+   *  restoring never writes by itself. (Undo-delete still uses the backend
+   *  `restore_revision`, where there is no editor state to load into.) */
   async function restoreRevision(rev: api.Revision) {
-    busy = true;
     try {
-      await api.restoreRevision(name, rev.id);
+      const config =
+        previewRev?.id === rev.id ? previewRev.config : await api.getRevision(name, rev.id);
+      // End any audition without re-asserting the old edit — we're replacing it.
       previewRev = null;
       comparing = false;
       matchArmed = false;
       matchOff = false;
       histOpen = false;
-      await load(name); // reload the editor at the restored content
-      // The user chose this version — make it what's playing, dirty-free.
-      api.applyLive(buildConfig(false), livePregain).catch((e) => (err = String(e)));
-      onApplied(name);
+      const parsed = parseConfigEq(config);
+      bands = parsed.filters.map((f) => ({ ...f, id: nextId++ }));
+      rawLines = parsed.raw;
+      balance = parsed.balance;
+      hadPreamp = parsed.hadPreamp; // snapshots carry no master preamp
+      // Recomputed anti-clip value, like a saved restore would get — the
+      // snapshot has no preamp of its own.
+      totalPreamp = computeAutoPreamp(parsed.filters as CurveFilter[], parsed.balance);
+      deviceManual = null;
+      schedule(); // live + dirty — Save persists it (Ctrl+Z can take it back)
     } catch (e) {
       err = String(e);
-    } finally {
-      busy = false;
     }
   }
 
@@ -1203,7 +1211,7 @@
         class="hist-restore"
         onclick={() => restoreRevision(rev)}
         disabled={busy}
-        title="Make this version the preset again (undoable — the current content is snapshotted first)"
+        title="Load this version into the editor — nothing is written until you click Save (Ctrl+Z takes it back)"
       >
         Restore
       </button>
