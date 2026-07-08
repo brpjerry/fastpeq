@@ -37,6 +37,7 @@
     name,
     reloadToken,
     onApplied,
+    onSaved,
     tone = { bass: 0, mid: 0, treble: 0, invert: false, swap: false },
     bypassed = false,
     forceAutoPreamp = false,
@@ -49,6 +50,9 @@
     name: string;
     reloadToken: number;
     onApplied: (name: string) => void;
+    /** A save landed (it may have minted a history revision — the parent
+     * refreshes the preset list's version badges). */
+    onSaved?: () => void;
     tone?: api.Tone;
     bypassed?: boolean;
     /** Hardware offload's Min. APO preamp mode forces Auto Preamp on (and locked). */
@@ -861,6 +865,7 @@
       matchArmed = false; // A and B are one again — the matching session is over
       matchOff = false;
       err = "";
+      onSaved?.();
     } catch (e) {
       err = String(e);
     } finally {

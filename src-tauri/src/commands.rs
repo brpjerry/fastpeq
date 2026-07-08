@@ -106,6 +106,13 @@ pub fn preset_history(
     state.preset_history(&name)
 }
 
+/// Revision counts per preset name — the preset list's version badges (a
+/// preset's current content is version `count + 1`).
+#[tauri::command]
+pub fn preset_versions(state: State<'_, AppState>) -> Result<BTreeMap<String, usize>, String> {
+    state.preset_versions()
+}
+
 /// One history revision, parsed — for the browser's preview/audition.
 #[tauri::command]
 pub fn get_revision(

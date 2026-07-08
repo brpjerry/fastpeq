@@ -28,6 +28,9 @@ export interface Revision {
   op: RevisionOp;
 }
 export const presetHistory = (name: string) => invoke<Revision[]>("preset_history", { name });
+/** Revision counts per preset (presets without history absent). A preset's
+ *  current content is version `count + 1`; its oldest snapshot is v1. */
+export const presetVersions = () => invoke<Record<string, number>>("preset_versions");
 export const getRevision = (name: string, id: string) =>
   invoke<Config>("get_revision", { name, id });
 export const renamePreset = (from: string, to: string) =>

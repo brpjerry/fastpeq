@@ -22,6 +22,7 @@
   let {
     presets,
     categories,
+    versions = {},
     active,
     selected,
     isBypassed,
@@ -40,6 +41,9 @@
   }: {
     presets: string[];
     categories: Record<string, string>;
+    /** History revision counts per preset; a preset's current content is
+     * version `count + 1` — shown as a small gray "vN" after the name. */
+    versions?: Record<string, number>;
     active: string | null;
     selected: string | null;
     isBypassed: boolean;
@@ -295,7 +299,7 @@
             ondblclick={() => startRename(name)}
             title="Click to load (reverts unsaved live changes) · double-click to rename"
           >
-            {name}
+            {name}{#if versions[name]}<span class="ver">v{versions[name] + 1}</span>{/if}
           </button>
           <div class="row-actions">
             <button class="icon" onclick={() => startRename(name)} disabled={busy} title="Rename">
@@ -564,6 +568,15 @@
     background: transparent;
     border: none;
     padding: 5px 8px;
+  }
+  /* Version badge: stays small and gray even on the accent-colored
+     active/selected row. */
+  .name .ver {
+    margin-left: 6px;
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
   }
   .name:hover {
     background: var(--panel-2);

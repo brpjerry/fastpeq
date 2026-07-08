@@ -193,6 +193,7 @@ pub fn run() {
             commands::restore_revision,
             commands::preset_history,
             commands::get_revision,
+            commands::preset_versions,
             commands::get_preset,
             commands::save_preset,
             commands::apply_live,

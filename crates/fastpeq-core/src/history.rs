@@ -25,6 +25,7 @@ use crate::apo::{parse, serialize, writer};
 use crate::provenance;
 use crate::store::is_safe_name;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -213,6 +214,35 @@ impl PresetHistory {
         }
         let text = fs::read_to_string(rev_path(&dir, id))?;
         Ok(parse(&text))
+    }
+
+    /// Revision counts per preset name (presets without history are absent) —
+    /// the preset list's version-badge data: a preset's *current* content is
+    /// version `count + 1`, its oldest snapshot v1.
+    pub fn counts(&self) -> io::Result<BTreeMap<String, usize>> {
+        let entries = match fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+            Err(e) => return Err(e),
+        };
+        let mut out = BTreeMap::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let n = fs::read_dir(&path)?
+                .flatten()
+                .filter(|e| parse_revision(&e.path()).is_some())
+                .count();
+            if n > 0 {
+                out.insert(name.to_string(), n);
+            }
+        }
+        Ok(out)
     }
 
     /// Move `from`'s history to `to` (a preset rename). Merges file-by-file
@@ -487,6 +517,28 @@ mod tests {
             &oldest.lines[0],
             Line::Filter(f) if f.freq == 103.0
         ));
+    }
+
+    #[test]
+    fn counts_reports_per_preset_revision_totals() {
+        let tmp = tempdir("counts");
+        let history = PresetHistory::new(tmp.path());
+        assert!(history.counts().unwrap().is_empty()); // no .history dir yet
+
+        let a = Config {
+            lines: vec![peak(100.0, 1.0)],
+        };
+        let b = Config {
+            lines: vec![peak(200.0, 2.0)],
+        };
+        history.record("P", &a, RevisionOp::Save).unwrap();
+        history.record("P", &b, RevisionOp::Save).unwrap();
+        history.record("Q", &a, RevisionOp::Delete).unwrap();
+
+        let counts = history.counts().unwrap();
+        assert_eq!(counts.get("P"), Some(&2));
+        assert_eq!(counts.get("Q"), Some(&1));
+        assert_eq!(counts.get("R"), None);
     }
 
     #[test]
