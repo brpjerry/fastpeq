@@ -42,6 +42,10 @@ windows = { version = "0.62", features = [
     "Win32_Media_Audio",
     "Win32_Devices_FunctionDiscovery",
     "Win32_UI_Shell_PropertiesSystem",
+    # IVirtualDesktopManager + GetForegroundWindow: re-anchor the OSD overlay to
+    # the current virtual desktop (docs/OSD_OVERLAY_BUG.md, hypothesis E).
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # Pulled in directly so the `#[interface]` macro (which emits `windows_core::…`
 # paths for the hand-declared IPolicyConfig) resolves. Must match `windows` above.

@@ -6,6 +6,7 @@
   import { onMount } from "svelte";
   import { Spring } from "svelte/motion";
   import { listen } from "@tauri-apps/api/event";
+  import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { OSD_EVENT, type OsdPayload } from "../lib/osd";
 
@@ -33,7 +34,13 @@
     if (p.bar) barValue.set(p.bar.value, fresh ? { instant: true } : undefined);
     payload = p;
     shown = true;
-    win.show().catch(() => {});
+    // Show, then pull the window back onto the current virtual desktop: Windows
+    // can associate the overlay with one desktop, after which show() on any other
+    // desktop renders it cloaked/invisible (docs/OSD_OVERLAY_BUG.md, hypothesis E).
+    // Ordered after show() because the desktop check passes vacuously while hidden.
+    win.show()
+      .then(() => invoke("osd_ensure_on_current_desktop"))
+      .catch(() => {});
     // Re-assert topmost on every show: a non-activating window created hidden can
     // drop out of the topmost z-order, and show() alone doesn't raise it back.
     win.setAlwaysOnTop(true).catch(() => {});
