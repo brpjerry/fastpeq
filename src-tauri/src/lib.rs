@@ -90,6 +90,72 @@ mod overlay {
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
         }
     }
+
+    /// Move the (already shown) OSD onto the current virtual desktop if the
+    /// shell has associated it with another one. Normally a tool window is
+    /// unmanaged and renders on every desktop, but Windows can start tracking
+    /// it per-desktop, after which `show()` on any other desktop renders it
+    /// DWM-cloaked — i.e. invisibly (docs/OSD_OVERLAY_BUG.md, hypothesis E).
+    /// Must run *after* `show()`: the on-current-desktop check passes vacuously
+    /// for a hidden window.
+    pub fn ensure_on_current_desktop(window: &WebviewWindow) {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::System::Com::{
+            CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+        };
+        use windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        use windows::core::GUID;
+
+        let Ok(hwnd) = window.hwnd() else {
+            return;
+        };
+        // Tauri re-exports HWND from the older `windows` major it links against;
+        // round-trip through the raw pointer value to get *our* crate's HWND.
+        let hwnd = HWND(hwnd.0 as isize as *mut core::ffi::c_void);
+
+        // SAFETY: standard COM init (S_FALSE = already initialized on this
+        // thread, still paired with an uninit; RPC_E_CHANGED_MODE = owned by an
+        // STA elsewhere, usable without owning it — same pattern as audio.rs).
+        // The manager and GUIDs never outlive this scope.
+        unsafe {
+            let com_owned = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+            let moved = (|| {
+                let vdm: IVirtualDesktopManager =
+                    CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_ALL).ok()?;
+                // On the current desktop (or unmanaged, which reports the same):
+                // nothing to fix. Treat query failure as "fine" — moving is only
+                // safe when we positively know the window is elsewhere.
+                if vdm
+                    .IsWindowOnCurrentVirtualDesktop(hwnd)
+                    .map(|b| b.as_bool())
+                    .unwrap_or(true)
+                {
+                    return None;
+                }
+                // There's no documented "current desktop id" query; the
+                // foreground window is on the current desktop by definition, so
+                // borrow its id. A null/unmanaged foreground yields no GUID and
+                // we skip rather than guess.
+                let fg = GetForegroundWindow();
+                if fg.0.is_null() {
+                    return None;
+                }
+                let desktop = vdm.GetWindowDesktopId(fg).ok()?;
+                if desktop == GUID::zeroed() {
+                    return None;
+                }
+                vdm.MoveWindowToDesktop(hwnd, &desktop).ok()
+            })()
+            .is_some();
+            if com_owned {
+                CoUninitialize();
+            }
+            if moved {
+                eprintln!("fastpeq: OSD was on another virtual desktop; moved to the current one");
+            }
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -221,6 +287,7 @@ pub fn run() {
             commands::refresh_hardware,
             commands::set_offload_mode,
             commands::offload_selection,
+            commands::osd_ensure_on_current_desktop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running fastpeq");

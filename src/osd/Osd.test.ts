@@ -2,9 +2,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, cleanup, waitFor } from "@testing-library/svelte";
 
-// Capture the OSD event listener and stub the window show/hide calls.
-const { ev } = vi.hoisted(() => ({
+// Capture the OSD event listener and stub the window show/hide and IPC calls.
+const { ev, invoke } = vi.hoisted(() => ({
   ev: { cb: null as null | ((e: { payload: unknown }) => void) },
+  invoke: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn((_event: string, cb: (e: { payload: unknown }) => void) => {
@@ -12,6 +13,7 @@ vi.mock("@tauri-apps/api/event", () => ({
     return Promise.resolve(() => {});
   }),
 }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     show: vi.fn(() => Promise.resolve()),
@@ -46,5 +48,16 @@ describe("Osd overlay", () => {
 
     await waitFor(() => expect(container.querySelector(".detail")?.textContent).toBe("+1.0 dB"));
     expect(container.querySelectorAll(".osd").length).toBe(1);
+  });
+
+  it("re-anchors the window to the current virtual desktop after each show", async () => {
+    render(Osd);
+    await waitFor(() => expect(ev.cb).toBeTruthy());
+
+    ev.cb!({ payload: { title: "Bypass", detail: "EQ on" } });
+
+    // The invoke is chained behind show(), so the window is visible (and its
+    // desktop association queryable) by the time the backend checks it.
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("osd_ensure_on_current_desktop"));
   });
 });

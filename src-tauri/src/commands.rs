@@ -360,3 +360,17 @@ pub fn set_offload_mode(
     let _ = tray::refresh(&app);
     Ok(())
 }
+
+/// Pull the calling window (the OSD overlay) back onto the current virtual
+/// desktop. The overlay invokes this right after every `show()`: Windows can
+/// silently associate the overlay with one virtual desktop, after which showing
+/// it from any other desktop renders it cloaked — the "notifications stopped
+/// appearing" bug (docs/OSD_OVERLAY_BUG.md, hypothesis E). No-op when the
+/// window is already visible on the current desktop, and on non-Windows.
+#[tauri::command]
+pub fn osd_ensure_on_current_desktop(window: tauri::WebviewWindow) {
+    #[cfg(windows)]
+    crate::overlay::ensure_on_current_desktop(&window);
+    #[cfg(not(windows))]
+    let _ = window;
+}
