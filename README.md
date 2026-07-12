@@ -76,6 +76,18 @@ npm run check                   # svelte-check (types)
 npx vitest run                  # unit/component tests
 ```
 
+## Releasing
+
+Update the application version with the repository helper, which keeps the
+frontend, Tauri, and Rust manifest and lockfile records in sync:
+
+```sh
+npm run bump-version -- 0.9.0
+```
+
+AI assistants: use this command for every version bump rather than editing
+individual manifest or lockfile version fields.
+
 ## Design
 
 A hard split between a UI-agnostic Rust core and a thin Tauri + Svelte shell.
