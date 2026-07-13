@@ -131,7 +131,13 @@ impl Manager {
         self.history().set_tag(name, id, tag)
     }
 
-    /// One revision, parsed — for the history browser's preview ghost.
+    /// Remove a revision from visible history while retaining its source file
+    /// in the hidden history archive for manual recovery.
+    pub fn delete_revision(&self, name: &str, id: &str) -> io::Result<()> {
+        self.history().archive(name, id)
+    }
+
+    /// One revision, parsed for the history browser's preview ghost.
     pub fn load_revision(&self, name: &str, id: &str) -> io::Result<Config> {
         self.history().load(name, id)
     }

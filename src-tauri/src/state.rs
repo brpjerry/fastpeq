@@ -650,6 +650,14 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
+    /// Hide a history revision while preserving its snapshot file in the
+    /// history archive.
+    pub fn delete_revision(&self, name: &str, id: &str) -> Result<(), String> {
+        self.manager()
+            .delete_revision(name, id)
+            .map_err(|e| e.to_string())
+    }
+
     /// Load a preset as a structured config (for the parametric editor).
     pub fn load_config(&self, name: &str) -> Result<Config, String> {
         self.manager().load_preset(name).map_err(|e| e.to_string())

@@ -261,6 +261,7 @@ pub fn run() {
             commands::get_revision,
             commands::preset_versions,
             commands::set_revision_tag,
+            commands::delete_revision,
             commands::get_preset,
             commands::save_preset,
             commands::apply_live,

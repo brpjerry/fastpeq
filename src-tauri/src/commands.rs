@@ -125,7 +125,14 @@ pub fn set_revision_tag(
     state.set_revision_tag(&name, &id, &tag)
 }
 
-/// One history revision, parsed — for the browser's preview/audition.
+/// Hide a history revision without deleting its snapshot file. It moves into
+/// the preset library's `.history/.deleted` archive instead.
+#[tauri::command]
+pub fn delete_revision(state: State<'_, AppState>, name: String, id: String) -> Result<(), String> {
+    state.delete_revision(&name, &id)
+}
+
+/// One history revision, parsed for the browser's preview/audition.
 #[tauri::command]
 pub fn get_revision(
     state: State<'_, AppState>,

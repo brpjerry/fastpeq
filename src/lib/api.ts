@@ -32,6 +32,9 @@ export interface Revision {
 /** Name (or clear, with an empty string) a history revision. */
 export const setRevisionTag = (name: string, id: string, tag: string) =>
   invoke<void>("set_revision_tag", { name, id, tag });
+/** Hide a history revision while retaining its snapshot in the on-disk archive. */
+export const deleteRevision = (name: string, id: string) =>
+  invoke<void>("delete_revision", { name, id });
 export const presetHistory = (name: string) => invoke<Revision[]>("preset_history", { name });
 /** Revision counts per preset (presets without history absent). A preset's
  *  current content is version `count + 1`; its oldest snapshot is v1. */
