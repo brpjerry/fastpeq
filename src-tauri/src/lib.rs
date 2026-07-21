@@ -91,69 +91,82 @@ mod overlay {
         }
     }
 
-    /// Move the (already shown) OSD onto the current virtual desktop if the
-    /// shell has associated it with another one. Normally a tool window is
-    /// unmanaged and renders on every desktop, but Windows can start tracking
-    /// it per-desktop, after which `show()` on any other desktop renders it
-    /// DWM-cloaked — i.e. invisibly (docs/OSD_OVERLAY_BUG.md, hypothesis E).
-    /// Must run *after* `show()`: the on-current-desktop check passes vacuously
-    /// for a hidden window.
-    pub fn ensure_on_current_desktop(window: &WebviewWindow) {
-        use windows::Win32::Foundation::HWND;
+    /// Show, move, and raise the OSD as one native operation. The target desktop
+    /// is captured before showing; after a synchronous Win32 show we move there
+    /// unconditionally instead of asking whether the just-hidden window is on
+    /// the current desktop (that query reports true vacuously).
+    pub fn present_on_current_desktop(window: &WebviewWindow) -> Result<(), String> {
+        use windows::Win32::Foundation::{HWND, RPC_E_CHANGED_MODE};
         use windows::Win32::System::Com::{
             CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
         };
         use windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
-        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            SWP_SHOWWINDOW, SetWindowPos,
+        };
         use windows::core::GUID;
 
-        let Ok(hwnd) = window.hwnd() else {
-            return;
-        };
+        let hwnd = window
+            .hwnd()
+            .map_err(|e| format!("OSD HWND unavailable: {e}"))?;
         // Tauri re-exports HWND from the older `windows` major it links against;
         // round-trip through the raw pointer value to get *our* crate's HWND.
         let hwnd = HWND(hwnd.0 as isize as *mut core::ffi::c_void);
+        make_noactivate(window);
 
-        // SAFETY: standard COM init (S_FALSE = already initialized on this
-        // thread, still paired with an uninit; RPC_E_CHANGED_MODE = owned by an
-        // STA elsewhere, usable without owning it — same pattern as audio.rs).
-        // The manager and GUIDs never outlive this scope.
+        // SAFETY: `hwnd` remains live for this command. COM objects and GUIDs do
+        // not escape the initialized apartment, and each successful init is
+        // balanced with CoUninitialize.
         unsafe {
-            let com_owned = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
-            let moved = (|| {
-                let vdm: IVirtualDesktopManager =
-                    CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_ALL).ok()?;
-                // On the current desktop (or unmanaged, which reports the same):
-                // nothing to fix. Treat query failure as "fine" — moving is only
-                // safe when we positively know the window is elsewhere.
-                if vdm
-                    .IsWindowOnCurrentVirtualDesktop(hwnd)
-                    .map(|b| b.as_bool())
-                    .unwrap_or(true)
-                {
-                    return None;
-                }
-                // There's no documented "current desktop id" query; the
-                // foreground window is on the current desktop by definition, so
-                // borrow its id. A null/unmanaged foreground yields no GUID and
-                // we skip rather than guess.
-                let fg = GetForegroundWindow();
-                if fg.0.is_null() {
-                    return None;
-                }
-                let desktop = vdm.GetWindowDesktopId(fg).ok()?;
-                if desktop == GUID::zeroed() {
-                    return None;
-                }
-                vdm.MoveWindowToDesktop(hwnd, &desktop).ok()
-            })()
-            .is_some();
+            let init = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let com_owned = init.is_ok();
+            let com_usable = if init.is_ok() || init == RPC_E_CHANGED_MODE {
+                Ok(())
+            } else {
+                Err(windows::core::Error::from_hresult(init))
+            };
+            let target = com_usable
+                .map_err(|e| format!("COM initialization failed: {e}"))
+                .and_then(|_| -> Result<(IVirtualDesktopManager, GUID), String> {
+                    let vdm: IVirtualDesktopManager =
+                        CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_ALL)
+                            .map_err(|e| format!("virtual desktop manager unavailable: {e}"))?;
+                    // There is no documented direct current-desktop-id query. The
+                    // foreground window is necessarily on the active desktop, so
+                    // capture its id before the OSD can affect window-manager state.
+                    let fg = GetForegroundWindow();
+                    if fg.0.is_null() {
+                        return Err("no foreground window for current desktop".into());
+                    }
+                    let desktop = vdm
+                        .GetWindowDesktopId(fg)
+                        .map_err(|e| format!("current desktop id unavailable: {e}"))?;
+                    if desktop == GUID::zeroed() {
+                        return Err("current desktop id was empty".into());
+                    }
+                    Ok((vdm, desktop))
+                });
+
+            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+            // Unlike WebviewWindow::show(), this call has completed the native
+            // visibility mutation before the desktop move begins. Showing is
+            // still attempted when COM/desktop discovery failed, so a degraded
+            // shell state does not suppress every OSD.
+            let shown = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags)
+                .map_err(|e| format!("native OSD show failed: {e}"));
+            let moved = target.and_then(|(vdm, desktop)| {
+                vdm.MoveWindowToDesktop(hwnd, &desktop)
+                    .map_err(|e| format!("moving OSD to current desktop failed: {e}"))
+            });
+            // Moving can disturb z-order; re-raise without activation even if
+            // the move failed, keeping the best-effort presentation visible.
+            let raised = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags)
+                .map_err(|e| format!("raising OSD failed: {e}"));
             if com_owned {
                 CoUninitialize();
             }
-            if moved {
-                eprintln!("fastpeq: OSD was on another virtual desktop; moved to the current one");
-            }
+            shown.and(moved).and(raised)
         }
     }
 }
@@ -261,6 +274,7 @@ pub fn run() {
             commands::get_revision,
             commands::preset_versions,
             commands::set_revision_tag,
+            commands::delete_revision,
             commands::get_preset,
             commands::save_preset,
             commands::apply_live,
@@ -287,7 +301,7 @@ pub fn run() {
             commands::refresh_hardware,
             commands::set_offload_mode,
             commands::offload_selection,
-            commands::osd_ensure_on_current_desktop,
+            commands::osd_present,
         ])
         .run(tauri::generate_context!())
         .expect("error while running fastpeq");

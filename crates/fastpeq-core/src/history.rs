@@ -9,6 +9,11 @@
 //! derived/inert, not history), while balance trims, disabled bands, and
 //! unmodeled raw lines round-trip verbatim.
 //!
+//! Versions deleted from the visible history and whole preset files deleted
+//! from the library are moved, not removed, into
+//! `<preset store>/.history/.deleted/<name>/`; that archive is ignored by the
+//! application's history list and version count.
+//!
 //! Two invariants keep the history free of duplicates, both enforced at record
 //! time on the normalized form:
 //!
@@ -36,6 +41,8 @@ use std::path::{Path, PathBuf};
 const KEEP_MAX: usize = 30;
 
 const REV_EXT: &str = "txt";
+/// Revisions removed from visible history. This is ignored by list/count.
+const ARCHIVE_DIR: &str = ".deleted";
 
 /// What displaced a snapshot's content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -185,6 +192,20 @@ impl PresetHistory {
         Ok(self.dir.join(name))
     }
 
+    /// The hidden, on-disk archive for revisions removed from `name`'s visible
+    /// history and for deleted whole-preset files. Validate `name` exactly as
+    /// for the active history directory.
+    fn archive_dir(&self, name: &str) -> io::Result<PathBuf> {
+        let name = name.trim();
+        if name.is_empty() || !is_safe_name(name) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid preset name: {name:?}"),
+            ));
+        }
+        Ok(self.dir.join(ARCHIVE_DIR).join(name))
+    }
+
     /// Record `prior` (the content a mutation is about to displace) as a
     /// revision of `name`. Normalizes first, removes any older revision with
     /// the same content (invariant 1), and prunes to the newest [`KEEP_MAX`].
@@ -286,9 +307,43 @@ impl PresetHistory {
         Ok(parse(&text))
     }
 
-    /// Revision counts per preset name (presets without history are absent) —
-    /// the preset list's version-badge data: a preset's *current* content is
-    /// version `count + 1`, its oldest snapshot v1.
+    /// Remove a revision from the visible history without deleting its file.
+    /// The original snapshot moves into `.history/.deleted/<name>/`, where it
+    /// remains available for manual recovery but is never listed or counted by
+    /// the application.
+    pub fn archive(&self, name: &str, id: &str) -> io::Result<()> {
+        let dir = self.preset_dir(name)?;
+        if parse_id(id).is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid revision id: {id:?}"),
+            ));
+        }
+        let archive = self.archive_dir(name)?;
+        fs::create_dir_all(&archive)?;
+        fs::rename(rev_path(&dir, id), archived_rev_path(&archive, id))?;
+        let _ = fs::remove_dir(&dir); // best-effort: empty after the last removal
+        Ok(())
+    }
+
+    /// Move a whole preset file out of the live library without deleting it.
+    /// Its original file name is retained in `.history/.deleted/<name>/`; a
+    /// suffix prevents a later deletion of the same preset from overwriting an
+    /// older archived copy. A missing preset remains a no-op.
+    pub(crate) fn archive_preset(&self, name: &str, source: &Path) -> io::Result<()> {
+        let archive = self.archive_dir(name)?;
+        match fs::metadata(source) {
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        }
+        fs::create_dir_all(&archive)?;
+        fs::rename(source, unique_archive_path(&archive, source))
+    }
+
+    /// Revision counts per preset name (presets without history are absent).
+    /// The preset list's current content is version `count + 1`; its oldest
+    /// snapshot is v1.
     pub fn counts(&self) -> io::Result<BTreeMap<String, usize>> {
         let entries = match fs::read_dir(&self.dir) {
             Ok(entries) => entries,
@@ -304,6 +359,9 @@ impl PresetHistory {
             let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
                 continue;
             };
+            if name == ARCHIVE_DIR {
+                continue;
+            }
             let n = fs::read_dir(&path)?
                 .flatten()
                 .filter(|e| parse_revision(&e.path()).is_some())
@@ -321,25 +379,44 @@ impl PresetHistory {
     pub fn rename(&self, from: &str, to: &str) -> io::Result<()> {
         let from_dir = self.preset_dir(from)?;
         let to_dir = self.preset_dir(to)?;
-        if !from_dir.exists() || from_dir == to_dir {
+        if from_dir.exists() && from_dir != to_dir {
+            if !to_dir.exists() {
+                // The parent (.history) exists iff from_dir does.
+                fs::rename(&from_dir, &to_dir)?;
+            } else {
+                for rev in self.list(from)? {
+                    let Some((mut ms, op)) = parse_id(&rev.id) else {
+                        continue;
+                    };
+                    let mut target = rev_path(&to_dir, &rev.id);
+                    while target.exists() {
+                        ms += 1;
+                        target = rev_path(&to_dir, &format!("{ms}-{}", op.as_str()));
+                    }
+                    fs::rename(rev_path(&from_dir, &rev.id), target)?;
+                }
+                let _ = fs::remove_dir(&from_dir); // best-effort: empty now
+            }
+        }
+
+        // Keep hidden archived revisions with their preset when it is renamed.
+        let from_archive = self.archive_dir(from)?;
+        let to_archive = self.archive_dir(to)?;
+        if !from_archive.exists() || from_archive == to_archive {
             return Ok(());
         }
-        if !to_dir.exists() {
-            // The parent (.history) exists iff from_dir does.
-            return fs::rename(&from_dir, &to_dir);
+        if !to_archive.exists() {
+            fs::create_dir_all(self.dir.join(ARCHIVE_DIR))?;
+            return fs::rename(&from_archive, &to_archive);
         }
-        for rev in self.list(from)? {
-            let Some((mut ms, op)) = parse_id(&rev.id) else {
+        for entry in fs::read_dir(&from_archive)?.flatten() {
+            let source = entry.path();
+            if !source.is_file() {
                 continue;
-            };
-            let mut target = rev_path(&to_dir, &rev.id);
-            while target.exists() {
-                ms += 1;
-                target = rev_path(&to_dir, &format!("{ms}-{}", op.as_str()));
             }
-            fs::rename(rev_path(&from_dir, &rev.id), target)?;
+            fs::rename(&source, unique_archive_path(&to_archive, &source))?;
         }
-        let _ = fs::remove_dir(&from_dir); // best-effort: empty now
+        let _ = fs::remove_dir(&from_archive); // best-effort: empty now
         Ok(())
     }
 
@@ -365,6 +442,36 @@ impl PresetHistory {
 
 fn rev_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.{REV_EXT}"))
+}
+
+/// Preserve the regular file name in the archive unless a hidden copy already
+/// has it (for example after a system-clock rollback). In that case, suffix
+/// the file instead of overwriting either snapshot.
+fn archived_rev_path(dir: &Path, id: &str) -> PathBuf {
+    unique_archive_path(dir, &rev_path(dir, id))
+}
+
+fn unique_archive_path(dir: &Path, source: &Path) -> PathBuf {
+    let file_name = source.file_name().unwrap_or_default();
+    let target = dir.join(file_name);
+    if !target.exists() {
+        return target;
+    }
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("revision");
+    let ext = source
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or(REV_EXT);
+    for suffix in 1.. {
+        let target = dir.join(format!("{stem}-{suffix}.{ext}"));
+        if !target.exists() {
+            return target;
+        }
+    }
+    unreachable!("unbounded archive suffix iterator")
 }
 
 /// `<unix-ms>-<op>` from a revision file path, or `None` for foreign files.
@@ -487,6 +594,44 @@ mod tests {
         // The snapshot round-trips: raw lines verbatim, already-normal content
         // unchanged.
         assert_eq!(history.load("HD600", &id).unwrap(), normalize(&config));
+    }
+
+    #[test]
+    fn archive_moves_a_revision_out_of_visible_history_without_deleting_it() {
+        let tmp = tempdir("archive");
+        let history = PresetHistory::new(tmp.path());
+        let config = Config {
+            lines: vec![peak(1000.0, 3.0)],
+        };
+        let id = history.record("P", &config, RevisionOp::Save).unwrap();
+
+        history.archive("P", &id).unwrap();
+
+        assert!(history.list("P").unwrap().is_empty());
+        assert!(history.counts().unwrap().is_empty());
+        let archived = tmp
+            .path()
+            .join(".history")
+            .join(ARCHIVE_DIR)
+            .join("P")
+            .join(format!("{id}.{REV_EXT}"));
+        assert!(archived.exists(), "archived revision should remain on disk");
+        assert_eq!(
+            parse(&fs::read_to_string(&archived).unwrap()),
+            normalize(&config)
+        );
+
+        history.rename("P", "Renamed").unwrap();
+        assert!(!archived.exists());
+        assert!(
+            tmp.path()
+                .join(".history")
+                .join(ARCHIVE_DIR)
+                .join("Renamed")
+                .join(format!("{id}.{REV_EXT}"))
+                .exists(),
+            "the archive follows a preset rename"
+        );
     }
 
     #[test]

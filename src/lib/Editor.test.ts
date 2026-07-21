@@ -35,6 +35,7 @@ vi.mock("./api", () => ({
   getRevision: vi.fn(),
   restoreRevision: vi.fn(() => Promise.resolve()),
   setRevisionTag: vi.fn(() => Promise.resolve()),
+  deleteRevision: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -773,6 +774,23 @@ describe("Editor history browser", () => {
     const saved = vi.mocked(api.savePreset).mock.calls.at(-1)![1] as Config;
     const savedFilt = saved.lines.find((l) => l.kind === "Filter");
     expect(savedFilt && savedFilt.kind === "Filter" && savedFilt.value.freq).toBe(500);
+  });
+
+  it("hides a deleted revision while refreshing the version count", async () => {
+    vi.mocked(api.presetHistory)
+      .mockResolvedValueOnce([REV])
+      .mockResolvedValueOnce([]);
+    const onSaved = vi.fn();
+    const { container } = renderEditor(cfg(0, [[3000, 6, 1]]), { onSaved });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    await fireEvent.click(container.querySelector(".hist-btn")!);
+    await waitFor(() => expect(document.querySelector(".hist-menu .hist-delete")).toBeTruthy());
+    await fireEvent.click(document.querySelector(".hist-menu .hist-delete")!);
+
+    await waitFor(() => expect(api.deleteRevision).toHaveBeenCalledWith("Test", REV.id));
+    await waitFor(() => expect(document.querySelector(".hist-menu .hist-empty")).toBeTruthy());
+    expect(onSaved).toHaveBeenCalledOnce();
   });
 });
 

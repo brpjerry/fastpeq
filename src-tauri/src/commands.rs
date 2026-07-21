@@ -125,7 +125,14 @@ pub fn set_revision_tag(
     state.set_revision_tag(&name, &id, &tag)
 }
 
-/// One history revision, parsed — for the browser's preview/audition.
+/// Hide a history revision without deleting its snapshot file. It moves into
+/// the preset library's `.history/.deleted` archive instead.
+#[tauri::command]
+pub fn delete_revision(state: State<'_, AppState>, name: String, id: String) -> Result<(), String> {
+    state.delete_revision(&name, &id)
+}
+
+/// One history revision, parsed for the browser's preview/audition.
 #[tauri::command]
 pub fn get_revision(
     state: State<'_, AppState>,
@@ -361,16 +368,23 @@ pub fn set_offload_mode(
     Ok(())
 }
 
-/// Pull the calling window (the OSD overlay) back onto the current virtual
-/// desktop. The overlay invokes this right after every `show()`: Windows can
-/// silently associate the overlay with one virtual desktop, after which showing
-/// it from any other desktop renders it cloaked — the "notifications stopped
-/// appearing" bug (docs/OSD_OVERLAY_BUG.md, hypothesis E). No-op when the
-/// window is already visible on the current desktop, and on non-Windows.
+/// Present the calling OSD window without activation, on the current virtual
+/// desktop and at the top of the z-order. This is deliberately one native
+/// operation: Tauri's frontend `show()` promise resolves before TAO necessarily
+/// applies the Win32 visibility change, which made the old follow-up desktop
+/// check race against a still-hidden HWND (docs/OSD_OVERLAY_BUG.md).
 #[tauri::command]
-pub fn osd_ensure_on_current_desktop(window: tauri::WebviewWindow) {
+pub fn osd_present(window: tauri::WebviewWindow) -> Result<(), String> {
     #[cfg(windows)]
-    crate::overlay::ensure_on_current_desktop(&window);
+    let result = crate::overlay::present_on_current_desktop(&window);
     #[cfg(not(windows))]
-    let _ = window;
+    let result = window
+        .show()
+        .and_then(|_| window.set_always_on_top(true))
+        .map_err(|e| e.to_string());
+
+    if let Err(e) = &result {
+        eprintln!("fastpeq: OSD presentation failed: {e}");
+    }
+    result
 }

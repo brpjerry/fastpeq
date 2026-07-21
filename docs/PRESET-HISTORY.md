@@ -116,7 +116,7 @@ All in `Manager` (crates/fastpeq-core), the same layer that keeps
 | --- | --- |
 | `save_preset` over an existing file | Record the prior content (normalized) as `save` — **skipped when its normalized form matches the new content** (no snapshot spam from re-saves), and any older revision it duplicates is removed (uniqueness invariant above). |
 | `save_preset`, file absent | Nothing (imports and new presets have no prior state). |
-| `delete_preset` | Record the prior content (normalized) as `delete`, then delete. |
+| `delete_preset` | Record the prior content (normalized) as `delete` for Undo, then move the exact preset file into `.history/.deleted/<name>/` (collision-safe, so repeated deletions retain every source file). |
 | `rename_preset` | Rename `.history/<from>/` → `.history/<to>/` (merge file-by-file if the target dir exists — e.g. renaming onto a previously-deleted name). No snapshot; content didn't change. |
 | `restore_revision` (new) | Record the *current* content (if any) as `restore`, then write the revision back to `<name>.txt` with the master preamp recomputed (anti-clip over the restored bands). The restored revision file itself is removed once it matches the live preset (invariant 2). |
 

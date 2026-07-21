@@ -2,10 +2,15 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, cleanup, waitFor } from "@testing-library/svelte";
 
-// Capture the OSD event listener and stub the window show/hide and IPC calls.
-const { ev, invoke } = vi.hoisted(() => ({
+// Capture the OSD event listener and stub the native presentation IPC call.
+const { ev, invoke, win } = vi.hoisted(() => ({
   ev: { cb: null as null | ((e: { payload: unknown }) => void) },
   invoke: vi.fn(() => Promise.resolve()),
+  win: {
+    show: vi.fn(() => Promise.resolve()),
+    hide: vi.fn(() => Promise.resolve()),
+    setAlwaysOnTop: vi.fn(() => Promise.resolve()),
+  },
 }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn((_event: string, cb: (e: { payload: unknown }) => void) => {
@@ -15,16 +20,16 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({
-    show: vi.fn(() => Promise.resolve()),
-    hide: vi.fn(() => Promise.resolve()),
-    setAlwaysOnTop: vi.fn(() => Promise.resolve()),
-  }),
+  getCurrentWindow: () => win,
 }));
 
 import Osd from "./Osd.svelte";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  ev.cb = null;
+});
 
 describe("Osd overlay", () => {
   it("renders a payload's title, detail and bar, and marks itself shown", async () => {
@@ -50,14 +55,14 @@ describe("Osd overlay", () => {
     expect(container.querySelectorAll(".osd").length).toBe(1);
   });
 
-  it("re-anchors the window to the current virtual desktop after each show", async () => {
+  it("delegates show, desktop placement, and raise to one native command", async () => {
     render(Osd);
     await waitFor(() => expect(ev.cb).toBeTruthy());
 
     ev.cb!({ payload: { title: "Bypass", detail: "EQ on" } });
 
-    // The invoke is chained behind show(), so the window is visible (and its
-    // desktop association queryable) by the time the backend checks it.
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("osd_ensure_on_current_desktop"));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("osd_present"));
+    expect(win.show).not.toHaveBeenCalled();
+    expect(win.setAlwaysOnTop).not.toHaveBeenCalled();
   });
 });

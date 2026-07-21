@@ -646,6 +646,7 @@
   let histList = $state<api.Revision[]>([]);
   let histAnchor = $state<Anchor | null>(null);
   let histBtn = $state<HTMLButtonElement | null>(null);
+  let histBusy = $state(false);
 
   const OP_LABEL: Record<api.RevisionOp, string> = {
     save: "overwritten by save",
@@ -691,8 +692,22 @@
     }
   }
 
+  async function deleteRevision(rev: api.Revision) {
+    if (histBusy) return;
+    histBusy = true;
+    try {
+      await api.deleteRevision(name, rev.id);
+      histList = await api.presetHistory(name);
+      onSaved?.(); // the preset-list version badge count changed
+    } catch (e) {
+      err = String(e);
+    } finally {
+      histBusy = false;
+    }
+  }
+
   /** Load a revision into the editor as an UNSAVED edit: it plays live and
-   *  lights Save, but only reaches the preset file when Save is clicked —
+   *  lights Save, but only reaches the preset file when Save is clicked -
    *  restoring never writes by itself. (Undo-delete still uses the backend
    *  `restore_revision`, where there is no editor state to load into.) */
   async function restoreRevision(rev: api.Revision) {
@@ -1233,6 +1248,7 @@
         <button
           class="hist-tag-btn"
           onclick={() => (editingTag = { id: rev.id, value: rev.tag ?? "", prior: rev.tag ?? "" })}
+          disabled={busy || histBusy}
           title="Name this version"
           aria-label="Name this version"
         >
@@ -1241,10 +1257,18 @@
         <button
           class="hist-restore"
           onclick={() => restoreRevision(rev)}
-          disabled={busy}
+          disabled={busy || histBusy}
           title="Load this version into the editor — nothing is written until you click Save (Ctrl+Z takes it back)"
         >
           Restore
+        </button>
+        <button
+          class="hist-delete"
+          onclick={() => deleteRevision(rev)}
+          disabled={busy || histBusy}
+          title="Hide this version from history; its file is kept in the archive"
+        >
+          Delete
         </button>
       {/if}
     </div>
@@ -1378,6 +1402,12 @@
     flex: none;
     padding: 2px 8px;
     font-size: 11px;
+  }
+  :global(.hist-menu) .hist-delete {
+    flex: none;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--danger);
   }
 
   /* Square icon button (expand / collapse). */
