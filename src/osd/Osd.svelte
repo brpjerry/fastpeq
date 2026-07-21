@@ -1,8 +1,8 @@
 <script lang="ts">
   // The overlay card. Listens for OSD_EVENT and shows a volume-indicator-style
   // card that updates in place (rapid tone steps coalesce into one card) and
-  // auto-hides after a hold. The window is shown/hidden here; the no-activate
-  // styles (set in Rust) keep show() from stealing focus.
+  // auto-hides after a hold. Presentation is one native backend operation so
+  // showing, virtual-desktop placement, and raising cannot race each other.
   import { onMount } from "svelte";
   import { Spring } from "svelte/motion";
   import { listen } from "@tauri-apps/api/event";
@@ -34,20 +34,14 @@
     if (p.bar) barValue.set(p.bar.value, fresh ? { instant: true } : undefined);
     payload = p;
     shown = true;
-    // Show, then pull the window back onto the current virtual desktop: Windows
-    // can associate the overlay with one desktop, after which show() on any other
-    // desktop renders it cloaked/invisible (docs/OSD_OVERLAY_BUG.md, hypothesis E).
-    // Ordered after show() because the desktop check passes vacuously while hidden.
-    win.show()
-      .then(() => invoke("osd_ensure_on_current_desktop"))
-      .catch(() => {});
-    // Re-assert topmost on every show: a non-activating window created hidden can
-    // drop out of the topmost z-order, and show() alone doesn't raise it back.
-    win.setAlwaysOnTop(true).catch(() => {});
     if (hideTimer) {
       clearTimeout(hideTimer);
       hideTimer = null;
     }
+    // Do not compose this from Tauri's show() and a second IPC call. On Windows,
+    // show() resolves after queuing the native visibility change, so the desktop
+    // check can otherwise run while the HWND is still hidden and pass vacuously.
+    invoke("osd_present").catch(() => {});
     if (holdTimer) clearTimeout(holdTimer);
     holdTimer = setTimeout(dismiss, HOLD_MS);
   }

@@ -1,9 +1,8 @@
 # OSD overlay intermittently doesn't appear — triage notes
 
-**Status:** fix for hypothesis E (virtual-desktop cloaking, see 2026-07-11
-evidence below) implemented on branch `osd-virtual-desktop-fix` — awaiting field
-verification. If it proves insufficient, the fallback is the never-hide design
-(see "Fallback plan: Option A" below).
+**Status:** the original hypothesis-E fix shipped in 0.8.1 but still reproduced.
+The 2026-07-20 follow-up found an ordering race in that fix and replaced its two
+queued operations with one native presentation command (details below).
 
 ## Symptom (as reported)
 
@@ -22,9 +21,10 @@ toast.
 - `maybeOsd` is gated: `if (windowFocused) return;` — it only emits when the
   main window is **not** focused ([src/App.svelte:99](../src/App.svelte)). It
   then `emit(OSD_EVENT, payload)`.
-- The separate `osd` window listens and runs `present()` →
-  `win.show()` + `setAlwaysOnTop(true)`, holds 1200 ms, then `dismiss()` fades
-  and `win.hide()`s ([src/osd/Osd.svelte:21-39](../src/osd/Osd.svelte)).
+- The separate `osd` window listens and runs `present()` → one native
+  `osd_present` command that shows, moves, and raises the HWND, holds 1200 ms,
+  then `dismiss()` fades and `win.hide()`s ([src/osd/Osd.svelte](../src/osd/Osd.svelte),
+  [src-tauri/src/lib.rs](../src-tauri/src/lib.rs)).
 - The window is created `visible:false`, `alwaysOnTop`, `skipTaskbar`,
   no-activate / tool-window styles
   ([src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json),
@@ -78,20 +78,33 @@ the shell re-tracking the window on some later show. The "~10 s self-heal" in
 the original report fits too — recovery is a shell re-evaluation (often a
 desktop/foreground change), not a timer.
 
-**Fix E (targeted) — implemented on `osd-virtual-desktop-fix`:** on each
-`present()`, after `show()` resolves, the overlay invokes
-`osd_ensure_on_current_desktop` ([src-tauri/src/commands.rs](../src-tauri/src/commands.rs)
-→ `overlay::ensure_on_current_desktop` in
-[src-tauri/src/lib.rs](../src-tauri/src/lib.rs)). Rust checks
-`IVirtualDesktopManager::IsWindowOnCurrentVirtualDesktop(hwnd)` and, when false,
-`MoveWindowToDesktop(hwnd, GetWindowDesktopId(GetForegroundWindow()))` — the
-foreground window is on the current desktop by definition, and both interfaces
-are documented shell COM APIs. The check must run *after* `show()`: it passes
-vacuously for a hidden window. A successful move logs
-`fastpeq: OSD was on another virtual desktop; moved to the current one` to
-stderr, which doubles as field confirmation of the mechanism. Pinning via
-`IVirtualDesktopPinnedApps` was rejected: undocumented, breaks across Windows
-builds.
+**Original Fix E (shipped in 0.8.1, insufficient):** on each `present()`, after
+the frontend `show()` promise resolved, the overlay invoked a second command to
+check `IVirtualDesktopManager::IsWindowOnCurrentVirtualDesktop(hwnd)` and move
+the window when false. The premise was right — the check must happen while the
+window is shown, because it reports true vacuously while hidden — but the code
+did not actually establish that ordering.
+
+Tauri 2.11's `show()` acknowledges a queued `WindowMessage::Show`; TAO's Windows
+implementation then queues the actual visibility mutation through its thread
+executor. The promise can therefore resolve and the desktop-check IPC can run
+while the HWND is still hidden. It sees the vacuous `true`, returns without a
+move, and the native show happens afterward. The unit test only proved that the
+second command was invoked, because its `show()` mock resolved synchronously; it
+could not detect the native ordering error. All COM failures were also swallowed,
+so the only runtime diagnostic was the success log.
+
+**Fix E2 (2026-07-20):** `present()` now invokes one `osd_present` command.
+`overlay::present_on_current_desktop` captures the active desktop ID from the
+foreground window, uses synchronous `SetWindowPos(HWND_TOPMOST, ...,
+SWP_NOACTIVATE | SWP_SHOWWINDOW)` to show the OSD, unconditionally moves it to
+the captured desktop, then re-raises it because a desktop move can disturb
+z-order. Reapplying the no-activate style on each presentation also covers TAO
+rewriting extended styles after startup. Errors are returned and logged instead
+of being interpreted as "already current"; native show/raise are still attempted
+if COM or desktop discovery fails, so degradation does not suppress every OSD.
+Pinning via `IVirtualDesktopPinnedApps` remains rejected: it is undocumented and
+breaks across Windows builds.
 
 ## Hypotheses (distinguishable by *when* it happens)
 
@@ -122,9 +135,9 @@ away entirely. Details preserved here so the switch is cheap later:
     hypothesis B).
   - `dismiss()`: drop `hideTimer` and `win.hide()`; the `.shown` fade-out *is*
     the dismissal.
-  - **Keep the `osd_ensure_on_current_desktop` invoke**, moved to the start of
-    `present()` (no `show()` to chain after; an always-visible window's desktop
-    association is queryable at any time).
+  - Preserve the native current-desktop re-anchor, but split it from
+    `osd_present`'s one-time show because an always-visible window's association
+    is queryable at any time.
 - [src-tauri/capabilities/osd.json](../src-tauri/capabilities/osd.json):
   `core:window:allow-show`/`allow-hide` become unused once main.ts's one-time
   show is the only caller (keep `allow-show` for that).
@@ -174,10 +187,10 @@ actually observed.
 
 ## Files involved
 
-- [src/osd/Osd.svelte](../src/osd/Osd.svelte) — present/dismiss, show/hide, topmost.
+- [src/osd/Osd.svelte](../src/osd/Osd.svelte) — present/dismiss and native-present IPC.
 - [src/osd/main.ts](../src/osd/main.ts) — window position, click-through.
 - [src/App.svelte](../src/App.svelte) — `maybeOsd`, focus gate, emit.
-- [src-tauri/src/lib.rs](../src-tauri/src/lib.rs) — `overlay::make_noactivate` (where a Rust raise helper would go).
+- [src-tauri/src/lib.rs](../src-tauri/src/lib.rs) — native no-activate/show/move/raise operation.
 - [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) — `osd` window config.
 
 ## Verification

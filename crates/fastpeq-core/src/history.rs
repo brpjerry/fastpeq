@@ -9,7 +9,8 @@
 //! derived/inert, not history), while balance trims, disabled bands, and
 //! unmodeled raw lines round-trip verbatim.
 //!
-//! Versions deleted from the visible history are moved, not removed, into
+//! Versions deleted from the visible history and whole preset files deleted
+//! from the library are moved, not removed, into
 //! `<preset store>/.history/.deleted/<name>/`; that archive is ignored by the
 //! application's history list and version count.
 //!
@@ -192,7 +193,8 @@ impl PresetHistory {
     }
 
     /// The hidden, on-disk archive for revisions removed from `name`'s visible
-    /// history. Validate `name` exactly as for the active history directory.
+    /// history and for deleted whole-preset files. Validate `name` exactly as
+    /// for the active history directory.
     fn archive_dir(&self, name: &str) -> io::Result<PathBuf> {
         let name = name.trim();
         if name.is_empty() || !is_safe_name(name) {
@@ -322,6 +324,21 @@ impl PresetHistory {
         fs::rename(rev_path(&dir, id), archived_rev_path(&archive, id))?;
         let _ = fs::remove_dir(&dir); // best-effort: empty after the last removal
         Ok(())
+    }
+
+    /// Move a whole preset file out of the live library without deleting it.
+    /// Its original file name is retained in `.history/.deleted/<name>/`; a
+    /// suffix prevents a later deletion of the same preset from overwriting an
+    /// older archived copy. A missing preset remains a no-op.
+    pub(crate) fn archive_preset(&self, name: &str, source: &Path) -> io::Result<()> {
+        let archive = self.archive_dir(name)?;
+        match fs::metadata(source) {
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        }
+        fs::create_dir_all(&archive)?;
+        fs::rename(source, unique_archive_path(&archive, source))
     }
 
     /// Revision counts per preset name (presets without history are absent).

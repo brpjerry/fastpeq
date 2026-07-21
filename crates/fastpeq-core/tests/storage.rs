@@ -2,7 +2,8 @@
 
 use fastpeq_core::apo::env::ApoInstall;
 use fastpeq_core::{
-    Channel, Config, Filter, FilterKind, Line, Manager, PresetStore, Tone, provenance, serialize,
+    Channel, Config, Filter, FilterKind, Line, Manager, PresetStore, Tone, parse, provenance,
+    serialize,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -644,14 +645,23 @@ fn save_records_the_displaced_content_and_delete_then_restore_round_trips() {
         ]
     );
 
-    // Delete records the undo handle; restoring it brings the file back with
-    // a RECOMPUTED anti-clip preamp (≈ −5 dB for v2's +5 dB band — snapshots
-    // carry no preamp of their own).
+    // Delete records the undo handle and moves the exact source preset into
+    // the hidden archive. Restoring brings the file back with a RECOMPUTED
+    // anti-clip preamp (≈ −5 dB for v2's +5 dB band — snapshots carry no
+    // preamp of their own).
+    let source_text = fs::read_to_string(presets.path().join("HD600.txt")).unwrap();
     let undo = manager
         .delete_preset("HD600")
         .unwrap()
         .expect("undo handle");
     assert!(!presets.path().join("HD600.txt").exists());
+    let archived_preset = presets
+        .path()
+        .join(".history")
+        .join(".deleted")
+        .join("HD600")
+        .join("HD600.txt");
+    assert_eq!(fs::read_to_string(&archived_preset).unwrap(), source_text);
 
     manager.restore_revision("HD600", &undo).unwrap();
     let back = manager.load_preset("HD600").unwrap();
@@ -735,7 +745,7 @@ fn assert_unique_history(manager: &Manager, name: &str) {
 }
 
 #[test]
-fn history_failure_is_non_fatal_to_saves_and_deletes() {
+fn history_recording_failure_is_non_fatal_to_saves() {
     let (_apo, presets, manager) = history_manager("hist-nonfatal");
     // Occupy the .history path with a FILE so the history dir can't exist.
     fs::write(presets.path().join(".history"), "in the way").unwrap();
@@ -750,10 +760,36 @@ fn history_failure_is_non_fatal_to_saves_and_deletes() {
     manager.save_preset("P", &v2).unwrap(); // snapshot fails, save succeeds
     assert_eq!(manager.load_preset("P").unwrap(), v2);
 
-    // Delete succeeds too — but reports no undo handle, so the UI won't offer
-    // a dead Undo button.
-    assert_eq!(manager.delete_preset("P").unwrap(), None);
-    assert!(!presets.path().join("P.txt").exists());
+    // Archiving is now the deletion itself, so a blocked archive must fail
+    // safely and leave the live preset untouched.
+    assert!(manager.delete_preset("P").is_err());
+    assert!(presets.path().join("P.txt").exists());
+}
+
+#[test]
+fn repeated_preset_deletes_keep_every_archived_source_file() {
+    let (_apo, presets, manager) = history_manager("hist-delete-collide");
+    let first = Config {
+        lines: vec![Line::Filter(Filter::peak(1000.0, 3.0, 1.0))],
+    };
+    let second = Config {
+        lines: vec![Line::Filter(Filter::peak(2000.0, -2.0, 1.0))],
+    };
+
+    manager.save_preset("P", &first).unwrap();
+    manager.delete_preset("P").unwrap();
+    manager.save_preset("P", &second).unwrap();
+    manager.delete_preset("P").unwrap();
+
+    let archive = presets.path().join(".history").join(".deleted").join("P");
+    assert_eq!(
+        parse(&fs::read_to_string(archive.join("P.txt")).unwrap()),
+        first
+    );
+    assert_eq!(
+        parse(&fs::read_to_string(archive.join("P-1.txt")).unwrap()),
+        second
+    );
 }
 
 #[test]

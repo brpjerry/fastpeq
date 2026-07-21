@@ -82,16 +82,19 @@ impl Manager {
         Ok(())
     }
 
-    /// Delete a preset (and its category). Returns the id of the `delete`
+    /// Delete a preset (and its category) by moving its exact source file into
+    /// the hidden history archive. Returns the id of the normalized `delete`
     /// history snapshot — the undo-delete handle — or `None` when there was
-    /// nothing to snapshot or history is unavailable (the UI then offers no
-    /// Undo instead of a dead button).
+    /// nothing to snapshot or history recording was unavailable (the UI then
+    /// offers no Undo instead of a dead button).
     pub fn delete_preset(&self, name: &str) -> io::Result<Option<String>> {
+        let source = self.store.path_for(name)?;
+        let history = self.history();
         let revision = match self.store.load(name) {
-            Ok(prior) => log_history(self.history().record(name, &prior, RevisionOp::Delete)),
+            Ok(prior) => log_history(history.record(name, &prior, RevisionOp::Delete)),
             Err(_) => None,
         };
-        self.store.delete(name)?;
+        history.archive_preset(name, &source)?;
         let mut map = self.categories()?;
         if map.remove(name).is_some() {
             self.write_categories(&map)?;
