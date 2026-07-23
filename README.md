@@ -88,6 +88,26 @@ npm run bump-version -- 0.9.0
 AI assistants: use this command for every version bump rather than editing
 individual manifest or lockfile version fields.
 
+### Vendored WiX template
+
+`src-tauri/main.wxs` is a copy of tauri-bundler's stock MSI template with one
+deliberate change: the Start Menu shortcut no longer carries an explicit
+`Icon="ProductIcon"`.
+
+WiX stages a referenced `<Icon>` into `C:\Windows\Installer\{ProductCode}\`, and
+the MSI's ProductCode is regenerated for every release. Because a taskbar pin
+copies the shortcut's `IconLocation` verbatim at pin time, the next release's
+major upgrade deleted that folder and left the pin pointing at a file that no
+longer existed — the icon turned into a blank page until the user unpinned and
+repinned. Without the attribute, the shell resolves the icon from
+`fastpeq.exe` at its stable `INSTALLDIR` path instead, which is what the desktop
+shortcut and the NSIS installer already did. The Add/Remove Programs icon is
+unaffected; it comes from `ARPPRODUCTICON`.
+
+When bumping Tauri, re-download the stock template for the new bundler version
+and re-apply that one change instead of hand-merging — see the header comment in
+the file.
+
 ## Design
 
 A hard split between a UI-agnostic Rust core and a thin Tauri + Svelte shell.
