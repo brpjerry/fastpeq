@@ -1,6 +1,6 @@
 [package]
 name = "fastpeq-hw"
-version = "0.9.0"
+version = "0.9.1"
 description = "fastpeq hardware parametric-EQ device drivers (USB HID) and a driver-development CLI"
 license = "MIT"
 edition = "2024"
