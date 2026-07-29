@@ -39,6 +39,13 @@
   let refreshing = $state(false);
   let editorReloadToken = $state(0);
 
+  // How to name the active output in the APO banners. The backend reports the
+  // friendly name alongside the check; fall back to a generic phrase if the
+  // endpoint disappeared between the check and the render.
+  const outputLabel = $derived(
+    status?.output_name ? `"${status.output_name}"` : "the current output",
+  );
+
   // Global tone overlay (bass/mid/treble), layered over the active preset by the
   // backend. Writes are throttled while a knob is being dragged.
   let tone = $state<api.Tone>({ bass: 0, mid: 0, treble: 0, invert: false, swap: false });
@@ -135,9 +142,11 @@
 
   // Reconcile hardware offload with the active output (off the UI thread) and pick
   // up the fresh status. Called on demand — window focus and output switches — so
-  // offload follows the active output without polling.
+  // offload follows the active output without polling. Returns the promise so a
+  // caller that also re-reads `apo_status` can wait for the backend's APO endpoint
+  // re-check, which this same command triggers.
   function refreshOffload() {
-    api
+    return api
       .refreshHardware()
       .then((s) => (offload = s))
       .catch(() => {});
@@ -495,12 +504,13 @@
     const unlistenFocus = win.onFocusChanged(({ payload }) => (windowFocused = payload));
     // Pick up external changes to the presets folder when the window is focused.
     const onFocus = () => {
-      reload();
       loadDevices();
       // Belt-and-braces resync: output changes are normally caught live by the
       // backend's OS watcher (which emits fastpeq:changed), this covers anything
-      // missed while we were away.
-      refreshOffload();
+      // missed while we were away. It also re-runs the APO endpoint check, so it
+      // has to finish before reload() re-reads apo_status — otherwise the status
+      // comes back one refresh stale.
+      refreshOffload().finally(reload);
     };
     window.addEventListener("focus", onFocus);
     return () => {
@@ -573,6 +583,20 @@
         Presets still work on a supported hardware device in Hardware Only mode.
         For software EQ, install Equalizer APO and restart fastpeq.
       </div>
+      <!-- APO is installed, but the Configurator enables it per output device, so it
+           can still miss the one you're listening on. Naming the output matters: the
+           fix is a different device's checkbox, not a reinstall. -->
+    {:else if status && status.output_state === "not-on-output"}
+      <div class="banner error">
+        <strong>Equalizer APO isn't enabled for {outputLabel} — software EQ is off.</strong>
+        Run the Equalizer APO Configurator, tick this device, and reboot.
+      </div>
+    {:else if status && status.output_state === "enhancements-off"}
+      <div class="banner error">
+        <strong>Audio enhancements are off for {outputLabel} — software EQ is off.</strong>
+        Equalizer APO is installed for this device but Windows won't load it. Turn
+        "Enhance audio" back on for it in Windows Sound settings.
+      </div>
     {/if}
     {#if connectingHardware}
       <div class="banner info connecting">
@@ -628,6 +652,8 @@
         name={selected}
         {tone}
         bypassed={isBypassed}
+        apoState={status?.output_state ?? "unknown"}
+        apoOutput={status?.output_name ?? null}
         {forceAutoPreamp}
         offloadActive={!!offload?.active}
         {hardwareOnly}

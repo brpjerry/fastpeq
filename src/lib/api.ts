@@ -1,9 +1,9 @@
 // Typed wrappers around the Rust IPC commands. The whole app surface lives here,
 // so adding a feature is: add a core method -> a command -> a wrapper here.
 import { invoke } from "@tauri-apps/api/core";
-import type { ApoStatus, Config, Tone } from "./types";
+import type { ApoOutputState, ApoStatus, Config, Tone } from "./types";
 
-export type { ApoStatus, Config, Tone };
+export type { ApoOutputState, ApoStatus, Config, Tone };
 
 export const apoStatus = () => invoke<ApoStatus>("apo_status");
 export const listPresets = () => invoke<string[]>("list_presets");

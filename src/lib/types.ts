@@ -37,10 +37,23 @@ export interface Config {
   lines: Line[];
 }
 
+// Whether Equalizer APO reaches the *current* output. Separate from `installed`:
+// APO's Configurator enables it per render endpoint, so an installed APO can still
+// leave the active output untouched. "unknown" means the background check hasn't
+// landed (or couldn't tell) and is rendered as the normal healthy state.
+export type ApoOutputState =
+  | "active"
+  | "not-installed"
+  | "not-on-output"
+  | "enhancements-off"
+  | "unknown";
+
 export interface ApoStatus {
   installed: boolean;
   config_path: string | null;
   error: string | null;
+  output_state: ApoOutputState;
+  output_name: string | null;
 }
 
 // Global tone-control overlay (bass/mid/treble gains in dB) plus routing switches.

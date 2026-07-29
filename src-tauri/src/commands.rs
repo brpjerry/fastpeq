@@ -335,12 +335,18 @@ pub fn hardware_status(state: State<'_, AppState>) -> HardwareStatus {
 /// caught by the backend's OS watcher (`audio::watch_default_output`), so there
 /// is no polling anywhere; this command doubles as the belt-and-braces resync.
 /// The reconcile runs off the UI thread (its HID enumeration takes ~1 s).
+///
+/// Also refreshes the APO endpoint check, so running APO's Configurator while
+/// fastpeq is in the background is picked up when the window comes back. The
+/// frontend must await this before re-reading `apo_status` (see `App.svelte`'s
+/// focus handler), or it reads the cache one refresh behind.
 #[tauri::command]
 pub async fn refresh_hardware(app: AppHandle) -> Result<HardwareStatus, String> {
     let sync_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(state) = sync_app.try_state::<AppState>() {
             state.sync_offload();
+            state.refresh_apo_output();
         }
     })
     .await
