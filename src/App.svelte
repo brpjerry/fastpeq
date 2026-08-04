@@ -9,6 +9,7 @@
   import HotkeysPage from "./lib/HotkeysPage.svelte";
   import TonePanel from "./lib/TonePanel.svelte";
   import PresetsPanel, { scrollCurrentIntoView } from "./lib/PresetsPanel.svelte";
+  import PresetPreview from "./lib/PresetPreview.svelte";
   import { starterConfig } from "./lib/starter";
   import { addTarget, initTargets } from "./lib/targets.svelte";
   import { renamePresetView, clearPresetView, initPresetView } from "./lib/preset-view.svelte";
@@ -36,6 +37,7 @@
   let isBypassed = $state(false);
   let bandCount = $state(defaultBandCount());
   let presetsDirPath = $state("");
+  let previewName = $state<string | null>(null); // read-only preview overlay (right-click a preset)
   let refreshing = $state(false);
   let editorReloadToken = $state(0);
 
@@ -206,6 +208,8 @@
     isBypassed = byp;
     tone = tn;
     if (selected && !presets.includes(selected)) selected = null;
+    // A preset that disappeared (deleted or renamed elsewhere) can't be previewed.
+    if (previewName && !presets.includes(previewName)) previewName = null;
     // Default the editor to the active preset when nothing is selected
     // (e.g. on startup), so it opens in the right panel automatically.
     if (!selected && active) selected = active;
@@ -277,6 +281,18 @@
       scrollCurrentIntoView();
     });
 
+
+  // The preview is view-only, so both of its write actions just close it and hand
+  // off to the list's own paths — Apply loads the preset like clicking it, Delete
+  // runs the same archival + undo flow as the row's X button.
+  function applyFromPreview(name: string) {
+    previewName = null;
+    open(name);
+  }
+  function deleteFromPreview(name: string) {
+    previewName = null;
+    remove(name);
+  }
 
   function flashImport(r: api.ImportReport, empty: string) {
     const n = r.imported.length;
@@ -640,6 +656,7 @@
       onRefresh={refresh}
       onToggleBypass={toggleBypass}
       onOpen={open}
+      onPreview={(n) => (previewName = n)}
       onRemove={remove}
       onSetCategory={setCategoryFor}
       onNewPreset={newPreset}
@@ -674,6 +691,16 @@
     {/if}
   </div>
   </div>
+  {/if}
+
+  {#if previewName}
+    <PresetPreview
+      name={previewName}
+      {busy}
+      onClose={() => (previewName = null)}
+      onApply={applyFromPreview}
+      onDelete={deleteFromPreview}
+    />
   {/if}
 
 {#if toast}
