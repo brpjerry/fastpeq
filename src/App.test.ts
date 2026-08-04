@@ -641,6 +641,81 @@ describe("startup offload detection", () => {
   });
 });
 
+describe("App preset preview", () => {
+  const openPreview = async (container: ParentNode, name: string) => {
+    await fireEvent.contextMenu(rowFor(container, name).querySelector(".name")!);
+    await waitFor(() => expect(container.querySelector(".preview")).toBeTruthy());
+  };
+
+  it("opens a read-only preview on right-clicking a preset name", async () => {
+    withLibrary();
+    vi.mocked(api.applyPreset).mockClear(); // call counts persist across tests here
+    vi.mocked(api.getPreset).mockResolvedValue({
+      lines: [
+        {
+          kind: "Filter",
+          value: {
+            enabled: true,
+            kind: "Peak",
+            freq: 120,
+            gain: 4.5,
+            q: 1.2,
+            index: 1,
+            channel: { kind: "both" },
+          },
+        },
+      ],
+    });
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await openPreview(container, "Sennheiser HD600");
+    expect(container.querySelector(".preview")!.textContent).toContain("Sennheiser HD600");
+    await waitFor(() => expect(container.querySelectorAll(".preview .prow").length).toBe(1));
+    // Nothing in the pane is editable, and right-clicking never applied anything.
+    expect(container.querySelectorAll(".preview input, .preview select").length).toBe(0);
+    expect(api.applyPreset).not.toHaveBeenCalledWith("Sennheiser HD600");
+
+    // Escape closes it again.
+    await fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(container.querySelector(".preview")).toBeNull());
+  });
+
+  it("applies the preset and closes on Apply", async () => {
+    withLibrary();
+    vi.mocked(api.applyPreset).mockClear();
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await openPreview(container, "64 Audio U12t");
+    const apply = [...container.querySelectorAll(".preview button")].find(
+      (b) => b.textContent!.trim() === "Apply",
+    )!;
+    await fireEvent.click(apply);
+
+    await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("64 Audio U12t"));
+    await waitFor(() => expect(container.querySelector(".preview")).toBeNull());
+  });
+
+  it("deletes through the same archival path as the row's X, with Undo", async () => {
+    withLibrary();
+    vi.mocked(api.deletePreset).mockResolvedValue("1783300512345-delete");
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    await openPreview(container, "Sennheiser HD600");
+    const del = [...container.querySelectorAll(".preview button")].find(
+      (b) => b.textContent!.trim() === "Delete",
+    )!;
+    await fireEvent.click(del);
+
+    await waitFor(() => expect(api.deletePreset).toHaveBeenCalledWith("Sennheiser HD600"));
+    await waitFor(() => expect(container.querySelector(".preview")).toBeNull());
+    await waitFor(() => expect(container.querySelector(".toast")).toBeTruthy());
+    expect(container.querySelector(".toast-action")!.textContent).toBe("Undo");
+  });
+});
+
 describe("App undo-delete", () => {
   it("offers Undo when delete returns a revision, and restores on click", async () => {
     withLibrary();

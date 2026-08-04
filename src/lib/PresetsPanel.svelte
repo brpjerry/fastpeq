@@ -33,6 +33,7 @@
     onRefresh,
     onToggleBypass,
     onOpen,
+    onPreview,
     onRemove,
     onSetCategory,
     onNewPreset,
@@ -54,6 +55,8 @@
     onRefresh: () => void;
     onToggleBypass: () => void;
     onOpen: (name: string) => void;
+    /** Right-click on a preset name: open its read-only preview. */
+    onPreview: (name: string) => void;
     onRemove: (name: string) => void;
     onSetCategory: (name: string, value: string | null) => void;
     onNewPreset: (name: string) => void;
@@ -297,7 +300,11 @@
             class="name"
             onclick={() => onOpen(name)}
             ondblclick={() => startRename(name)}
-            title="Click to load (reverts unsaved live changes) · double-click to rename"
+            oncontextmenu={(e) => {
+              e.preventDefault();
+              onPreview(name);
+            }}
+            title="Click to load (reverts unsaved live changes) · double-click to rename · right-click to preview"
           >
             {name}{#if versions[name]}<span class="ver">v{versions[name] + 1}</span>{/if}
           </button>
