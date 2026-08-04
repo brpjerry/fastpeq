@@ -40,6 +40,8 @@
     onSaved,
     tone = { bass: 0, mid: 0, treble: 0, invert: false, swap: false },
     bypassed = false,
+    apoState = "unknown",
+    apoOutput = null,
     forceAutoPreamp = false,
     offloadActive = false,
     hardwareOnly = false,
@@ -55,6 +57,12 @@
     onSaved?: () => void;
     tone?: api.Tone;
     bypassed?: boolean;
+    /** Whether Equalizer APO reaches the *active output* — the backend's background
+     * endpoint check. Anything but "active"/"unknown" means software EQ is silent
+     * no matter what we write, so the live indicator says so. */
+    apoState?: api.ApoOutputState;
+    /** The output the check ran against, named in the indicator's tooltip. */
+    apoOutput?: string | null;
     /** Hardware offload's Min. APO preamp mode forces Auto Preamp on (and locked). */
     forceAutoPreamp?: boolean;
     /** Whether EQ offload to a hardware device is currently on (drives the per-band
@@ -325,6 +333,29 @@
     ),
   );
   const clipping = $derived(clipPeak > 0.05);
+
+  // Equalizer APO can be unable to touch the active output even when everything
+  // here succeeds — it isn't installed, its Configurator was never run for this
+  // output, or Windows' per-device enhancements switch is off. In all three the
+  // writes land but nothing is audible, so the live indicator has to say so
+  // rather than showing a reassuring green. "unknown" (check not back yet, or
+  // undeterminable) stays green so the chip never flashes on startup.
+  const apoBroken = $derived(apoState !== "active" && apoState !== "unknown");
+  const apoWhere = $derived(apoOutput ? `"${apoOutput}"` : "the current output");
+  const apoLabel = $derived(
+    apoState === "not-installed"
+      ? "● APO not installed"
+      : apoState === "enhancements-off"
+        ? "● enhancements off"
+        : "● APO not active",
+  );
+  const apoTitle = $derived(
+    apoState === "not-installed"
+      ? "Equalizer APO isn't installed — software EQ is silent. Install it and restart fastpeq."
+      : apoState === "enhancements-off"
+        ? `Windows audio enhancements are off for ${apoWhere}, so Equalizer APO can't run. Turn them back on in Sound settings.`
+        : `Equalizer APO isn't enabled for ${apoWhere}. Run the Equalizer APO Configurator and tick this device.`,
+  );
 
   // The per-preset target curve (Flat by default), shown on the graph as a
   // reference. Reactive to the selected target and the current preset. A manual
@@ -979,15 +1010,26 @@
   <span
     class="live"
     class:error={!!err}
-    class:comparing={comparing && !err}
-    class:bypassed={bypassed && !err && !comparing}
-    title={comparing
-      ? "Hearing the saved version — toggle Compare off to return to your edit"
-      : bypassed
-        ? "Filters are bypassed — preamp kept, EQ off"
-        : "Changes apply to Equalizer APO instantly"}
+    class:apo-off={apoBroken && !err}
+    class:comparing={comparing && !err && !apoBroken}
+    class:bypassed={bypassed && !err && !apoBroken && !comparing}
+    title={apoBroken && !err
+      ? apoTitle
+      : comparing
+        ? "Hearing the saved version — toggle Compare off to return to your edit"
+        : bypassed
+          ? "Filters are bypassed — preamp kept, EQ off"
+          : "Changes apply to Equalizer APO instantly"}
   >
-    {err ? "● error" : comparing ? "● saved" : bypassed ? "● bypassed" : "● live"}
+    {err
+      ? "● error"
+      : apoBroken
+        ? apoLabel
+        : comparing
+          ? "● saved"
+          : bypassed
+            ? "● bypassed"
+            : "● live"}
   </span>
   {#if clipping}
     <span
@@ -1286,7 +1328,8 @@
     color: #5bb85f;
     white-space: nowrap;
   }
-  .live.error {
+  .live.error,
+  .live.apo-off {
     color: var(--danger);
   }
   .live.bypassed {

@@ -255,6 +255,49 @@ describe("Editor", () => {
     expect(container.querySelector(".live")!.textContent).toContain("bypassed");
   });
 
+  // Everything the editor does still "succeeds" when APO can't reach the active
+  // output — the indicator is the only thing that tells the user it's inaudible.
+  it.each([
+    ["not-installed", "APO not installed"],
+    ["not-on-output", "APO not active"],
+    ["enhancements-off", "enhancements off"],
+  ])("shows a red indicator when APO is %s", async (apoState, label) => {
+    const { container } = renderEditor(cfg(-10, [[100, 0, 1]]), {
+      apoState,
+      apoOutput: "Odyssey G80SD",
+    });
+    await waitFor(() => expect(container.querySelector(".live.apo-off")).toBeTruthy());
+    expect(container.querySelector(".live")!.textContent).toContain(label);
+  });
+
+  it("names the output in the APO indicator's tooltip", async () => {
+    const { container } = renderEditor(cfg(-10, [[100, 0, 1]]), {
+      apoState: "not-on-output",
+      apoOutput: "Odyssey G80SD",
+    });
+    await waitFor(() => expect(container.querySelector(".live.apo-off")).toBeTruthy());
+    expect(container.querySelector(".live")!.getAttribute("title")).toContain("Odyssey G80SD");
+  });
+
+  // The check runs in the background, so "unknown" is the state at every launch.
+  it("stays live while the APO check is unknown", async () => {
+    const { container } = renderEditor(cfg(-10, [[100, 0, 1]]), { apoState: "unknown" });
+    await waitFor(() => expect(container.querySelector(".live")).toBeTruthy());
+    expect(container.querySelector(".live")!.textContent).toContain("live");
+    expect(container.querySelector(".live.apo-off")).toBeNull();
+  });
+
+  // A broken APO outranks bypass/compare (they're moot when nothing is audible)
+  // but not an error from the action the user just took.
+  it("keeps the APO state ahead of bypass", async () => {
+    const { container } = renderEditor(cfg(-10, [[100, 0, 1]]), {
+      apoState: "not-on-output",
+      bypassed: true,
+    });
+    await waitFor(() => expect(container.querySelector(".live.apo-off")).toBeTruthy());
+    expect(container.querySelector(".live.bypassed")).toBeNull();
+  });
+
   it("flags clipping when the summed boost tops 0 dB", async () => {
     const { container } = renderEditor(cfg(0, [[1000, 10, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));

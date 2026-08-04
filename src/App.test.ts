@@ -121,7 +121,13 @@ const rowFor = (root: ParentNode, name: string) =>
   })!;
 
 beforeEach(() => {
-  vi.mocked(api.apoStatus).mockResolvedValue({ installed: true, config_path: "C:/config.txt", error: null });
+  vi.mocked(api.apoStatus).mockResolvedValue({
+    installed: true,
+    config_path: "C:/config.txt",
+    error: null,
+    output_state: "active",
+    output_name: "Headphones",
+  });
   vi.mocked(api.presetsDir).mockResolvedValue("C:/presets");
   vi.mocked(api.bypassed).mockResolvedValue(false);
   vi.mocked(api.getTone).mockResolvedValue(FLAT_TONE);
@@ -320,6 +326,8 @@ describe("App without Equalizer APO", () => {
       installed: false,
       config_path: null,
       error: "Equalizer APO registry key not found",
+      output_state: "not-installed",
+      output_name: "Headphones",
     });
     const { container, getByText } = render(App);
 
@@ -334,6 +342,55 @@ describe("App without Equalizer APO", () => {
     await fireEvent.input(search, { target: { value: "Senn" } });
     await fireEvent.keyDown(search, { key: "Enter" });
     await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD600"));
+  });
+
+  // APO installed but not reaching the *active output* is a separate failure with a
+  // separate fix (its Configurator, not a reinstall), so the banner must name the
+  // device rather than repeat "not detected".
+  it("names the output when APO isn't enabled for it", async () => {
+    withLibrary();
+    vi.mocked(api.apoStatus).mockResolvedValue({
+      installed: true,
+      config_path: "C:/config.txt",
+      error: null,
+      output_state: "not-on-output",
+      output_name: "Odyssey G80SD",
+    });
+    const { getByText, queryByText } = render(App);
+
+    await waitFor(() => getByText(/isn't enabled for "Odyssey G80SD"/i));
+    expect(queryByText(/not detected/i)).toBeNull();
+  });
+
+  it("points at the Windows enhancements switch when it's off for the output", async () => {
+    withLibrary();
+    vi.mocked(api.apoStatus).mockResolvedValue({
+      installed: true,
+      config_path: "C:/config.txt",
+      error: null,
+      output_state: "enhancements-off",
+      output_name: "Speakers",
+    });
+    const { getByText } = render(App);
+
+    await waitFor(() => getByText(/Audio enhancements are off for "Speakers"/i));
+  });
+
+  // The check runs in the background; until it lands the status is "unknown" and
+  // the UI must stay quiet rather than flashing a warning at every launch.
+  it("shows no banner while the check is still unknown", async () => {
+    withLibrary();
+    vi.mocked(api.apoStatus).mockResolvedValue({
+      installed: true,
+      config_path: "C:/config.txt",
+      error: null,
+      output_state: "unknown",
+      output_name: null,
+    });
+    const { container, queryByText } = render(App);
+
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    expect(queryByText(/software EQ is off/i)).toBeNull();
   });
 });
 

@@ -3,7 +3,7 @@
 //! hotkey, and the IPC commands stay consistent.
 
 use crate::audio;
-use fastpeq_core::apo::env;
+use fastpeq_core::apo::{device as apo_device, env};
 use fastpeq_core::{
     Category, Config, ImportReport, Manager as CoreManager, OffloadMode, PresetStore, Tone,
     offload, provenance,
@@ -16,12 +16,50 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
 
+/// Whether Equalizer APO will actually process the *current* output — the
+/// result of the background endpoint check (see [`AppState::refresh_apo_output`]).
+///
+/// Distinct from [`ApoStatus::installed`]: APO's Configurator enables it per
+/// render endpoint, so an installed APO still won't touch every output.
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApoOutputState {
+    /// APO is hooked into the active output — software EQ is audible.
+    Active,
+    /// APO isn't installed at all.
+    NotInstalled,
+    /// Installed, but not enabled for the active output.
+    NotOnOutput,
+    /// Enabled for the active output, but Windows audio enhancements are off
+    /// for it, so APO never loads.
+    EnhancementsOff,
+    /// Not checked yet, or not determinable. The UI treats this as "fine" so it
+    /// never flashes a warning before the first check lands.
+    #[default]
+    Unknown,
+}
+
+impl From<apo_device::EndpointApo> for ApoOutputState {
+    fn from(state: apo_device::EndpointApo) -> Self {
+        match state {
+            apo_device::EndpointApo::Active => ApoOutputState::Active,
+            apo_device::EndpointApo::NotOnEndpoint => ApoOutputState::NotOnOutput,
+            apo_device::EndpointApo::EnhancementsOff => ApoOutputState::EnhancementsOff,
+            apo_device::EndpointApo::Unknown => ApoOutputState::Unknown,
+        }
+    }
+}
+
 /// Reported to the UI so it can show APO status / errors.
 #[derive(Serialize, Clone)]
 pub struct ApoStatus {
     pub installed: bool,
     pub config_path: Option<String>,
     pub error: Option<String>,
+    /// Whether APO reaches the active output, from the background check.
+    pub output_state: ApoOutputState,
+    /// The output the check ran against, so the UI can name it.
+    pub output_name: Option<String>,
 }
 
 /// Reported to the UI's hardware panel.
@@ -212,6 +250,14 @@ pub struct AppState {
     /// session was last reconciled against. When unchanged, sync skips the expensive
     /// HID enumeration, so an on-demand reconcile is near-free in steady state.
     last_sync: Mutex<Option<(bool, Option<String>)>>,
+    /// Result of the background APO endpoint check: whether APO reaches the active
+    /// output, and which output that was. Refreshed by [`refresh_apo_output`] from
+    /// the same off-UI-thread points that reconcile offload, and served from here
+    /// by [`status`] so no IPC call ever blocks on COM + registry.
+    ///
+    /// [`refresh_apo_output`]: AppState::refresh_apo_output
+    /// [`status`]: AppState::status
+    apo_output: Mutex<(ApoOutputState, Option<String>)>,
     /// Serializes [`sync_offload`]: reconciles run off the UI thread and can be
     /// requested from several places at once (focus, mode change, …); this makes an
     /// overlapping request a no-op instead of racing the session open/close.
@@ -273,6 +319,7 @@ impl AppState {
             hardware: Mutex::new(None),
             offload_mode: Mutex::new(offload_mode),
             last_sync: Mutex::new(None),
+            apo_output: Mutex::new((ApoOutputState::Unknown, None)),
             sync_guard: Mutex::new(()),
             initial_synced: AtomicBool::new(false),
         };
@@ -375,6 +422,38 @@ impl AppState {
         self.invalidate_active();
     }
 
+    /// Re-run the APO endpoint check against the current default output and cache
+    /// the result for [`status`](Self::status).
+    ///
+    /// "APO is installed" isn't the same as "APO processes what I'm listening to":
+    /// APO's Configurator enables it per render endpoint, and Windows' per-device
+    /// "Enable audio enhancements" switch can silence it on an endpoint it *is*
+    /// enabled for. Without this check the UI would show a healthy `live` state
+    /// while nothing reaches the ears.
+    ///
+    /// Called from the same places as [`sync_offload`](Self::sync_offload) — startup,
+    /// the OS default-device notification, and focus — so it is always off the UI
+    /// thread even though it only costs a few ms of COM plus a couple of registry
+    /// opens. No caching key: it's cheap enough to just redo, and the user can flip
+    /// the underlying registry state at any time via APO's Configurator.
+    pub fn refresh_apo_output(&self) {
+        // E2E runs against a throwaway config dir with no APO behind it; leave the
+        // check `Unknown` so the UI stays in its normal state.
+        if test_data_dir().is_some() {
+            return;
+        }
+        // Copy the flag out and drop the lock — the probe below blocks on COM, and
+        // `inner` must never be held across that.
+        let installed = self.inner.lock().unwrap().apo_error.is_none();
+        let result = match audio::default_output() {
+            // No default output at all (nothing plugged in): nothing to report.
+            None => (ApoOutputState::Unknown, None),
+            Some((_, name)) if !installed => (ApoOutputState::NotInstalled, Some(name)),
+            Some((id, name)) => (apo_device::endpoint_state(&id).into(), Some(name)),
+        };
+        *self.apo_output.lock().unwrap() = result;
+    }
+
     /// The current full (un-split) EQ: the cached `last_full` while offloading,
     /// otherwise reconstructed from the active preset's stamp, otherwise the live
     /// `config.txt` as-is.
@@ -444,18 +523,23 @@ impl AppState {
     }
 
     pub fn status(&self) -> ApoStatus {
+        let (output_state, output_name) = self.apo_output.lock().unwrap().clone();
         let inner = self.inner.lock().unwrap();
         match &inner.apo_error {
             None => ApoStatus {
                 installed: true,
                 config_path: Some(inner.manager.install().config_file().display().to_string()),
                 error: None,
+                output_state,
+                output_name,
             },
             // The fallback config path isn't APO's, so it isn't reported.
             Some(e) => ApoStatus {
                 installed: false,
                 config_path: None,
                 error: Some(e.clone()),
+                output_state,
+                output_name,
             },
         }
     }
