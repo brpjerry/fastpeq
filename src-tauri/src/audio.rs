@@ -220,19 +220,21 @@ mod imp {
         Ok(())
     }
 
-    /// The friendly name of the current default render endpoint, without
-    /// enumerating every device. Cheap enough to poll from the offload reconciler
-    /// (which only needs to notice when the active output *changes*).
-    pub fn default_output_name() -> Option<String> {
+    /// The id and friendly name of the current default render endpoint, without
+    /// enumerating every device. Cheap enough to call from the offload reconciler
+    /// and the APO endpoint check (both only need to notice when the active
+    /// output *changes*).
+    pub fn default_output() -> Option<(String, String)> {
         let _com = ComGuard::new();
         // SAFETY: guarded by the COM init above; the endpoint + its property store
-        // are owned here, and the friendly-name PROPVARIANT is read like in
+        // are owned here, and the id and friendly-name PROPVARIANT are read like in
         // `list_devices`.
         unsafe {
             let enumerator: IMMDeviceEnumerator =
                 CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
             let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
-            device
+            let id = take_pwstr(device.GetId().ok()?);
+            let name = device
                 .OpenPropertyStore(STGM_READ)
                 .ok()
                 .and_then(|store| store.GetValue(&PKEY_Device_FriendlyName).ok())
@@ -243,8 +245,15 @@ mod imp {
                         None
                     }
                 })
-                .filter(|s| !s.is_empty())
+                .filter(|s| !s.is_empty())?;
+            Some((id, name))
         }
+    }
+
+    /// The friendly name of the current default render endpoint. The offload
+    /// reconciler's cache key, so it stays a distinct entry point.
+    pub fn default_output_name() -> Option<String> {
+        default_output().map(|(_, name)| name)
     }
 
     /// Register an OS callback that runs `on_change` whenever the default
@@ -339,7 +348,38 @@ mod imp {
 
     #[cfg(test)]
     mod tests {
-        use super::{list_devices, set_default, watch_default_output};
+        use super::{default_output, list_devices, set_default, watch_default_output};
+
+        /// Live cross-check of the APO endpoint probe: prints whether Equalizer
+        /// APO is hooked into each real output. The one test that proves the id
+        /// this module hands out lines up with the `MMDevices` registry layout
+        /// `apo::device` reads. Compare the output against APO's Configurator.
+        /// Run with: `cargo test -- --ignored --nocapture reports_apo_per_output`
+        #[test]
+        #[ignore]
+        fn reports_apo_per_output() {
+            use fastpeq_core::apo::device::{EndpointApo, endpoint_state};
+
+            let devices = list_devices().expect("enumeration should succeed");
+            for d in &devices {
+                println!(
+                    "{}{:<40} {:?}",
+                    if d.is_default { "* " } else { "  " },
+                    d.name,
+                    endpoint_state(&d.id)
+                );
+            }
+            // A machine with outputs must resolve every one of them; `Unknown`
+            // across the board would mean the id/registry mapping has drifted.
+            assert!(
+                devices
+                    .iter()
+                    .any(|d| endpoint_state(&d.id) != EndpointApo::Unknown),
+                "no output resolved — the endpoint id → registry mapping is broken"
+            );
+            let (id, name) = default_output().expect("expected a default output");
+            println!("default: {name} [{id}] -> {:?}", endpoint_state(&id));
+        }
 
         /// Smoke test against the real machine; ignored by default because it
         /// needs actual audio hardware. Run with:
@@ -410,7 +450,9 @@ mod imp {
 }
 
 #[cfg(windows)]
-pub use imp::{default_output_name, list_devices, set_default, watch_default_output};
+pub use imp::{
+    default_output, default_output_name, list_devices, set_default, watch_default_output,
+};
 
 /// Enumerate output devices (non-Windows stub).
 #[cfg(not(windows))]
@@ -422,6 +464,12 @@ pub fn list_devices() -> Result<Vec<AudioDevice>, String> {
 #[cfg(not(windows))]
 pub fn set_default(_id: &str) -> Result<(), String> {
     Err("Switching audio devices is only supported on Windows".to_string())
+}
+
+/// The default output device id and name (non-Windows stub).
+#[cfg(not(windows))]
+pub fn default_output() -> Option<(String, String)> {
+    None
 }
 
 /// The default output device name (non-Windows stub).

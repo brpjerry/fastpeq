@@ -36,6 +36,7 @@ rules it follows. Current as of v0.5.0.
 | WebView localStorage | WebView2 profile (shared by main + OSD windows) | Backup copies + legacy migration sources only |
 | Hardware device | e.g. Moondrop DHA15 over USB HID | The offloaded EQ bands + pregain (RAM and flash) |
 | Registry | `HKLM\SOFTWARE\EqualizerAPO` | **Read-only** — APO detection, never written |
+| Registry | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\{guid}` | **Read-only** — per-output APO check (`FxProperties` effect CLSIDs + the enhancements switch), never written |
 
 Two overrides collapse the first three into one directory:
 
@@ -46,6 +47,13 @@ Two overrides collapse the first three into one directory:
   presets, tone sidecar, provenance, bypass — but nothing reads that
   `config.txt`, so sound shaping only happens via Hardware Only offload.
   `ApoStatus.installed` stays `false` so the UI can say so.
+
+`installed` is a machine-wide fact and doesn't mean APO reaches what you're
+listening to: its Configurator enables APO *per render endpoint*, and Windows'
+per-device enhancements switch can silence it on an endpoint it is enabled for.
+`ApoStatus.output_state` carries that separate answer, refreshed in the
+background by `AppState::refresh_apo_output` whenever the default output changes
+(see [device.rs](../crates/fastpeq-core/src/apo/device.rs)).
 
 ## App data dir (backend-owned, all atomic writes)
 

@@ -220,6 +220,10 @@ pub fn run() {
             audio::watch_default_output(move || {
                 if let Some(state) = watch_handle.try_state::<AppState>() {
                     state.sync_offload();
+                    // The new output may not be one APO is enabled for, so re-check
+                    // before nudging the UI — otherwise it would keep claiming the
+                    // EQ is live on an output APO never touches.
+                    state.refresh_apo_output();
                     tray::notify_changed(&watch_handle);
                 }
             });
@@ -232,6 +236,7 @@ pub fn run() {
             std::thread::spawn(move || {
                 if let Some(state) = startup_handle.try_state::<AppState>() {
                     state.sync_offload();
+                    state.refresh_apo_output();
                     state.mark_initial_synced();
                 }
                 // Tell the UI the startup reconcile finished so it drops the "connecting

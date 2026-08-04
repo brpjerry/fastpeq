@@ -1,5 +1,6 @@
 //! Everything that knows about the Equalizer APO configuration format.
 
+pub mod device;
 pub mod env;
 pub mod model;
 mod parse;
