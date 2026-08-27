@@ -17,7 +17,7 @@
   import { getToneStep, defaultBandCount, initPrefs } from "./lib/prefs.svelte";
   import { initTheme } from "./lib/theme";
   import { createDebounce, createTrailingThrottle } from "./lib/throttle";
-  import { getHotkeys, accelerators, initHotkeys } from "./lib/hotkeys.svelte";
+  import { getHotkeys, accelerators, initHotkeys, renameHotkeyPreset } from "./lib/hotkeys.svelte";
   import { OSD_EVENT, payloadForHotkey } from "./lib/osd";
 
   let status = $state<api.ApoStatus | null>(null);
@@ -89,8 +89,9 @@
   }
   const clampTone = (v: number) => Math.max(-12, Math.min(12, v)); // matches the tone Knob range
 
-  // A global hotkey fired (emitted from the backend): run its bound action. Stale
-  // preset references (deleted/renamed) just no-op.
+  // A global hotkey fired (emitted from the backend): run its bound action. A
+  // binding whose preset is gone just no-ops (a rename is followed — see
+  // renameHotkeyPreset — so only a delete can strand one).
   function dispatchHotkey(id: string) {
     const h = getHotkeys().find((x) => x.id === id);
     if (!h) return;
@@ -493,6 +494,7 @@
     guard(async () => {
       await api.renamePreset(from, to);
       renamePresetView(from, to);
+      renameHotkeyPreset(from, to); // bindings key off the name — keep them pointed at it
       if (selected === from) selected = to;
       await reload();
       flash(`Renamed to “${to}”`);
