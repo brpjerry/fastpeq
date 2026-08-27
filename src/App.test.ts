@@ -408,6 +408,33 @@ describe("App global hotkeys", () => {
     removeHotkey(id);
   });
 
+
+  it("keeps a preset hotkey working after the preset is renamed", async () => {
+    withLibrary(); // includes "Sennheiser HD600"
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+
+    const id = addHotkey();
+    updateHotkey(id, { key: "1", action: "preset", preset: "Sennheiser HD600" });
+
+    // Rename it in place from the list (double-click the name, type, Enter).
+    await fireEvent.dblClick(rowFor(container, "Sennheiser HD600").querySelector(".name")!);
+    const input = container.querySelector(".rename-input")!;
+    await fireEvent.input(input, { target: { value: "Sennheiser HD650" } });
+    vi.mocked(api.listPresets).mockResolvedValue(["64 Audio U12t", "Sennheiser HD650"]);
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(api.renamePreset).toHaveBeenCalledWith("Sennheiser HD600", "Sennheiser HD650"),
+    );
+    await waitFor(() => expect(container.textContent).toContain("Sennheiser HD650"));
+
+    // The binding followed the rename: pressing it applies the preset under its
+    // new name instead of silently doing nothing.
+    vi.mocked(api.applyPreset).mockClear();
+    listeners["hotkey-pressed"]({ payload: id });
+    await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD650"));
+    removeHotkey(id);
+  });
   it("nudges the tone by the configured step on a tone hotkey", async () => {
     withLibrary();
     setToneStep(0.5);
