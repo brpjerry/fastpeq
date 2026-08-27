@@ -82,6 +82,7 @@ vi.mock("./lib/api", () => {
       }),
     ),
     offloadSelection: vi.fn(() => Promise.resolve([])),
+    autostartEnabled: vi.fn(() => Promise.resolve(false)),
     // Mutations — resolve to void / a report.
     applyPreset: ok(),
     toggleBypass: ok(),
@@ -95,6 +96,7 @@ vi.mock("./lib/api", () => {
     setTone: ok(),
     setDefaultAudioDevice: ok(),
     setOffloadMode: ok(),
+    setAutostart: ok(),
     setHotkeys: vi.fn(() => Promise.resolve([])),
     loadHotkeyBindings: vi.fn(() => Promise.resolve(null)),
     saveHotkeyBindings: ok(),
@@ -302,6 +304,26 @@ describe("App settings", () => {
     sw.checked = !before;
     await fireEvent.change(sw);
     expect(getSpecialtyIcons()).toBe(!before);
+  });
+
+  it("registers the Windows startup entry from the Startup switch", async () => {
+    vi.mocked(api.autostartEnabled).mockResolvedValue(false);
+    const { container } = render(App);
+    await fireEvent.click(container.querySelector(".gear")!);
+    const label = await waitFor(() => {
+      const l = [...container.querySelectorAll(".switch")].find((l) =>
+        l.textContent!.includes("Start with Windows"),
+      )!;
+      // The switch stays disabled until the registry read resolves.
+      expect(l.querySelector<HTMLInputElement>("input")!.disabled).toBe(false);
+      return l;
+    });
+    const cb = label.querySelector<HTMLInputElement>("input[type='checkbox']")!;
+
+    expect(cb.checked).toBe(false);
+    cb.checked = true;
+    await fireEvent.change(cb);
+    expect(api.setAutostart).toHaveBeenCalledWith(true);
   });
 
   it("toggles the filter-shapes handle style", async () => {

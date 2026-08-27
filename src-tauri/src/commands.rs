@@ -374,6 +374,21 @@ pub fn set_offload_mode(
     Ok(())
 }
 
+/// Whether fastpeq is registered to start with Windows — the Task Manager
+/// "Startup apps" entry. Reads the live registry state, so disabling the entry
+/// from Task Manager is reflected the next time Settings is opened.
+#[tauri::command]
+pub fn autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    crate::autostart::is_enabled(&app)
+}
+
+/// Add or remove the startup entry. The registered command line carries
+/// `--minimized`, so a login launch goes straight to the tray.
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    crate::autostart::set(&app, enabled)
+}
+
 /// Present the calling OSD window without activation, on the current virtual
 /// desktop and at the top of the z-order. This is deliberately one native
 /// operation: Tauri's frontend `show()` promise resolves before TAO necessarily

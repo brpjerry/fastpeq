@@ -17,7 +17,8 @@
         "width": 1160,
         "height": 740,
         "minWidth": 1090,
-        "minHeight": 640
+        "minHeight": 640,
+        "visible": false
       },
       {
         "label": "osd",
