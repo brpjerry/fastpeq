@@ -104,6 +104,21 @@ export function updateHotkey(id: string, patch: Partial<Hotkey>): void {
   persist();
 }
 
+/**
+ * Follow a preset rename. Bindings hold their preset by name, so without this a
+ * rename leaves the binding pointing at a name that no longer exists and it
+ * silently stops working (App's dispatch drops a hotkey whose preset isn't in
+ * the list). Matches on the stored name alone, not on `action === "preset"`:
+ * the field lingers on a binding switched to another action, and rewriting it
+ * keeps a switch back correct. No match means no write, so an unrelated rename
+ * doesn't rewrite hotkeys.json.
+ */
+export function renameHotkeyPreset(from: string, to: string): void {
+  if (from === to || !hotkeys.some((h) => h.preset === from)) return;
+  hotkeys = hotkeys.map((h) => (h.preset === from ? { ...h, preset: to } : h));
+  persist();
+}
+
 export function removeHotkey(id: string): void {
   hotkeys = hotkeys.filter((h) => h.id !== id);
   persist();

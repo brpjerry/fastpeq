@@ -12,6 +12,7 @@ import {
   accelerator,
   accelerators,
   duplicateIds,
+  renameHotkeyPreset,
   type Hotkey,
 } from "./hotkeys.svelte";
 
@@ -101,6 +102,38 @@ describe("hotkeys store", () => {
     expect(getHotkeys().length).toBe(0);
   });
 
+
+  it("follows a preset rename so the binding keeps working", () => {
+    clearAll();
+    const a = addHotkey();
+    const b = addHotkey();
+    const c = addHotkey();
+    updateHotkey(a, { key: "1", action: "preset", preset: "HD600" });
+    updateHotkey(b, { key: "2", action: "preset", preset: "U12t" });
+    // Switched to another action, but the old preset name lingers on the record.
+    updateHotkey(c, { key: "3", action: "bypass", preset: "HD600" });
+
+    renameHotkeyPreset("HD600", "HD650");
+
+    const by = (id: string) => getHotkeys().find((h) => h.id === id)!;
+    expect(by(a).preset).toBe("HD650");
+    expect(by(b).preset).toBe("U12t"); // a different preset is untouched
+    expect(by(c).preset).toBe("HD650"); // ...so switching c back to "preset" still works
+    clearAll();
+  });
+
+  it("does not rewrite the file when a rename matches no binding", () => {
+    clearAll();
+    const a = addHotkey();
+    updateHotkey(a, { key: "1", action: "preset", preset: "HD600" });
+    vi.mocked(api.saveHotkeyBindings).mockClear();
+
+    renameHotkeyPreset("Bose QC", "Bose QC Ultra"); // no binding uses it
+    renameHotkeyPreset("HD600", "HD600"); // a no-op rename
+    expect(api.saveHotkeyBindings).not.toHaveBeenCalled();
+    expect(getHotkeys().find((h) => h.id === a)!.preset).toBe("HD600");
+    clearAll();
+  });
   it("validates keys as a single letter or digit", () => {
     expect(validKey("A")).toBe(true);
     expect(validKey("7")).toBe(true);
