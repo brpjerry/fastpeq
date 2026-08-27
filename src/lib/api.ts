@@ -144,6 +144,15 @@ export const setOffloadMode = (mode: OffloadMode) =>
 export const offloadSelection = (config: Config) =>
   invoke<number[]>("offload_selection", { config });
 
+/** Whether fastpeq is registered to start with Windows — the entry Task
+ *  Manager lists under "Startup apps". Read live from the registry, so a
+ *  change made in Task Manager shows up here. */
+export const autostartEnabled = () => invoke<boolean>("autostart_enabled");
+/** Add or remove the startup entry. The registered command line carries
+ *  `--minimized`, so a login launch goes straight to the tray. */
+export const setAutostart = (enabled: boolean) =>
+  invoke<void>("set_autostart", { enabled });
+
 export const readTextFile = (path: string) => invoke<string>("read_text_file", { path });
 
 export const presetsDir = () => invoke<string>("presets_dir");

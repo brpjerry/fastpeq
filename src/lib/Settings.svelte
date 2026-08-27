@@ -2,7 +2,9 @@
   // The Settings panel, extracted from App. Reads its prefs/targets/theme stores
   // directly; App passes the bits only it owns (status, presets dir, busy, the
   // shared new-preset band count) and the file/folder actions as callbacks.
+  import { onMount } from "svelte";
   import type { ApoStatus } from "./types";
+  import * as api from "./api";
   import { ACCENTS, currentAccentId, setAccent } from "./theme";
   import { BAND_COUNTS } from "./starter";
   import {
@@ -55,6 +57,31 @@
   } = $props();
 
   let accentId = $state(currentAccentId());
+
+  // "Start with Windows". The registry is the source of truth (the user can flip
+  // the same entry from Task Manager), so the state is read on mount rather than
+  // cached in prefs — and re-read after a failed write so the switch never shows
+  // a state the system doesn't have. `null` = not read yet.
+  let autostart = $state<boolean | null>(null);
+  let autostartError = $state("");
+
+  onMount(() => {
+    api
+      .autostartEnabled()
+      .then((v) => (autostart = v))
+      .catch((e) => (autostartError = String(e)));
+  });
+
+  async function toggleAutostart(enabled: boolean) {
+    autostart = enabled; // optimistic: the switch tracks the click
+    try {
+      await api.setAutostart(enabled);
+      autostartError = "";
+    } catch (e) {
+      autostartError = String(e);
+      autostart = await api.autostartEnabled().catch(() => !enabled);
+    }
+  }
 </script>
 
 <section class="panel settings-page">
@@ -230,6 +257,25 @@
         <button onclick={onResetPresetsDir} disabled={busy}>Use default</button>
       </div>
     </section>
+    <section class="settings-section">
+      <h3>Startup</h3>
+      <p class="hint">
+        Add fastpeq to Windows' startup apps, so your preset is in place from the moment you log
+        in. It starts minimized to the tray — click the tray icon to open the window. The entry
+        appears in Task Manager's <em>Startup apps</em> tab, where it can also be turned off.
+      </p>
+      <div class="cat-switches">
+        <Switch
+          label="Start with Windows"
+          checked={autostart === true}
+          disabled={autostart === null}
+          onChange={toggleAutostart}
+        />
+      </div>
+      {#if autostartError}
+        <p class="hint error-line">Couldn't change the startup entry: {autostartError}</p>
+      {/if}
+    </section>
     <HardwarePanel apoInstalled={status?.installed ?? true} onChanged={onHardwareChanged} />
     <section class="settings-section">
       <h3>Equalizer APO</h3>
@@ -364,5 +410,9 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+  .error-line {
+    margin: 10px 0 0;
+    color: var(--danger);
   }
 </style>

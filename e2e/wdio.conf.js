@@ -9,6 +9,7 @@
 //   - msedgedriver matching the installed WebView2 runtime, at
 //     e2e/drivers/msedgedriver.exe (or set MSEDGEDRIVER)
 //   - a debug build: npm run build && cargo build -p fastpeq
+import { browser } from "@wdio/globals";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -79,6 +80,24 @@ export const config = {
       },
       stdio: [null, process.stdout, process.stderr],
     });
+  },
+
+  // The app runs two webviews — the main window and the hidden OSD overlay — and
+  // msedgedriver attaches the session to whichever it enumerated first. That is
+  // not deterministic: roughly a third of runs landed on osd.html, whose body is
+  // near-empty, and every spec then failed looking for UI that was never there.
+  // Pin the session to the main webview before any spec runs.
+  async before() {
+    await browser.waitUntil(
+      async () => {
+        for (const handle of await browser.getWindowHandles()) {
+          await browser.switchToWindow(handle);
+          if (!(await browser.getUrl()).includes("osd.html")) return true;
+        }
+        return false;
+      },
+      { timeout: 20000, timeoutMsg: "main webview never appeared" },
+    );
   },
 
   // Diagnostic: on the first failure, dump what the app actually rendered so we

@@ -38,6 +38,9 @@ no restart, no process churn.
 - **Hardware EQ offload** — send a preset's first bands to a supported DAC/amp that runs
   parametric EQ in hardware (currently the **Moondrop DHA15**); overflow bands stay in Equalizer
   APO. The hardware EQ persists in the device and keeps working even when fastpeq is closed.
+- **Start with Windows** — an optional startup entry (Task Manager's *Startup apps*) that
+  brings fastpeq up minimized to the tray at login, so your preset is in place before you
+  play anything.
 - **System tray**, single-instance, first-run backup of your config.
 - **PEACE import** — bring your existing `.peace` presets across.
 
@@ -116,7 +119,7 @@ A hard split between a UI-agnostic Rust core and a thin Tauri + Svelte shell.
 |-----------|------|
 | `crates/fastpeq-core` | Detect APO, parse/edit/serialize configs, preset store, atomic writes, hardware/software split + biquad math (`offload`) |
 | `crates/fastpeq-hw` | Hardware-EQ device drivers (USB HID) + `fastpeq-hw-cli`, a driver-development CLI that drives the same surface without the GUI |
-| `src-tauri` | Tauri 2 commands, system tray, configurable global hotkeys, single-instance |
+| `src-tauri` | Tauri 2 commands, system tray, configurable global hotkeys, single-instance, Windows startup entry |
 | `src/` | Svelte + TS UI: preset list, band editor, response curve, curve editor |
 
 The core models an APO configuration as an ordered list of lines. It only understands `Preamp:`
@@ -184,4 +187,4 @@ works in fastpeq.
    compensation, REW measurement overlay, tone generator, PEACE import.
 5. **Tooling & hotkeys** ✅ — editor undo/redo, A/B compare, auto-preamp, target offset/align,
    and a configurable global-hotkeys page.
-6. **Polish** *(next)* — autostart, an audio-output-device hotkey action, richer target tooling.
+6. **Polish** *(next)* — autostart ✅, an audio-output-device hotkey action, richer target tooling.

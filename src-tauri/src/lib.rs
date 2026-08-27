@@ -4,6 +4,7 @@
 //! window, a system tray, a global hotkey, and the IPC commands the UI calls.
 
 mod audio;
+mod autostart;
 mod commands;
 mod hotkeys;
 mod state;
@@ -175,12 +176,19 @@ mod overlay {
 pub fn run() {
     tauri::Builder::default()
         // Single instance: focus the existing window instead of opening a second.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        // An autostart launch racing an already-running copy is the exception —
+        // it asked for the tray, so it must not pop the window open.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if autostart::args_are_minimized(args.iter().skip(1)) {
+                return;
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
         }))
+        // "Start with Windows" — the Task Manager "Startup apps" entry.
+        .plugin(autostart::plugin())
         .plugin(tauri_plugin_dialog::init())
         // Closing the window hides it to the tray rather than quitting, so the
         // tray stays a usable fast-switching surface with no window open. The
@@ -196,10 +204,16 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // Match the native window frame to the app's dark theme.
-            #[cfg(windows)]
+            // The main window is configured hidden so an autostart launch never
+            // flashes a window on the way to the tray; every other launch shows
+            // it here, once the frame has been recolored.
             if let Some(window) = app.get_webview_window("main") {
+                // Match the native window frame to the app's dark theme.
+                #[cfg(windows)]
                 titlebar::apply(&window);
+                if !autostart::launched_minimized() {
+                    let _ = window.show();
+                }
             }
 
             // The OSD overlay must never grab focus when it pops up.
@@ -307,6 +321,8 @@ pub fn run() {
             commands::set_offload_mode,
             commands::offload_selection,
             commands::osd_present,
+            commands::autostart_enabled,
+            commands::set_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running fastpeq");

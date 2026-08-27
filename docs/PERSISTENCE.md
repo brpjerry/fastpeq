@@ -37,6 +37,7 @@ rules it follows. Current as of v0.5.0.
 | Hardware device | e.g. Moondrop DHA15 over USB HID | The offloaded EQ bands + pregain (RAM and flash) |
 | Registry | `HKLM\SOFTWARE\EqualizerAPO` | **Read-only** — APO detection, never written |
 | Registry | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\{guid}` | **Read-only** — per-output APO check (`FxProperties` effect CLSIDs + the enhancements switch), never written |
+| Registry | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | The "Start with Windows" entry — the only registry value fastpeq writes |
 
 Two overrides collapse the first three into one directory:
 
@@ -176,6 +177,20 @@ the offloaded bands + pregain in two tiers:
 
 fastpeq never *reads* state back from the device except the firmware version;
 the app's own files are always the source of truth for what to push.
+
+## Windows startup entry (registry, `HKCU`)
+
+Owner: [autostart.rs](../src-tauri/src/autostart.rs), via
+`tauri-plugin-autostart`. Settings' **Start with Windows** switch writes a
+`fastpeq` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+holding the exe path plus `--minimized`; `lib.rs` reads that flag at launch and
+leaves the main window hidden, so a login start goes straight to the tray.
+
+The registry is the source of truth and nothing about the toggle is cached in
+`prefs.json` — Windows exposes the same entry in Task Manager's *Startup apps*
+tab, and turning it off there flips a separate `StartupApproved` value the
+plugin also reads. Settings re-reads the live state each time it mounts, so the
+switch and Task Manager never disagree.
 
 ## What is deliberately not persisted
 

@@ -79,7 +79,6 @@ Guiding principles, to keep the bar high:
 
 ## System integration
 
-- **Autostart with Windows** *(S)* — on the roadmap; start minimized to tray.
 - **Update checker** *(S)* — check the GitHub Releases API and surface "a new
   version is available" with a link (no silent auto-update).
 - **Per-output-device profiles** *(L)* — APO config is per capture/render device;
