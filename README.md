@@ -34,7 +34,10 @@ no restart, no process churn.
   L / R swap), and a sine tone generator.
 - **Preset organisation** — search, device-type filter, and per-preset category icons.
 - **Configurable global hotkeys** — bind any number of `Ctrl+Alt` / `Ctrl+Shift` keys to switch
-  presets, toggle bypass, or nudge / reset the tone controls, working anywhere in Windows.
+  presets or audio outputs, toggle bypass, or nudge / reset the tone controls, working anywhere
+  in Windows. If Windows recreates an audio endpoint, pressing its hotkey recovers and saves
+  the association by device name (including case, spacing, and instance-number changes).
+  Ambiguous or missing matches leave the saved association unchanged.
 - **Hardware EQ offload** — send a preset's first bands to a supported DAC/amp that runs
   parametric EQ in hardware (currently the **Moondrop DHA15**); overflow bands stay in Equalizer
   APO. The hardware EQ persists in the device and keeps working even when fastpeq is closed.

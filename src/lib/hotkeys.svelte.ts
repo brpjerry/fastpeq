@@ -28,7 +28,7 @@ export interface Hotkey {
   preset?: string; // principal for "preset"
   tone?: ToneControl; // principal for "tone-up" / "tone-down"
   device?: string; // principal for "device": the audio endpoint id
-  deviceName?: string; // label cached at pick time, so an unplugged device still reads clearly
+  deviceName?: string; // cached label + recovery key if Windows recreates the endpoint id
 }
 
 const KEY = "fastpeq.hotkeys";
