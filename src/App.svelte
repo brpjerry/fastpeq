@@ -17,7 +17,8 @@
   import { getToneStep, defaultBandCount, initPrefs } from "./lib/prefs.svelte";
   import { initTheme } from "./lib/theme";
   import { createDebounce, createTrailingThrottle } from "./lib/throttle";
-  import { getHotkeys, accelerators, initHotkeys, renameHotkeyPreset } from "./lib/hotkeys.svelte";
+  import { getHotkeys, accelerators, initHotkeys, renameHotkeyPreset, updateHotkey, type Hotkey } from "./lib/hotkeys.svelte";
+  import { resolveAudioDevice } from "./lib/audio-device";
   import { OSD_EVENT, payloadForHotkey } from "./lib/osd";
 
   let status = $state<api.ApoStatus | null>(null);
@@ -112,23 +113,32 @@
       const delta = getToneStep() * (h.action === "tone-up" ? 1 : -1);
       setKnob(control, clampTone(tone[control] + delta));
     } else if (h.action === "device") {
-      // Stable endpoint id: works again automatically once an unplugged device
-      // returns; a currently-absent device just surfaces the backend error. Show
-      // the OSD only once the switch actually succeeds. Switching output may change
-      // whether offload engages, so reconcile after.
-      if (h.device)
-        api
-          .setDefaultAudioDevice(h.device)
-          .then(() => {
-            refreshOffload();
-            maybeOsd(h);
-          })
-          .catch((e) => flash(String(e)));
+      if (h.device) switchHotkeyDevice(h).catch((e) => flash(String(e)));
       return;
     } else if (h.action === "tone-reset") {
       resetTone();
     }
     maybeOsd(h);
+  }
+
+  async function switchHotkeyDevice(h: Hotkey) {
+    // Refresh even while unfocused: Windows may have recreated the endpoint
+    // since startup without the cached picker list ever seeing the change.
+    devices = await api.listAudioDevices();
+    const device = resolveAudioDevice(h.device!, h.deviceName, devices);
+    const stillBound = () => getHotkeys().some((current) =>
+      current.id === h.id && current.action === "device" &&
+      current.device === h.device && current.deviceName === h.deviceName,
+    );
+    if (!stillBound()) return; // edited/deleted while enumeration was pending
+    await api.setDefaultAudioDevice(device.id);
+    // Only persist a proven switch, and don't overwrite an edit made in flight.
+    if (stillBound() && (h.device !== device.id || h.deviceName !== device.name)) {
+      updateHotkey(h.id, { device: device.id, deviceName: device.name });
+    }
+    devices = devices.map((d) => ({ ...d, is_default: d.id === device.id }));
+    refreshOffload();
+    maybeOsd({ ...h, device: device.id, deviceName: device.name });
   }
 
   // When the main window is unfocused (the only time the user can't see the
