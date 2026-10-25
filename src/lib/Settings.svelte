@@ -23,7 +23,10 @@
     setToneStep,
     getToneHeadroom,
     setToneHeadroom,
+    getGainLimit,
+    setGainLimit,
   } from "./prefs.svelte";
+  import { GAIN_LIMIT_MAX, GAIN_LIMIT_MIN } from "./eq";
 
   const TONE_STEPS = [0.25, 0.5, 1];
   import { getTargets, removeTarget, FLAT_TARGET } from "./targets.svelte";
@@ -134,6 +137,31 @@
         <button class="seg-btn" class:sel={getFilterSet() === "full"} onclick={() => setFilterSet("full")}>
           All filters
         </button>
+      </div>
+    </section>
+    <section class="settings-section">
+      <h3>Filter gain limit</h3>
+      <p class="hint">
+        How far a single band's gain can be taken, either way. Presets you already have keep
+        whatever gain they were saved with — the limit applies when you edit a band's gain, so
+        editing one that sits above it brings it back to the limit.
+      </p>
+      <div class="settings-actions">
+        <label class="num-input">
+          <small>±</small>
+          <input
+            type="number"
+            min={GAIN_LIMIT_MIN}
+            max={GAIN_LIMIT_MAX}
+            step="1"
+            value={getGainLimit()}
+            onchange={(e) => {
+              setGainLimit(Number(e.currentTarget.value));
+              e.currentTarget.value = String(getGainLimit()); // show what was stored
+            }}
+          />
+          <small>dB</small>
+        </label>
       </div>
     </section>
     <section class="settings-section">

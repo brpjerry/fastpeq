@@ -9,9 +9,11 @@
     responseCurve,
     inChannel,
     balanceTrim,
+    clampGainTo,
     kindHasGain,
     kindHasQ,
     kindHasSlope,
+    DEFAULT_GAIN_LIMIT,
     type BandView,
     type CurveFilter,
     type EditorBand,
@@ -47,6 +49,7 @@
     hoveredId = null,
     mutedIds = new Set<number>(),
     filterShapes = false,
+    gainLimit = DEFAULT_GAIN_LIMIT,
     reference = null,
     onChange,
     onHover,
@@ -65,6 +68,10 @@
      * but excluded from the response traces — they run nowhere. */
     mutedIds?: Set<number>;
     filterShapes?: boolean;
+    /** How far a drag may push a band's gain, in dB either way (Settings). Only
+     * the drag is held to it: a band loaded past the limit keeps its gain, and
+     * its handle is drawn where that gain actually is, until it is dragged. */
+    gainLimit?: number;
     // A second response (the saved version during A/B compare) drawn as a faded
     // ghost so the difference from the working edit is visible, not just audible.
     reference?: { filters: CurveFilter[]; preamp: number; balance: number } | null;
@@ -248,7 +255,10 @@
     if (!p) return;
     cursorX = p.x;
     b.freq = Math.round(clampFreq(freqAt(p.x)));
-    if (kindHasGain(b.kind)) b.gain = round1(clampGain(gainAt(p.y)));
+    // The graph's own ±dbMax keeps the handle on the canvas; the settings limit
+    // then caps what a drag can actually write (an over-limit gain the preset
+    // brought in only moves once it's dragged).
+    if (kindHasGain(b.kind)) b.gain = round1(clampGainTo(clampGain(gainAt(p.y)), gainLimit));
     onChange();
   }
   function onDragEnd() {

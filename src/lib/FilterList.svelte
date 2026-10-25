@@ -1,6 +1,6 @@
 <script lang="ts">
   import BandRow from "./BandRow.svelte";
-  import { bandInView, type BandView, type EngineFilter, type EditorBand } from "./eq";
+  import { DEFAULT_GAIN_LIMIT, bandInView, type BandView, type EngineFilter, type EditorBand } from "./eq";
 
   let {
     bands = $bindable(),
@@ -10,6 +10,7 @@
     mutedIds = new Set<number>(),
     hybrid = false,
     engine = "all",
+    gainLimit = DEFAULT_GAIN_LIMIT,
     onSchedule,
     onChangeKind,
     onRemoveBand,
@@ -29,6 +30,8 @@
     /** Display filter over the list while hybrid: only the APO bands, only the
      * device bands, or everything (the Editor's APO/HW-only buttons drive it). */
     engine?: EngineFilter;
+    /** Per-band gain limit (dB either way) the rows hold edits to. */
+    gainLimit?: number;
     onSchedule: () => void;
     onChangeKind: (band: EditorBand) => void;
     onRemoveBand: (id: number) => void;
@@ -81,6 +84,7 @@
         offloaded={offloadedIdx.has(i)}
         muted={mutedIds.has(band.id)}
         {hybrid}
+        {gainLimit}
         onChange={onSchedule}
         onChangeKind={() => onChangeKind(band)}
         onRemove={() => onRemoveBand(band.id)}
