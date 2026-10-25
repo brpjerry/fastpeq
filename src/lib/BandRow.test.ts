@@ -87,6 +87,59 @@ describe("BandRow", () => {
     expect(c.onChange).toHaveBeenCalled();
   });
 
+  it("holds a gain edit to the limit, from the slider and the number box", async () => {
+    const b = band();
+    const c = cbs();
+    const { container } = render(BandRow, {
+      props: { band: b, hovered: false, gainLimit: 12, ...c },
+    });
+    const num = container.querySelector<HTMLInputElement>(".field.gain input[type='number']")!;
+    await fireEvent.input(num, { target: { value: "20" } });
+    await fireEvent.change(num);
+    expect(b.gain).toBe(12);
+
+    const slider = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
+    await fireEvent.input(slider, { target: { value: "-20" } });
+    expect(b.gain).toBe(-12);
+    expect(c.onChange).toHaveBeenCalled();
+  });
+
+  it("keeps a preset's over-limit gain until that gain is edited", async () => {
+    const b = band({ gain: 18 });
+    const c = cbs();
+    const { container } = render(BandRow, {
+      props: { band: b, hovered: false, gainLimit: 12, ...c },
+    });
+    // Loading it changes nothing, and the controls stretch to show the real value.
+    expect(b.gain).toBe(18);
+    expect(container.querySelector(".field.gain")!.classList.contains("over")).toBe(true);
+    const slider = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
+    expect(slider.max).toBe("18");
+
+    // Editing another field leaves the over-limit gain alone...
+    const freq = container.querySelector<HTMLInputElement>(".field.freq input")!;
+    await fireEvent.input(freq, { target: { value: "2000" } });
+    await fireEvent.change(freq);
+    expect(b.gain).toBe(18);
+
+    // ...but touching the gain itself brings it inside the limit.
+    const num = container.querySelector<HTMLInputElement>(".field.gain input[type='number']")!;
+    await fireEvent.input(num, { target: { value: "17" } });
+    await fireEvent.change(num);
+    expect(b.gain).toBe(12);
+  });
+
+  it("uses a wider limit when settings allow it", async () => {
+    const b = band();
+    const { container } = render(BandRow, {
+      props: { band: b, hovered: false, gainLimit: 24, ...cbs() },
+    });
+    const num = container.querySelector<HTMLInputElement>(".field.gain input[type='number']")!;
+    await fireEvent.input(num, { target: { value: "20" } });
+    await fireEvent.change(num);
+    expect(b.gain).toBe(20);
+  });
+
   it("calls onRemove when the remove button is clicked", async () => {
     const c = cbs();
     const { container } = render(BandRow, { props: { band: band(), hovered: false, ...c } });

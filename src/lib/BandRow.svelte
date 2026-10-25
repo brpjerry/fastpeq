@@ -13,7 +13,7 @@
   // `offloaded` is the backend's word on device membership, passed through
   // untouched — this row never infers it from mode, order, or position.
   import TypeSelect from "./TypeSelect.svelte";
-  import { kindHasGain, kindHasQ } from "./eq";
+  import { DEFAULT_GAIN_LIMIT, clampGainTo, kindHasGain, kindHasQ } from "./eq";
   import type { Channel, FilterKind } from "./types";
 
   type Band = {
@@ -29,6 +29,7 @@
   let {
     band = $bindable(),
     hovered,
+    gainLimit = DEFAULT_GAIN_LIMIT,
     offloaded = false,
     muted = false,
     hybrid = false,
@@ -39,6 +40,10 @@
   }: {
     band: Band;
     hovered: boolean;
+    /** How far this band's gain may be edited, in dB either way (Settings).
+     * Only edits are held to it — a gain loaded from a preset is left alone
+     * until it is edited. */
+    gainLimit?: number;
     /** This band is currently sent to the hardware device (backend-decided). */
     offloaded?: boolean;
     /** Enabled but running nowhere: Hardware Only offload left it off the device
@@ -70,6 +75,22 @@
 
   function toggle() {
     band.enabled = !band.enabled;
+    onChange();
+  }
+
+  // The gain limit is enforced on edit, never on display: a preset written
+  // before the limit (or under a wider one) keeps its gain, and the controls
+  // stretch to show it, so nothing silently moves when a preset is loaded or
+  // the setting is lowered. The first edit of that gain pulls it inside the
+  // limit — which is also why the inputs' own min/max can't do this job alone
+  // (typing past the limit, or dragging a stretched slider, still has to land
+  // inside it). Only the gain is held to it: changing this band's frequency,
+  // Q, or type leaves an over-limit gain where it is.
+  const gainBound = $derived(Math.max(gainLimit, Math.abs(band.gain)));
+  const overLimit = $derived(Math.abs(band.gain) > gainLimit);
+
+  function changeGain() {
+    band.gain = clampGainTo(band.gain, gainLimit);
     onChange();
   }
 </script>
@@ -105,22 +126,31 @@
     <small>Hz</small>
   </span>
   {#if kindHasGain(band.kind)}
-    <span class="field gain">
+    <span class="field gain" class:over={overLimit}>
       <input
         type="range"
-        min="-30"
-        max="30"
+        min={-gainBound}
+        max={gainBound}
         step="0.1"
         tabindex="-1"
         bind:value={band.gain}
-        oninput={onChange}
+        oninput={changeGain}
         oncontextmenu={() => {
           band.gain = 0;
           onChange();
         }}
-        title="Right-click to reset to 0 dB"
+        title={overLimit
+          ? `${band.gain.toFixed(1)} dB is past the ${gainLimit} dB limit — kept from the preset, but editing it pulls it back to ${gainLimit} dB. Right-click to reset to 0 dB.`
+          : "Right-click to reset to 0 dB"}
       />
-      <input type="number" min="-30" max="30" step="0.1" bind:value={band.gain} onchange={onChange} />
+      <input
+        type="number"
+        min={-gainBound}
+        max={gainBound}
+        step="0.1"
+        bind:value={band.gain}
+        onchange={changeGain}
+      />
       <small>dB</small>
     </span>
   {/if}
@@ -218,6 +248,11 @@
   .field.gain input[type="number"] {
     width: 46px; /* e.g. -12.3 */
     flex: none;
+  }
+  /* A gain the preset brought in from above the limit: flagged (not corrected)
+     until it's edited, so it never looks like a value the editor just chose. */
+  .field.gain.over input[type="number"] {
+    border-color: #e0a458;
   }
   .field small {
     white-space: nowrap;

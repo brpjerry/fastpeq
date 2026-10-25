@@ -72,6 +72,9 @@ active preset, status) with a builder so each test sets up its own scenario.
 4. ✅ **Editor band ops**: add/remove band, a gain edit propagates to the live
    config via `applyLive`. *(Per-field clamping and the L/R/Both toggle: partial
    — could extend.)*
+   ✅ **Gain limit**: a gain edit (slider or number box) lands inside the
+   configured ±limit; a preset's over-limit gain survives load and a frequency
+   edit, and only moves when that gain itself is edited.
 5. ✅ **Clipping indicator**: shown when the summed boost tops 0 dB, hidden when
    the preamp keeps it under.
 6. ✅ **Bypass indicator**: live vs bypassed track the prop.

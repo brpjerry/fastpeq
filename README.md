@@ -21,6 +21,9 @@ no restart, no process churn.
 - **Instant preset switching** — an atomic `config.txt` write; no engine restart, no process churn.
 - **Parametric band editor** — add / remove / enable bands, edit type and Fc / Gain / Q inline.
   Supports `PK`, `LS`, `HS`, `LSC`, `HSC`, `LP`, `HP`, `LPQ`, `HPQ`, `BP`, `NO`, `AP`.
+  A configurable **gain limit** (±12 dB by default, *Settings → Filter gain limit*) keeps a single
+  band's gain in range as you edit it; presets you already have keep the gain they were saved
+  with until you touch that band's gain.
 - **Live response curve** — a client-side RBJ-biquad magnitude plot that updates as you type.
 - **Expanded curve editor** — a full-window graph with draggable band handles (drag to set
   frequency & gain, scroll to change Q), a filter-shape overlay, per-channel (L / R) editing,

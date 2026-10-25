@@ -15,7 +15,7 @@
   import FilterList from "./FilterList.svelte";
   import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, loudnessDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
-  import { getFilterShapes, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
+  import { getFilterShapes, getGainLimit, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
   import { createTrailingThrottle } from "./throttle";
   import {
@@ -151,6 +151,11 @@
   // it). Uses the same bands + tone-overlay set as the clip warning, so with it
   // on the warning never fires. Persisted with the other UI prefs.
   const autoPreamp = $derived(getAutoPreamp());
+
+  // How far a single band's gain may be edited (Settings). Loading a preset
+  // never applies it — only an edit of that band's gain does — so presets
+  // written under a wider limit keep their shape until they're touched.
+  const gainLimit = $derived(getGainLimit());
 
   // Loudness-matching compare session flags (see the A/B compare section for
   // the machinery): armed on the first Compare entry, `matchOff` = the user's
@@ -1146,6 +1151,7 @@
     {mutedIds}
     {hybrid}
     {engine}
+    {gainLimit}
     onSchedule={schedule}
     onChangeKind={changeKind}
     onRemoveBand={removeBand}
@@ -1232,6 +1238,7 @@
             {hoveredId}
             {mutedIds}
             filterShapes={getFilterShapes()}
+            {gainLimit}
             reference={compareRef}
             onChange={schedule}
             onHover={(id) => (hoveredId = id)}
