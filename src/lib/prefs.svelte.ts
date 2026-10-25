@@ -13,6 +13,7 @@
 import * as api from "./api";
 import { loadBool, loadJson, loadNumber, loadRaw, loadString, saveJson } from "./storage";
 import { BAND_COUNTS } from "./starter";
+import { DEFAULT_GAIN_LIMIT, GAIN_LIMIT_MAX, GAIN_LIMIT_MIN } from "./eq";
 
 export type FilterSet = "basic" | "full";
 
@@ -26,6 +27,7 @@ interface Prefs {
   filterShapes?: boolean;
   autoPreamp?: boolean;
   bandCount?: number;
+  gainLimit?: number;
 }
 
 const KEY = "fastpeq.prefs";
@@ -181,6 +183,20 @@ export function getAutoPreamp(): boolean {
 }
 export function setAutoPreamp(v: boolean): void {
   set({ autoPreamp: v });
+}
+
+// How far a single filter's gain may be edited, in dB either way (the Settings
+// "Filter gain limit" box). Default ±12 dB; a stored value outside the allowed
+// range falls back to that default. Editing-only: a preset that already holds a
+// bigger gain keeps it until that gain is edited.
+export function getGainLimit(): number {
+  const v = prefs.gainLimit;
+  return typeof v === "number" && v >= GAIN_LIMIT_MIN && v <= GAIN_LIMIT_MAX
+    ? v
+    : DEFAULT_GAIN_LIMIT;
+}
+export function setGainLimit(v: number): void {
+  set({ gainLimit: Math.max(GAIN_LIMIT_MIN, Math.min(GAIN_LIMIT_MAX, v)) });
 }
 
 // How many bands a new preset starts with (the Settings "New presets" choice).

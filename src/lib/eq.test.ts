@@ -10,6 +10,10 @@ import {
   aWeightDb,
   loudnessDb,
   toneFilters,
+  clampGainTo,
+  DEFAULT_GAIN_LIMIT,
+  GAIN_LIMIT_MAX,
+  GAIN_LIMIT_MIN,
   type CurveFilter,
 } from "./eq";
 
@@ -51,6 +55,22 @@ describe("filter metadata", () => {
   it("defaults Q per kind", () => {
     expect(defaultQ("Peak")).toBe(1);
     expect(defaultQ("LowShelfQ")).toBeCloseTo(Math.SQRT1_2, 6);
+  });
+});
+
+describe("clampGainTo", () => {
+  it("holds a gain inside the limit, either way", () => {
+    expect(clampGainTo(18, 12)).toBe(12);
+    expect(clampGainTo(-18, 12)).toBe(-12);
+  });
+  it("leaves a gain already inside the limit alone", () => {
+    expect(clampGainTo(6.5, 12)).toBe(6.5);
+    expect(clampGainTo(-12, 12)).toBe(-12);
+  });
+  it("defaults to ±12 dB, configurable within the editor's range", () => {
+    expect(DEFAULT_GAIN_LIMIT).toBe(12);
+    expect(GAIN_LIMIT_MIN).toBeLessThan(DEFAULT_GAIN_LIMIT);
+    expect(GAIN_LIMIT_MAX).toBeGreaterThan(DEFAULT_GAIN_LIMIT);
   });
 });
 

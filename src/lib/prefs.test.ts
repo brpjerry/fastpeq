@@ -18,6 +18,8 @@ import {
   setAutoPreamp,
   defaultBandCount,
   setDefaultBandCount,
+  getGainLimit,
+  setGainLimit,
 } from "./prefs.svelte";
 
 vi.mock("./api", () => ({
@@ -87,9 +89,16 @@ describe("prefs persistence", () => {
 
   it("falls back per field when the file holds out-of-range values", async () => {
     vi.mocked(api.loadUiState).mockResolvedValue(
-      JSON.stringify({ toneStep: 99, toneVolumeCap: "loud", bandCount: 11, filterSet: "huh" }),
+      JSON.stringify({
+        toneStep: 99,
+        toneVolumeCap: "loud",
+        bandCount: 11,
+        filterSet: "huh",
+        gainLimit: 99,
+      }),
     );
     await initPrefs();
+    expect(getGainLimit()).toBe(12);
     expect(getToneStep()).toBe(0.5);
     expect(getToneVolumeCap()).toBe(0.2);
     expect(defaultBandCount()).toBe(10);
@@ -108,6 +117,7 @@ describe("prefs defaults and clamping", () => {
     expect(getFilterShapes()).toBe(true);
     expect(getAutoPreamp()).toBe(false);
     expect(defaultBandCount()).toBe(10);
+    expect(getGainLimit()).toBe(12);
   });
 
   it("clamps writes to each pref's range", () => {
@@ -121,6 +131,12 @@ describe("prefs defaults and clamping", () => {
     expect(getToneHeadroom()).toBe(30);
     setToneStep(9); // out of range resets to the default
     expect(getToneStep()).toBe(0.5);
+    setGainLimit(40);
+    expect(getGainLimit()).toBe(30);
+    setGainLimit(0);
+    expect(getGainLimit()).toBe(1);
+    setGainLimit(18);
+    expect(getGainLimit()).toBe(18);
   });
 
   it("round-trips the auto-preamp toggle and the band count", () => {

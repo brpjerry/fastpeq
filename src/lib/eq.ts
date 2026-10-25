@@ -50,6 +50,20 @@ export const kindHasGain = (k: FilterKind) => GAIN_KINDS.has(k);
 export const kindHasQ = (k: FilterKind) => Q_KINDS.has(k);
 export const defaultQ = (k: FilterKind) => (k === "Peak" ? 1 : Math.SQRT1_2);
 
+// How far a single filter's gain may be pushed, in dB either way. The default
+// keeps a band inside the range most presets (and most hardware EQ engines)
+// stay in; Settings can widen or narrow it. The limit is an *editing* rule, not
+// a storage one: a preset loaded with a bigger gain keeps it (see BandRow), and
+// only an edit of that gain pulls it inside the limit.
+export const DEFAULT_GAIN_LIMIT = 12;
+export const GAIN_LIMIT_MIN = 1;
+/** The curve editor's vertical range — a limit past it couldn't be dragged. */
+export const GAIN_LIMIT_MAX = 30;
+
+/** A filter gain pulled inside ±`limit` dB. */
+export const clampGainTo = (gain: number, limit: number) =>
+  Math.max(-limit, Math.min(limit, gain));
+
 /** The band-list channel views. */
 export type BandView = "both" | "left" | "right";
 
