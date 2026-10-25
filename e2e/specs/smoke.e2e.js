@@ -7,6 +7,14 @@ import { readConfig, readPreset, presetExists } from "../helpers/seed.js";
 
 const BYPASS = 'button[title^="Drop the EQ filters"]';
 
+// The Bypass button is disabled while an apply is in flight, and a click on a
+// disabled button does nothing — so wait for it to be live before clicking.
+async function clickBypass() {
+  const bypass = await $(BYPASS);
+  await bypass.waitForEnabled({ timeout: 10000 });
+  await bypass.click();
+}
+
 const rows = () => $$(".presets li:not(.empty)");
 
 // Selectors unique to the editor (the presets panel has none of these), so they
@@ -20,17 +28,29 @@ const bandRows = () => $$(".band");
 const firstBand = () => $$(".band")[0];
 const firstBandTok = () => $$(".band .ts-btn .tok")[0];
 
+// A preset row's name: the `.name` button's own text, without the "v2" badge
+// (`.ver`) it gains once the preset has saved history — getText() would run
+// the two together as "BassBoostv2".
+const nameOf = (button) =>
+  browser.execute(
+    (el) =>
+      [...el.childNodes]
+        .filter((n) => n.nodeType === Node.TEXT_NODE)
+        .map((n) => n.textContent)
+        .join("")
+        .trim(),
+    button,
+  );
+
 async function presetNames() {
   // WDIO's $$ .map() is async and resolves the callbacks itself — don't wrap it
   // in Promise.all (that would try to iterate a Promise).
-  const texts = await $$(".presets li:not(.empty) .name").map((el) => el.getText());
-  return texts.map((t) => t.trim());
+  return $$(".presets li:not(.empty) .name").map(nameOf);
 }
 
 async function rowFor(name) {
   for (const li of await rows()) {
-    const text = (await (await li.$(".name")).getText()).trim();
-    if (text === name) return li;
+    if ((await nameOf(await li.$(".name"))) === name) return li;
   }
   throw new Error(`preset row not found: ${name}`);
 }
@@ -112,7 +132,7 @@ describe("fastpeq E2E smokes", () => {
     await browser.waitUntil(() => readConfig().includes("Filter"), { timeout: 10000 });
 
     // Bypass: filters dropped, preamp kept.
-    await $(BYPASS).click();
+    await clickBypass();
     await browser.waitUntil(() => !readConfig().includes("Filter"), {
       timeout: 10000,
       timeoutMsg: "filters were not dropped on bypass",
@@ -120,7 +140,7 @@ describe("fastpeq E2E smokes", () => {
     expect(readConfig()).toContain("Preamp");
 
     // Un-bypass: the exact prior config (filters and all) comes back.
-    await $(BYPASS).click();
+    await clickBypass();
     await browser.waitUntil(() => readConfig().includes("Filter"), {
       timeout: 10000,
       timeoutMsg: "filters were not restored on un-bypass",
@@ -396,7 +416,7 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
     await apply("BassBoost");
     await $(GRAPH).waitForExist({ timeout: 10000 });
     const slider = await $('.preamp input[type="range"]');
-    const auto = await $(".preamp .switch"); // the only switch in the preamp row
+    const auto = await $(".pside .switch"); // the Auto toggle beside the preamp row
 
     // Normalize to Auto-off first (the setting persists in prefs.json).
     if (!(await slider.isEnabled())) {
