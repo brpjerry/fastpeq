@@ -3,7 +3,8 @@
 //! The parser is deliberately conservative: a line is only turned into a
 //! modeled [`Line::Preamp`] / [`Line::Filter`] when we can reproduce it
 //! faithfully. Anything else — including filter variants we don't yet support
-//! (e.g. `LS 6dB`) — falls through to [`Line::Raw`] and is preserved verbatim.
+//! (e.g. `LS 6dB`; the `LSC 12 dB` slope shelf *is* modeled) — falls through to
+//! [`Line::Raw`] and is preserved verbatim.
 //!
 //! `Channel:` is stateful in APO: it scopes every following command until the
 //! next `Channel:`. We track that state and attach the active [`Channel`] to
@@ -123,6 +124,11 @@ fn parse_filter_body(index: Option<u32>, body: &str) -> Option<Filter> {
     };
 
     let kind = FilterKind::from_token(tokens.next()?)?;
+    let slope = if kind.takes_slope() {
+        parse_slope(&mut tokens)?
+    } else {
+        None
+    };
 
     let mut freq = None;
     let mut gain = None;
@@ -147,15 +153,52 @@ fn parse_filter_body(index: Option<u32>, body: &str) -> Option<Filter> {
         }
     }
 
+    // A slope and a Q both describe the shelf's steepness; rather than guess
+    // which one APO honours, leave such a line raw.
+    if slope.is_some() && q.is_some() {
+        return None;
+    }
+
     Some(Filter {
         enabled,
         kind,
         freq: freq?,
         gain,
         q,
+        slope,
         index,
         channel: Channel::Both,
     })
+}
+
+/// Consume a shelf slope right after the type token — `12 dB` or `12dB`, as
+/// APO accepts both. `Some(None)` when none follows; `None` for a number with no
+/// `dB` unit, which APO wouldn't read as a slope either.
+fn parse_slope<'a, I>(tokens: &mut std::iter::Peekable<I>) -> Option<Option<f64>>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let Some(&token) = tokens.peek() else {
+        return Some(None);
+    };
+    if let Ok(value) = token.parse::<f64>() {
+        tokens.next();
+        return tokens
+            .next()
+            .is_some_and(|unit| unit.eq_ignore_ascii_case("dB"))
+            .then_some(Some(value));
+    }
+    // The fused `12dB` form. `get` refuses a split inside a multi-byte character.
+    let fused = token.len().checked_sub(2).and_then(|split| {
+        let (number, unit) = (token.get(..split)?, token.get(split..)?);
+        unit.eq_ignore_ascii_case("dB")
+            .then(|| number.parse().ok())
+            .flatten()
+    });
+    if fused.is_some() {
+        tokens.next();
+    }
+    Some(fused)
 }
 
 /// Consume an optional unit token (e.g. `Hz`, `dB`) if it's next.

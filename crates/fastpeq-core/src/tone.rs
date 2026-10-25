@@ -56,6 +56,7 @@ impl Tone {
                     freq,
                     gain: Some(gain),
                     q: Some(q),
+                    slope: None,
                     index: None,
                     channel: Channel::Both,
                 });
@@ -292,6 +293,7 @@ mod tests {
             freq: 2000.0,
             gain: Some(3.0),
             q: Some(1.0),
+            slope: None,
             index: None,
             channel: Channel::Left,
         };

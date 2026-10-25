@@ -49,6 +49,22 @@ const Q_KINDS = new Set<FilterKind>([
 export const kindHasGain = (k: FilterKind) => GAIN_KINDS.has(k);
 export const kindHasQ = (k: FilterKind) => Q_KINDS.has(k);
 export const defaultQ = (k: FilterKind) => (k === "Peak" ? 1 : Math.SQRT1_2);
+/** The types that can take a slope in dB/octave in place of their Q. */
+export const kindHasSlope = (k: FilterKind) => k === "LowShelfQ" || k === "HighShelfQ";
+
+/**
+ * The Q equivalent to a shelf slope of `slope` dB/octave at `gain` dB, or null
+ * when there is none (a slope too steep for the gain, or not positive).
+ * Equalizer APO reads `LSC 12 dB` as the cookbook's shelf slope S = slope / 12
+ * — mirrors `slope_to_q` in crates/fastpeq-core/src/apo/model.rs.
+ */
+export function slopeToQ(slope: number, gain: number): number | null {
+  const s = slope / 12;
+  if (!(s > 0)) return null;
+  const A = Math.pow(10, gain / 40);
+  const radicand = (A + 1 / A) * (1 / s - 1) + 2;
+  return radicand > 0 ? 1 / Math.sqrt(radicand) : null;
+}
 
 // How far a single filter's gain may be pushed, in dB either way. The default
 // keeps a band inside the range most presets (and most hardware EQ engines)
@@ -105,6 +121,8 @@ export interface CurveFilter {
   freq: number;
   gain: number | null;
   q: number | null;
+  /** A shelf's slope in dB/octave; when set it stands in for `q`. */
+  slope?: number | null;
   channel: Channel;
 }
 
@@ -120,6 +138,9 @@ export type EditorBand = {
   freq: number;
   gain: number;
   q: number;
+  /** Set only on a shelf given as a slope (see [kindHasSlope]); the editor then
+   *  edits it in place of `q`, which stays at its default underneath. */
+  slope: number | null;
   channel: Channel;
 };
 
@@ -148,7 +169,7 @@ export function balanceFromTrim(side: "left" | "right", trimDb: number): number 
 /** A Config split into the editor's shape (see [parseConfigEq]). */
 export interface ParsedConfigEq {
   /** The `Filter:` lines, gain/q defaulted per type so they're plain numbers. */
-  filters: (CurveFilter & { gain: number; q: number })[];
+  filters: (CurveFilter & { gain: number; q: number; slope: number | null })[];
   /** The master (both-channel) preamp gain, 0 when absent. */
   preamp: number;
   /** Balance recovered from a one-sided preamp trim (see balanceFromTrim). */
@@ -186,6 +207,7 @@ export function parseConfigEq(cfg: Config): ParsedConfigEq {
         freq: f.freq,
         gain: f.gain ?? 0,
         q: f.q ?? defaultQ(f.kind),
+        slope: f.slope ?? null,
         channel: f.channel,
       });
     } else {
@@ -214,7 +236,12 @@ function biquadCoeffs(f: CurveFilter, fs: number): BiquadCoeffs | null {
   const w0 = (2 * Math.PI * f.freq) / fs;
   const cw = Math.cos(w0);
   const sw = Math.sin(w0);
-  const q = (kindHasQ(f.kind) ? f.q ?? defaultQ(f.kind) : defaultQ(f.kind)) || defaultQ(f.kind);
+  let q = (kindHasQ(f.kind) ? f.q ?? defaultQ(f.kind) : defaultQ(f.kind)) || defaultQ(f.kind);
+  if (f.slope != null && kindHasSlope(f.kind)) {
+    const equivalent = slopeToQ(f.slope, f.gain ?? 0);
+    if (equivalent === null) return null; // no real filter for this slope and gain
+    q = equivalent;
+  }
   const alpha = sw / (2 * q);
   const A = Math.pow(10, (f.gain ?? 0) / 40);
 

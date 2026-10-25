@@ -13,7 +13,7 @@
   // `offloaded` is the backend's word on device membership, passed through
   // untouched — this row never infers it from mode, order, or position.
   import TypeSelect from "./TypeSelect.svelte";
-  import { DEFAULT_GAIN_LIMIT, clampGainTo, kindHasGain, kindHasQ } from "./eq";
+  import { DEFAULT_GAIN_LIMIT, clampGainTo, kindHasGain, kindHasQ, kindHasSlope } from "./eq";
   import type { Channel, FilterKind } from "./types";
 
   type Band = {
@@ -23,6 +23,7 @@
     freq: number;
     gain: number;
     q: number;
+    slope: number | null;
     channel: Channel;
   };
 
@@ -154,7 +155,13 @@
       <small>dB</small>
     </span>
   {/if}
-  {#if kindHasQ(band.kind)}
+  {#if band.slope !== null && kindHasSlope(band.kind)}
+    <!-- A shelf given as a slope (e.g. from PEACE) edits that slope instead. -->
+    <span class="field q slope" title="Shelf slope in dB per octave">
+      <input type="number" min="0.1" max="36" step="0.1" bind:value={band.slope} onchange={onChange} />
+      <small>dB/oct</small>
+    </span>
+  {:else if kindHasQ(band.kind)}
     <span class="field q">
       <small>Q</small>
       <input type="number" min="0.1" max="36" step="0.1" bind:value={band.q} onchange={onChange} />

@@ -13,7 +13,7 @@
   import { createHistory, type Snapshot } from "./history.svelte";
   import PreampRow from "./PreampRow.svelte";
   import FilterList from "./FilterList.svelte";
-  import { kindHasGain, kindHasQ, defaultQ, balanceTrim, toneFilters, peakGainDb, loudnessDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
+  import { kindHasGain, kindHasQ, kindHasSlope, defaultQ, balanceTrim, toneFilters, peakGainDb, loudnessDb, parseConfigEq, bandInView, type BandView, type EngineFilter, type CurveFilter, type EditorBand } from "./eq";
   import { parseRew, normalize, downsample, type MeasPoint } from "./measurement";
   import { getFilterShapes, getGainLimit, getToneHeadroom, getAutoPreamp, setAutoPreamp as saveAutoPreamp } from "./prefs.svelte";
   import { getTarget } from "./targets.svelte";
@@ -91,7 +91,7 @@
   $effect(() => {
     // Track the band shape so a freq/gain/Q/type/enable change re-queries.
     const sig = JSON.stringify(
-      bands.map((b) => [b.enabled, b.kind, b.freq, b.gain, b.q, b.channel.kind]),
+      bands.map((b) => [b.enabled, b.kind, b.freq, b.gain, b.q, b.slope, b.channel.kind]),
     );
     void sig;
     if (!offloadActive) {
@@ -410,7 +410,7 @@
   // Device-side state (the offloaded bands + pregain) — tells whether a press
   // actually changed what the device runs.
   const deviceStateSig = $derived(
-    JSON.stringify([livePregain, hwBands.map((b) => [b.kind, b.freq, b.gain, b.q])]),
+    JSON.stringify([livePregain, hwBands.map((b) => [b.kind, b.freq, b.gain, b.q, b.slope])]),
   );
 
   // A commit-to-apply device (the DHA15) only latches EQ/pregain on a flash commit,
@@ -660,7 +660,7 @@
   // history normal form).
   const eqKey = () =>
     JSON.stringify({
-      b: bands.map((b) => [b.enabled, b.kind, b.freq, b.gain, b.q, b.channel.kind]),
+      b: bands.map((b) => [b.enabled, b.kind, b.freq, b.gain, b.q, b.slope, b.channel.kind]),
       balance,
       raw: rawLines,
     });
@@ -824,6 +824,8 @@
       }
     }
     bands.forEach((b, i) => {
+      // A slope shelf writes its slope in place of the Q.
+      const slope = kindHasSlope(b.kind) ? b.slope : null;
       lines.push({
         kind: "Filter",
         value: {
@@ -831,7 +833,8 @@
           kind: b.kind,
           freq: b.freq,
           gain: kindHasGain(b.kind) ? b.gain : null,
-          q: kindHasQ(b.kind) ? b.q : null,
+          q: kindHasQ(b.kind) && slope === null ? b.q : null,
+          slope,
           index: i + 1,
           channel: b.channel,
         },
@@ -880,6 +883,8 @@
 
   function changeKind(band: Band) {
     if (kindHasQ(band.kind) && (!band.q || band.q <= 0)) band.q = defaultQ(band.kind);
+    // Only the Q shelves take a slope; any other type goes back to its Q.
+    if (!kindHasSlope(band.kind)) band.slope = null;
     schedule();
   }
 
@@ -911,6 +916,7 @@
       freq: 1000,
       gain: 0,
       q: 1,
+      slope: null,
       channel: channelForView(view),
     });
     schedule();

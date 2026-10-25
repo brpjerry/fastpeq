@@ -324,6 +324,33 @@ describe("Editor", () => {
     expect(applied.lines.some((l) => l.kind === "Filter" && l.value.gain === 5)).toBe(true);
   });
 
+  it("keeps a slope shelf's slope, with no Q beside it, when an edit goes live", async () => {
+    const shelf: Config = {
+      lines: [
+        {
+          kind: "Filter",
+          value: { enabled: true, kind: "LowShelfQ", freq: 100, gain: 6, q: null, slope: 12, index: 1, channel: { kind: "both" } },
+        },
+      ],
+    };
+    const { container } = renderEditor(shelf);
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    vi.mocked(api.applyLive).mockClear();
+
+    const gain = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
+    await fireEvent.input(gain, { target: { value: "4" } });
+
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    // A Q alongside the slope would make the backend keep the line as raw text.
+    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({
+      kind: "LowShelfQ",
+      gain: 4,
+      q: null,
+      slope: 12,
+    });
+  });
+
   it("opens the balance popover and dismisses it on an outside click", async () => {
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));

@@ -10,6 +10,7 @@ fn filter(kind: FilterKind, freq: f64, gain: Option<f64>, q: Option<f64>, index:
         freq,
         gain,
         q,
+        slope: None,
         index: Some(index),
         channel: Channel::Both,
     }
@@ -40,8 +41,13 @@ fn model_round_trips() {
                 freq: 30.0,
                 gain: None,
                 q: None,
+                slope: None,
                 index: None,
                 channel: Channel::Both,
+            }),
+            Line::Filter(Filter {
+                slope: Some(10.5),
+                ..filter(FilterKind::HighShelfQ, 9000.0, Some(-4.0), None, 3)
             }),
             Line::Raw("Include: base.txt".to_string()),
         ],
@@ -180,6 +186,35 @@ fn filter_type_tokens() {
         parse("Filter 1: ON XYZ Fc 1000 Hz").lines[0],
         Line::Raw(_)
     ));
+}
+
+/// `LSC`/`HSC` take a slope in dB/octave in place of a Q, written either
+/// `12 dB` or `12dB`; anything we can't model faithfully stays Raw.
+#[test]
+fn slope_shelves() {
+    let config =
+        parse("Filter 1: ON LSC 12 dB Fc 100 Hz Gain 6 dB\nFilter: OFF hsc 4.5dB Fc 8000 Hz");
+    let filters: Vec<_> = config.filters().collect();
+    assert_eq!(filters.len(), 2);
+    assert_eq!(filters[0].kind, FilterKind::LowShelfQ);
+    assert_eq!((filters[0].slope, filters[0].q), (Some(12.0), None));
+    assert_eq!(filters[1].slope, Some(4.5));
+    assert_eq!(
+        serialize(&config),
+        "Filter 1: ON LSC 12 dB Fc 100 Hz Gain 6 dB\nFilter: OFF HSC 4.5 dB Fc 8000 Hz"
+    );
+
+    for raw in [
+        "Filter 1: ON LSC 12 dB Fc 100 Hz Gain 6 dB Q 0.7", // slope and Q both
+        "Filter 1: ON LSC 12 Fc 100 Hz Gain 6 dB",          // no dB unit
+        "Filter 1: ON PK 12 dB Fc 100 Hz Gain 6 dB",        // not a slope type
+        "Filter 1: ON LSC 1€ Fc 100 Hz",                    // multi-byte, no panic
+    ] {
+        assert!(
+            matches!(&parse(raw).lines[..], [Line::Raw(line)] if line == raw),
+            "{raw:?} should stay Raw"
+        );
+    }
 }
 
 /// A non-trivial fractional Q survives the float round-trip exactly.

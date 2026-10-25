@@ -399,8 +399,18 @@ fn band_unclamped(f: &Filter) -> Option<HwBand> {
         kind,
         freq: f.freq,
         gain: f.gain.unwrap_or(0.0),
-        q: f.q.unwrap_or(kind.default_q()),
+        q: band_q(f, kind)?,
     })
+}
+
+/// A band's Q for the biquad math: its own Q (or the class default), or for a
+/// slope shelf the Q drawing the same curve. `None` for a slope with no real
+/// equivalent, which then counts as no filter.
+fn band_q(f: &Filter, kind: HwFilterType) -> Option<f64> {
+    match f.slope {
+        Some(_) => f.effective_q(),
+        None => Some(f.q.unwrap_or(kind.default_q())),
+    }
 }
 
 /// Set the master (`Both`-channel) preamp gain — replacing an existing master
@@ -441,7 +451,8 @@ fn offload_band(f: &Filter, profile: &HardwareProfile) -> Option<HwBand> {
         kind,
         freq: clamp(f.freq, profile.freq_range),
         gain: clamp(f.gain.unwrap_or(0.0), profile.gain_range),
-        q: clamp(f.q.unwrap_or(kind.default_q()), profile.q_range),
+        // The slope's equivalent Q at the band's own gain, before that is clamped.
+        q: clamp(band_q(f, kind)?, profile.q_range),
     })
 }
 
@@ -628,6 +639,7 @@ mod tests {
             freq: 5000.0,
             gain: None,
             q: None,
+            slope: None,
             index: None,
             channel: Channel::Both,
         });
@@ -668,6 +680,33 @@ mod tests {
             OffloadMode::FirstX,
         );
         assert!(split.hw.is_empty());
+        assert_eq!(split.software.filters().count(), 1);
+    }
+
+    #[test]
+    fn slope_shelves_offload_with_their_equivalent_q() {
+        let slope_shelf = |slope| {
+            Line::Filter(Filter {
+                kind: FilterKind::LowShelfQ,
+                q: None,
+                slope: Some(slope),
+                ..Filter::peak(100.0, 6.0, 1.0)
+            })
+        };
+        let split = split(
+            &Config {
+                // The second has no real equivalent Q, so it stays in software.
+                lines: vec![slope_shelf(10.0), slope_shelf(600.0)],
+            },
+            &profile(),
+            OffloadMode::FirstX,
+        );
+        assert_eq!(split.hw.len(), 1);
+        assert_eq!(split.hw[0].kind, HwFilterType::LowShelf);
+        assert_eq!(
+            Some(split.hw[0].q),
+            crate::apo::model::slope_to_q(10.0, 6.0)
+        );
         assert_eq!(split.software.filters().count(), 1);
     }
 

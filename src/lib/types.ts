@@ -23,6 +23,8 @@ export interface Filter {
   freq: number;
   gain: number | null;
   q: number | null;
+  // Shelf slope in dB/octave (`LSC 12 dB`), in place of `q`. Absent = none.
+  slope?: number | null;
   index: number | null;
   channel: Channel;
 }

@@ -57,11 +57,16 @@ fn serialize_filter(f: &Filter) -> String {
     }
     s.push_str(if f.enabled { "ON " } else { "OFF " });
     s.push_str(f.kind.as_token());
+    // A slope replaces the Q (the parser won't model a line with both).
+    let slope = f.slope.filter(|_| f.kind.takes_slope());
+    if let Some(slope) = slope {
+        let _ = write!(s, " {} dB", num(slope));
+    }
     let _ = write!(s, " Fc {} Hz", num(f.freq));
     if let Some(gain) = f.gain {
         let _ = write!(s, " Gain {} dB", num(gain));
     }
-    if let Some(q) = f.q {
+    if let Some(q) = f.q.filter(|_| slope.is_none()) {
         let _ = write!(s, " Q {}", num(q));
     }
     s

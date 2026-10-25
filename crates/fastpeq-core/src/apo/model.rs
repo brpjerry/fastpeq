@@ -56,7 +56,7 @@ impl Config {
 pub enum Line {
     /// `Preamp: <value> dB`, scoped to `channel`.
     Preamp { gain: f64, channel: Channel },
-    /// `Filter[ N]: ON|OFF <type> Fc <hz> Hz [Gain <db> dB] [Q <q>]`
+    /// `Filter[ N]: ON|OFF <type> [<slope> dB] Fc <hz> Hz [Gain <db> dB] [Q <q>]`
     Filter(Filter),
     /// Any line we do not model — comments, blank lines, `Include:`,
     /// `Device:`, `Channel:`, `GraphicEQ:`, `Convolution:`, unsupported filter
@@ -79,6 +79,11 @@ pub struct Filter {
     pub gain: Option<f64>,
     /// Quality factor `Q`.
     pub q: Option<f64>,
+    /// Shelf slope in dB per octave — `LSC 12 dB …` — given instead of a `Q`.
+    /// Only for the types where [`FilterKind::takes_slope`]; never alongside
+    /// `q`. Defaulted so JSON written before this field existed still loads.
+    #[serde(default)]
+    pub slope: Option<f64>,
     /// The label from a numbered `Filter N:` line, or `None` for bare `Filter:`.
     pub index: Option<u32>,
     /// Which channel(s) this band applies to.
@@ -94,10 +99,41 @@ impl Filter {
             freq,
             gain: Some(gain),
             q: Some(q),
+            slope: None,
             index: None,
             channel: Channel::Both,
         }
     }
+
+    /// The Q to use in biquad math: the band's own `q`, or for a shelf given as
+    /// a slope, the Q that draws the same curve at this gain. `None` when the
+    /// band has neither, or its slope has no real equivalent (see
+    /// [`slope_to_q`]).
+    pub fn effective_q(&self) -> Option<f64> {
+        match self.slope {
+            Some(slope) => slope_to_q(slope, self.gain.unwrap_or(0.0)),
+            None => self.q,
+        }
+    }
+}
+
+/// The Q equivalent to a shelf slope of `slope` dB/octave at `gain` dB.
+///
+/// Equalizer APO reads `LSC 12 dB` as the RBJ cookbook's shelf slope
+/// S = slope / 12 (so 12 dB/oct is S = 1, the steepest shelf with no overshoot)
+/// and sets alpha = sin(w0)/2 · sqrt((A + 1/A)(1/S − 1) + 2). In Q form alpha is
+/// sin(w0)/(2Q), so Q = 1/sqrt(…) — which, unlike S, depends on the gain.
+/// `None` when the root isn't real (a slope too steep for the gain) or the slope
+/// isn't positive; APO has no usable filter there either. Mirrors `slopeToQ` in
+/// `src/lib/eq.ts`.
+pub fn slope_to_q(slope: f64, gain: f64) -> Option<f64> {
+    let s = slope / 12.0;
+    if s <= 0.0 {
+        return None;
+    }
+    let a = 10f64.powf(gain / 40.0);
+    let radicand = (a + 1.0 / a) * (1.0 / s - 1.0) + 2.0;
+    (radicand > 0.0).then(|| 1.0 / radicand.sqrt())
 }
 
 /// The supported filter types, mapped to their APO tokens.
@@ -187,6 +223,13 @@ impl FilterKind {
             Peak | LowShelfQ | HighShelfQ | LowPassQ | HighPassQ | BandPass | Notch | AllPass
         )
     }
+
+    /// Whether this type can take a slope in dB/octave in place of its `Q`
+    /// (`LSC 12 dB` / `HSC 6 dB`). APO also accepts `LS 6dB`, but that is a
+    /// corner-frequency shelf we don't model, so it stays a raw line.
+    pub fn takes_slope(self) -> bool {
+        matches!(self, FilterKind::LowShelfQ | FilterKind::HighShelfQ)
+    }
 }
 
 #[cfg(test)]
@@ -208,6 +251,7 @@ mod tests {
                     freq: 1000.0,
                     gain: Some(-2.0),
                     q: Some(1.0),
+                    slope: None,
                     index: Some(1),
                     channel: Channel::Left,
                 }),
@@ -217,6 +261,7 @@ mod tests {
                     freq: 8000.0,
                     gain: Some(2.0),
                     q: None,
+                    slope: None,
                     index: Some(2),
                     channel: Channel::Other("C SUB".into()),
                 }),
@@ -237,5 +282,46 @@ mod tests {
         // And it survives a JSON round-trip unchanged.
         let back: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(back, config);
+    }
+
+    /// JSON from before the slope existed (no `slope` key) still deserializes.
+    #[test]
+    fn filter_json_without_slope_loads() {
+        let json = r#"{"enabled":true,"kind":"Peak","freq":100.0,"gain":1.0,"q":1.0,"index":null,"channel":{"kind":"both"}}"#;
+        let f: Filter = serde_json::from_str(json).unwrap();
+        assert_eq!(f.slope, None);
+    }
+
+    #[test]
+    fn slope_to_q_matches_the_cookbook() {
+        let close = |a: Option<f64>, b: f64| a.is_some_and(|a| (a - b).abs() < 1e-12);
+        // S = 1 (12 dB/oct) is Q = 1/√2 at every gain.
+        for gain in [-12.0, 0.0, 3.0, 12.0] {
+            assert!(close(
+                slope_to_q(12.0, gain),
+                std::f64::consts::FRAC_1_SQRT_2
+            ));
+        }
+        // At 0 dB the gain terms vanish: Q = sqrt(S / 2).
+        assert!(close(slope_to_q(6.0, 0.0), 0.5));
+        // Pinned in src/lib/eq.test.ts as well, so the two stay in step.
+        assert!(slope_to_q(10.0, 6.0).is_some_and(|q| (q - 0.642281).abs() < 5e-7));
+        // Shallower slopes give lower Qs, steeper ones higher (the overshoot).
+        assert!(slope_to_q(6.0, 6.0).unwrap() < slope_to_q(15.0, 6.0).unwrap());
+        // No real equivalent: a non-positive slope, or one too steep for the gain.
+        assert_eq!(slope_to_q(0.0, 6.0), None);
+        assert_eq!(slope_to_q(60.0, 24.0), None);
+    }
+
+    #[test]
+    fn effective_q_prefers_the_slope() {
+        let shelf = Filter {
+            kind: FilterKind::LowShelfQ,
+            q: None,
+            slope: Some(12.0),
+            ..Filter::peak(100.0, 6.0, 1.0)
+        };
+        assert_eq!(shelf.effective_q(), slope_to_q(12.0, 6.0));
+        assert_eq!(Filter::peak(100.0, 6.0, 2.0).effective_q(), Some(2.0));
     }
 }
