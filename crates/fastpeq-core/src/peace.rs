@@ -99,13 +99,13 @@ struct BandType {
 /// The type of a band from its `Filter{i}` code — an index into PEACE's own
 /// filter list (the "Peak filter" … labels in its `.plf` language files, keys
 /// 3200 + code). No entry means a peaking filter, and so does a code we don't
-/// know: that keeps the band rather than losing it.
+/// know: that keeps the band rather than losing it. 16/17 (shelves with a
+/// corner frequency) become an `LS`/`HS` that keeps its Q, which Equalizer APO
+/// reads as a corner-frequency shelf ([`Filter::apo_biquad`]).
 ///
 /// Approximations, where our model has no exact counterpart:
 /// - 10–13 (Butterworth / Linkwitz-Riley passes) become one adjustable-Q
 ///   biquad, where PEACE renders a cascade.
-/// - 16/17 (shelves with a corner frequency) keep their Q on a fixed-slope
-///   shelf: Equalizer APO accepts that, but the editor doesn't offer a Q there.
 fn band_type(code: Option<u32>) -> BandType {
     use FilterKind::*;
     let band = |kind, gain, q| BandType {

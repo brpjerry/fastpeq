@@ -351,6 +351,51 @@ describe("Editor", () => {
     });
   });
 
+  it("keeps the Q a fixed shelf came with, and gives a Q-less one none", async () => {
+    const shelf = (kind: "LowShelf" | "LowShelfQ", freq: number, q: number | null, index: number) => ({
+      kind: "Filter" as const,
+      value: { enabled: true, kind, freq, gain: 6, q, index, channel: { kind: "both" as const } },
+    });
+    // An LS with a Q is APO's corner-frequency shelf; dropping the Q would
+    // change the sound. A plain LS must stay plain, and a Q-less LSC gets the
+    // Q Equalizer APO already runs it at (S = 0.9 at +6 dB).
+    const { container } = renderEditor({
+      lines: [shelf("LowShelf", 100, 0.7, 1), shelf("LowShelf", 200, null, 2), shelf("LowShelfQ", 300, null, 3)],
+    });
+    await waitFor(() => expect(bandCount(container)).toBe(3));
+    vi.mocked(api.applyLive).mockClear();
+
+    const gain = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
+    await fireEvent.input(gain, { target: { value: "4" } });
+
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    const filters = applied.lines.flatMap((l) => (l.kind === "Filter" ? [l.value] : []));
+    expect(filters.map((f) => [f.kind, f.q])).toEqual([
+      ["LowShelf", 0.7],
+      ["LowShelf", null],
+      ["LowShelfQ", expect.closeTo(0.668809, 6)],
+    ]);
+  });
+
+  it("drops a band's Q when its type changes to one without", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 3, 2]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    vi.mocked(api.applyLive).mockClear();
+
+    await fireEvent.click(container.querySelector(".ts-btn")!);
+    const lowShelf = [...document.querySelectorAll<HTMLElement>(".ts-item")].find(
+      (b) => b.textContent!.includes("Low shelf") && !b.textContent!.includes("(Q)"),
+    );
+    await fireEvent.click(lowShelf!);
+
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    // Keeping the peak's Q would turn the new LS into a corner-frequency shelf.
+    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({ kind: "LowShelf", q: null });
+    expect(container.querySelector(".field.q")).toBeNull();
+  });
+
   it("opens the balance popover and dismisses it on an outside click", async () => {
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));

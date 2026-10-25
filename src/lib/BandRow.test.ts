@@ -12,7 +12,7 @@ type Band = {
   kind: FilterKind;
   freq: number;
   gain: number;
-  q: number;
+  q: number | null;
   slope: number | null;
   channel: Channel;
 };
@@ -46,10 +46,21 @@ describe("BandRow", () => {
 
   it("hides the Q field for a shelf without Q", () => {
     const { container } = render(BandRow, {
-      props: { band: band({ kind: "LowShelf" }), hovered: false, ...cbs() },
+      props: { band: band({ kind: "LowShelf", q: null }), hovered: false, ...cbs() },
     });
     expect(container.querySelector(".field.gain")).not.toBeNull();
     expect(container.querySelector(".field.q")).toBeNull();
+  });
+
+  it("edits the Q a fixed shelf's line came with (APO's corner-frequency shelf)", async () => {
+    const b = band({ kind: "HighShelf", q: 0.7 });
+    const c = cbs();
+    const { container } = render(BandRow, { props: { band: b, hovered: false, ...c } });
+    const input = container.querySelector<HTMLInputElement>(".field.q input")!;
+    await fireEvent.input(input, { target: { value: "1.2" } });
+    await fireEvent.change(input);
+    expect(b.q).toBe(1.2);
+    expect(c.onChange).toHaveBeenCalled();
   });
 
   it("edits a slope shelf's slope in place of its Q", async () => {

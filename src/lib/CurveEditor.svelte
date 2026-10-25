@@ -11,7 +11,6 @@
     balanceTrim,
     clampGainTo,
     kindHasGain,
-    kindHasQ,
     kindHasSlope,
     DEFAULT_GAIN_LIMIT,
     type BandView,
@@ -219,7 +218,7 @@
             kind: b.kind,
             freq: b.freq,
             gain: kindHasGain(b.kind) ? b.gain : null,
-            q: kindHasQ(b.kind) ? b.q : null,
+            q: b.q,
             slope: b.slope,
             channel: b.channel,
           },
@@ -282,15 +281,16 @@
   function widthLabel(b: Band): string {
     const slope = slopeOf(b);
     if (slope !== null) return ` · ${slope.toFixed(1)} dB/oct`;
-    return kindHasQ(b.kind) ? ` · Q ${b.q.toFixed(1)}` : "";
+    return b.q !== null ? ` · Q ${b.q.toFixed(1)}` : "";
   }
   function onWheel(e: WheelEvent, b: Band) {
     const slope = slopeOf(b);
-    if (slope === null && !kindHasQ(b.kind)) return;
+    const q = b.q;
+    if (slope === null && q === null) return;
     e.preventDefault();
     const up = e.deltaY < 0;
     if (slope !== null) b.slope = Math.max(0.5, Math.min(36, round1(slope + (up ? 0.5 : -0.5))));
-    else b.q = Math.max(0.1, Math.min(36, round1(b.q + (up ? 0.1 : -0.1))));
+    else if (q !== null) b.q = Math.max(0.1, Math.min(36, round1(q + (up ? 0.1 : -0.1))));
     onChange();
   }
   function onCursorMove(e: PointerEvent) {

@@ -21,7 +21,8 @@ no restart, no process churn.
 - **Instant preset switching** — an atomic `config.txt` write; no engine restart, no process churn.
 - **Parametric band editor** — add / remove / enable bands, edit type and Fc / Gain / Q inline.
   Supports `PK`, `LS`, `HS`, `LSC`, `HSC`, `LP`, `HP`, `LPQ`, `HPQ`, `BP`, `NO`, `AP`;
-  `LSC` / `HSC` take either a Q or a slope in dB per octave (`LSC 12 dB …`).
+  `LSC` / `HSC` take either a Q or a slope in dB per octave (`LSC 12 dB …`), and an `LS` / `HS`
+  keeps a Q it comes with (Equalizer APO then reads its Fc as a corner frequency).
   A configurable **gain limit** (±12 dB by default, *Settings → Filter gain limit*) keeps a single
   band's gain in range as you edit it; presets you already have keep the gain they were saved
   with until you touch that band's gain.

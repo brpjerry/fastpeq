@@ -11,7 +11,7 @@
   // same archival + undo flow as the list's X button.
   import * as api from "./api";
   import ResponseCurve from "./ResponseCurve.svelte";
-  import { FILTER_TYPES, kindHasGain, kindHasQ, kindHasSlope, parseConfigEq, type CurveFilter } from "./eq";
+  import { FILTER_TYPES, kindHasGain, kindHasSlope, parseConfigEq, type CurveFilter } from "./eq";
 
   let {
     name,
@@ -138,7 +138,7 @@
             {#if kindHasGain(f.kind)}{fmtGain(f.gain ?? 0)}<small>dB</small>{:else}<small class="na">—</small>{/if}
           </span>
           <span class="num q">
-            {#if f.slope != null && kindHasSlope(f.kind)}{f.slope.toFixed(1)}<small>dB/oct</small>{:else if kindHasQ(f.kind)}<small>Q</small>{(f.q ?? 0).toFixed(2)}{:else}<small class="na">—</small>{/if}
+            {#if f.slope != null && kindHasSlope(f.kind)}{f.slope.toFixed(1)}<small>dB/oct</small>{:else if f.q != null}<small>Q</small>{f.q.toFixed(2)}{:else}<small class="na">—</small>{/if}
           </span>
         </div>
       {:else}
