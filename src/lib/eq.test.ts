@@ -4,7 +4,10 @@ import {
   balanceFromTrim,
   kindHasGain,
   kindHasQ,
+  kindHasSlope,
   defaultQ,
+  slopeToQ,
+  parseConfigEq,
   responseCurve,
   peakGainDb,
   aWeightDb,
@@ -51,6 +54,62 @@ describe("filter metadata", () => {
   it("defaults Q per kind", () => {
     expect(defaultQ("Peak")).toBe(1);
     expect(defaultQ("LowShelfQ")).toBeCloseTo(Math.SQRT1_2, 6);
+  });
+  it("lets only the Q shelves take a slope", () => {
+    expect(kindHasSlope("LowShelfQ")).toBe(true);
+    expect(kindHasSlope("HighShelfQ")).toBe(true);
+    expect(kindHasSlope("LowShelf")).toBe(false);
+    expect(kindHasSlope("Peak")).toBe(false);
+  });
+});
+
+describe("slopeToQ", () => {
+  it("maps 12 dB/oct (S = 1) to Q 1/√2 at any gain", () => {
+    for (const gain of [-12, 0, 6]) expect(slopeToQ(12, gain)).toBeCloseTo(Math.SQRT1_2, 12);
+  });
+  it("matches the Rust conversion", () => {
+    // Pinned in crates/fastpeq-core/src/apo/model.rs as well.
+    expect(slopeToQ(10, 6)).toBeCloseTo(0.642281, 6);
+  });
+  it("has no equivalent for a slope too steep for the gain, or a non-positive one", () => {
+    expect(slopeToQ(60, 24)).toBeNull();
+    expect(slopeToQ(0, 6)).toBeNull();
+  });
+});
+
+describe("slope shelves", () => {
+  const shelf = (over: Partial<CurveFilter>): CurveFilter => ({
+    enabled: true,
+    kind: "LowShelfQ",
+    freq: 100,
+    gain: 6,
+    q: Math.SQRT1_2,
+    channel: both,
+    ...over,
+  });
+  const probe = [20, 50, 100, 200, 1000];
+
+  it("draw the same curve as a Q shelf at the equivalent Q", () => {
+    const bySlope = responseCurve([shelf({ slope: 6, q: 3 })], 0, probe); // slope wins over q
+    const byQ = responseCurve([shelf({ q: slopeToQ(6, 6) })], 0, probe);
+    bySlope.forEach((db, i) => expect(db).toBeCloseTo(byQ[i], 9));
+  });
+  it("ignore the slope on a type that can't take one", () => {
+    const peakWithSlope = responseCurve([{ ...peak(1000, 6, 1), slope: 6 }], 0, probe);
+    expect(peakWithSlope).toEqual(responseCurve([peak(1000, 6, 1)], 0, probe));
+  });
+  it("contribute nothing when the slope has no real filter", () => {
+    expect(responseCurve([shelf({ slope: 600 })], 0, probe)).toEqual([0, 0, 0, 0, 0]);
+  });
+  it("carry their slope through parseConfigEq", () => {
+    const filter = { enabled: true, kind: "HighShelfQ", freq: 8000, gain: -3, q: null, index: 1, channel: both } as const;
+    const parsed = parseConfigEq({
+      lines: [
+        { kind: "Filter", value: { ...filter, slope: 9 } },
+        { kind: "Filter", value: filter }, // no slope key at all
+      ],
+    });
+    expect(parsed.filters.map((f) => f.slope)).toEqual([9, null]);
   });
 });
 

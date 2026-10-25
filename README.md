@@ -20,7 +20,8 @@ no restart, no process churn.
 
 - **Instant preset switching** — an atomic `config.txt` write; no engine restart, no process churn.
 - **Parametric band editor** — add / remove / enable bands, edit type and Fc / Gain / Q inline.
-  Supports `PK`, `LS`, `HS`, `LSC`, `HSC`, `LP`, `HP`, `LPQ`, `HPQ`, `BP`, `NO`, `AP`.
+  Supports `PK`, `LS`, `HS`, `LSC`, `HSC`, `LP`, `HP`, `LPQ`, `HPQ`, `BP`, `NO`, `AP`;
+  `LSC` / `HSC` take either a Q or a slope in dB per octave (`LSC 12 dB …`).
 - **Live response curve** — a client-side RBJ-biquad magnitude plot that updates as you type.
 - **Expanded curve editor** — a full-window graph with draggable band handles (drag to set
   frequency & gain, scroll to change Q), a filter-shape overlay, per-channel (L / R) editing,
@@ -45,7 +46,8 @@ no restart, no process churn.
   brings fastpeq up minimized to the tray at login, so your preset is in place before you
   play anything.
 - **System tray**, single-instance, first-run backup of your config.
-- **PEACE import** — bring your existing `.peace` presets across.
+- **PEACE import** — bring your existing `.peace` presets across, keeping each band's filter
+  type (shelves, passes, notches) and whether it was switched off.
 
 ![fastpeq curve editor](assets/curve-editor.png)
 

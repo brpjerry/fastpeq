@@ -13,6 +13,7 @@ type Band = {
   freq: number;
   gain: number;
   q: number;
+  slope: number | null;
   channel: Channel;
 };
 
@@ -23,6 +24,7 @@ const band = (over: Partial<Band> = {}): Band => ({
   freq: 1000,
   gain: 0,
   q: 1,
+  slope: null,
   channel: { kind: "both" },
   ...over,
 });
@@ -48,6 +50,21 @@ describe("BandRow", () => {
     });
     expect(container.querySelector(".field.gain")).not.toBeNull();
     expect(container.querySelector(".field.q")).toBeNull();
+  });
+
+  it("edits a slope shelf's slope in place of its Q", async () => {
+    const b = band({ kind: "LowShelfQ", slope: 12 });
+    const c = cbs();
+    const { container } = render(BandRow, { props: { band: b, hovered: false, ...c } });
+    const field = container.querySelector(".field.slope");
+    expect(field?.textContent).toContain("dB/oct");
+    expect(container.querySelectorAll(".field.q")).toHaveLength(1); // no second Q box
+    const input = field!.querySelector<HTMLInputElement>("input")!;
+    await fireEvent.input(input, { target: { value: "6" } });
+    await fireEvent.change(input);
+    expect(b.slope).toBe(6);
+    expect(b.q).toBe(1); // untouched underneath
+    expect(c.onChange).toHaveBeenCalled();
   });
 
   it("hides the gain field for a band with no gain (e.g. high-pass)", () => {

@@ -1,7 +1,8 @@
 <script lang="ts">
   // Large, interactive response graph for the expanded view. Renders the same
   // biquad curve as ResponseCurve but adds a draggable handle per band: drag to
-  // set frequency (x) and gain (y), scroll over a handle to change Q. It mutates
+  // set frequency (x) and gain (y), scroll over a handle to change Q (or a slope
+  // shelf's slope). It mutates
   // the band objects in place (they are the parent's $state) and calls onChange
   // so the live-apply throttle fires, exactly like the sliders do.
   import {
@@ -10,6 +11,7 @@
     balanceTrim,
     kindHasGain,
     kindHasQ,
+    kindHasSlope,
     type BandView,
     type CurveFilter,
     type EditorBand,
@@ -211,6 +213,7 @@
             freq: b.freq,
             gain: kindHasGain(b.kind) ? b.gain : null,
             q: kindHasQ(b.kind) ? b.q : null,
+            slope: b.slope,
             channel: b.channel,
           },
         ],
@@ -264,10 +267,20 @@
       window.removeEventListener("pointercancel", onDragEnd);
     };
   });
+  // A shelf given as a slope shows and scrolls its slope in place of the Q.
+  const slopeOf = (b: Band) => (b.slope !== null && kindHasSlope(b.kind) ? b.slope : null);
+  function widthLabel(b: Band): string {
+    const slope = slopeOf(b);
+    if (slope !== null) return ` · ${slope.toFixed(1)} dB/oct`;
+    return kindHasQ(b.kind) ? ` · Q ${b.q.toFixed(1)}` : "";
+  }
   function onWheel(e: WheelEvent, b: Band) {
-    if (!kindHasQ(b.kind)) return;
+    const slope = slopeOf(b);
+    if (slope === null && !kindHasQ(b.kind)) return;
     e.preventDefault();
-    b.q = Math.max(0.1, Math.min(36, round1(b.q + (e.deltaY < 0 ? 0.1 : -0.1))));
+    const up = e.deltaY < 0;
+    if (slope !== null) b.slope = Math.max(0.5, Math.min(36, round1(slope + (up ? 0.5 : -0.5))));
+    else b.q = Math.max(0.1, Math.min(36, round1(b.q + (up ? 0.1 : -0.1))));
     onChange();
   }
   function onCursorMove(e: PointerEvent) {
@@ -391,11 +404,7 @@
           <text x={hx} y={hy} dy="0.4em" class="hnum" text-anchor="middle">{i + 1}</text>
           {#if dragId === band.id}
             <text x={hx} y={hy - 16} class="htip" text-anchor="middle">
-              {fmtFreq(band.freq)} Hz{kindHasGain(band.kind) ? ` · ${band.gain.toFixed(1)} dB` : ""}{kindHasQ(
-                band.kind,
-              )
-                ? ` · Q ${band.q.toFixed(1)}`
-                : ""}
+              {fmtFreq(band.freq)} Hz{kindHasGain(band.kind) ? ` · ${band.gain.toFixed(1)} dB` : ""}{widthLabel(band)}
             </text>
           {/if}
         </g>
