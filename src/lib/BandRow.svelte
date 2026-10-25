@@ -1,6 +1,6 @@
 <script lang="ts">
   // One row of the band list: status toggle, type picker, frequency, gain
-  // (slider + number, only for gain types), and Q (only for Q types), plus a
+  // (slider + number, only for gain types), and Q (when the band has one), plus a
   // remove button. Extracted from Editor; it mutates the passed `band` proxy in
   // place (so edits flow straight back) and emits semantic callbacks for the
   // throttled apply, the type change (which may seed a default Q), removal, and
@@ -13,7 +13,7 @@
   // `offloaded` is the backend's word on device membership, passed through
   // untouched — this row never infers it from mode, order, or position.
   import TypeSelect from "./TypeSelect.svelte";
-  import { DEFAULT_GAIN_LIMIT, clampGainTo, kindHasGain, kindHasQ, kindHasSlope } from "./eq";
+  import { DEFAULT_GAIN_LIMIT, clampGainTo, kindHasGain, kindHasSlope } from "./eq";
   import type { Channel, FilterKind } from "./types";
 
   type Band = {
@@ -22,7 +22,7 @@
     kind: FilterKind;
     freq: number;
     gain: number;
-    q: number;
+    q: number | null;
     slope: number | null;
     channel: Channel;
   };
@@ -161,7 +161,8 @@
       <input type="number" min="0.1" max="36" step="0.1" bind:value={band.slope} onchange={onChange} />
       <small>dB/oct</small>
     </span>
-  {:else if kindHasQ(band.kind)}
+  {:else if band.q !== null}
+    <!-- Every Q type has one; an LS/HS/LP/HP only when its line gave one. -->
     <span class="field q">
       <small>Q</small>
       <input type="number" min="0.1" max="36" step="0.1" bind:value={band.q} onchange={onChange} />

@@ -833,7 +833,7 @@
           kind: b.kind,
           freq: b.freq,
           gain: kindHasGain(b.kind) ? b.gain : null,
-          q: kindHasQ(b.kind) && slope === null ? b.q : null,
+          q: slope === null ? b.q : null,
           slope,
           index: i + 1,
           channel: b.channel,
@@ -882,7 +882,10 @@
   });
 
   function changeKind(band: Band) {
-    if (kindHasQ(band.kind) && (!band.q || band.q <= 0)) band.q = defaultQ(band.kind);
+    // A Q type needs a Q; any other type starts plain — a Q there (an LS/HS
+    // corner shelf, a resonant LP/HP) is only ever kept from a loaded line.
+    if (!kindHasQ(band.kind)) band.q = null;
+    else if (!band.q || band.q <= 0) band.q = defaultQ(band.kind);
     // Only the Q shelves take a slope; any other type goes back to its Q.
     if (!kindHasSlope(band.kind)) band.slope = null;
     schedule();

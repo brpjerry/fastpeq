@@ -17,7 +17,7 @@
 use crate::apo::model::{Channel, Config, Filter, FilterKind, Line};
 use crate::tone::Tone;
 use serde::{Deserialize, Serialize};
-use std::f64::consts::{FRAC_1_SQRT_2, PI};
+use std::f64::consts::PI;
 
 /// Sample rate the software/APO stage runs at, for the auto-preamp peak math —
 /// matches `SAMPLE_RATE` in `src/lib/eq.ts` (the device's own biquads use the
@@ -63,7 +63,9 @@ pub enum HwFilterType {
 impl HwFilterType {
     /// Map a fastpeq [`FilterKind`] to the hardware class, or `None` if no device
     /// of this family can represent it. Both the fixed-slope (`LowShelf`) and
-    /// adjustable-Q (`LowShelfQ`) shelves collapse to the same hardware class.
+    /// adjustable-Q (`LowShelfQ`) shelves collapse to the same hardware class, at
+    /// the centre and Q Equalizer APO would run them with
+    /// ([`Filter::apo_biquad`]).
     pub fn from_kind(kind: FilterKind) -> Option<Self> {
         use FilterKind::*;
         Some(match kind {
@@ -72,15 +74,6 @@ impl HwFilterType {
             HighShelf | HighShelfQ => HwFilterType::HighShelf,
             _ => return None,
         })
-    }
-
-    /// The default Q for this class when the source filter carries none (fixed
-    /// shelves) — matches `defaultQ` in `src/lib/eq.ts`.
-    fn default_q(self) -> f64 {
-        match self {
-            HwFilterType::Peak => 1.0,
-            _ => FRAC_1_SQRT_2,
-        }
     }
 }
 
@@ -393,24 +386,16 @@ pub fn auto_preamp(config: &Config, tone: &Tone) -> f64 {
 
 /// Map any peaking/shelf filter to an [`HwBand`] for magnitude math, *without*
 /// clamping to a device's ranges (used to gauge the software side's headroom).
+/// `None` for a slope with no real equivalent Q, which then counts as no filter.
 fn band_unclamped(f: &Filter) -> Option<HwBand> {
     let kind = HwFilterType::from_kind(f.kind)?;
+    let (freq, q) = f.apo_biquad()?;
     Some(HwBand {
         kind,
-        freq: f.freq,
+        freq,
         gain: f.gain.unwrap_or(0.0),
-        q: band_q(f, kind)?,
+        q,
     })
-}
-
-/// A band's Q for the biquad math: its own Q (or the class default), or for a
-/// slope shelf the Q drawing the same curve. `None` for a slope with no real
-/// equivalent, which then counts as no filter.
-fn band_q(f: &Filter, kind: HwFilterType) -> Option<f64> {
-    match f.slope {
-        Some(_) => f.effective_q(),
-        None => Some(f.q.unwrap_or(kind.default_q())),
-    }
 }
 
 /// Set the master (`Both`-channel) preamp gain — replacing an existing master
@@ -447,12 +432,14 @@ fn offload_band(f: &Filter, profile: &HardwareProfile) -> Option<HwBand> {
         _ => {}
     }
     let clamp = |v: f64, (lo, hi): (f64, f64)| v.clamp(lo, hi);
+    // Where APO would centre the band and its Q there — for a slope or corner
+    // shelf, worked out at the band's own gain, before that is clamped.
+    let (freq, q) = f.apo_biquad()?;
     Some(HwBand {
         kind,
-        freq: clamp(f.freq, profile.freq_range),
+        freq: clamp(freq, profile.freq_range),
         gain: clamp(f.gain.unwrap_or(0.0), profile.gain_range),
-        // The slope's equivalent Q at the band's own gain, before that is clamped.
-        q: clamp(band_q(f, kind)?, profile.q_range),
+        q: clamp(q, profile.q_range),
     })
 }
 
@@ -569,6 +556,7 @@ mod tests {
     use super::*;
     use crate::apo::model::Filter;
     use crate::tone::Tone;
+    use std::f64::consts::FRAC_1_SQRT_2;
 
     /// A representative 8-band profile (the DHA15's), so split/clamp tests don't
     /// depend on the shell's driver constants.
@@ -708,6 +696,40 @@ mod tests {
             crate::apo::model::slope_to_q(10.0, 6.0)
         );
         assert_eq!(split.software.filters().count(), 1);
+    }
+
+    #[test]
+    fn shelves_offload_at_the_centre_and_q_apo_runs() {
+        let shelf = |kind, q| {
+            Line::Filter(Filter {
+                kind,
+                q,
+                ..Filter::peak(100.0, 6.0, 1.0)
+            })
+        };
+        let split = split(
+            &Config {
+                lines: vec![
+                    // No Q: APO's S = 0.9 shelf, centred on Fc.
+                    shelf(FilterKind::LowShelf, None),
+                    // A Q on LS: Fc is a corner, so the device's centre moves up.
+                    shelf(FilterKind::LowShelf, Some(0.7)),
+                    // LSC keeps Fc as its centre.
+                    shelf(FilterKind::LowShelfQ, Some(0.7)),
+                ],
+            },
+            &profile(),
+            OffloadMode::FirstX,
+        );
+        let got: Vec<(f64, f64)> = split.hw.iter().map(|b| (b.freq, b.q)).collect();
+        let want = [(100.0, 0.668809), (119.24595, 0.7), (100.0, 0.7)];
+        assert_eq!(got.len(), want.len());
+        for ((f, q), (wf, wq)) in got.into_iter().zip(want) {
+            assert!(
+                (f - wf).abs() < 5e-4 && (q - wq).abs() < 5e-7,
+                "{f} Hz Q {q}"
+            );
+        }
     }
 
     #[test]

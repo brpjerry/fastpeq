@@ -105,35 +105,84 @@ impl Filter {
         }
     }
 
-    /// The Q to use in biquad math: the band's own `q`, or for a shelf given as
-    /// a slope, the Q that draws the same curve at this gain. `None` when the
-    /// band has neither, or its slope has no real equivalent (see
-    /// [`slope_to_q`]).
-    pub fn effective_q(&self) -> Option<f64> {
-        match self.slope {
-            Some(slope) => slope_to_q(slope, self.gain.unwrap_or(0.0)),
-            None => self.q,
+    /// The centre frequency and Q of the biquad Equalizer APO runs for this
+    /// band — what the response curve and a hardware device need. For a shelf
+    /// these aren't always the line's `Fc` and `Q`; APO's `BiQuadFilterFactory`
+    /// and `BiQuadFilter` resolve them as:
+    /// - a slope of N dB is the cookbook shelf slope S = N / 12 ([`slope_to_q`]);
+    /// - with neither a Q nor a slope (or either written as 0), S is
+    ///   [`DEFAULT_SHELF_S`];
+    /// - an `LS`/`HS` given a Q or a slope reads `Fc` as a *corner* frequency
+    ///   and centres the biquad at Fc · 10^(|gain| / (80 S)) (`LS`) or
+    ///   Fc / 10^(…) (`HS`), deriving S from the Q when that's what it has.
+    ///   `LSC`/`HSC`, and an `LS`/`HS` with neither, centre on `Fc` itself.
+    ///
+    /// Any other type keeps its `Fc`, and its `Q` or else
+    /// [`FilterKind::default_q`]. `None` for a slope with no real equivalent Q,
+    /// which is no usable filter. Mirrors `apoBiquad` in `src/lib/eq.ts`, and
+    /// the two are pinned to the same numbers in their tests.
+    pub fn apo_biquad(&self) -> Option<(f64, f64)> {
+        // APO takes a Q or slope of 0 as none given.
+        let given = |v: Option<f64>| v.filter(|&v| v != 0.0);
+        let q = given(self.q);
+        if !self.kind.is_shelf() {
+            return Some((self.freq, q.unwrap_or(self.kind.default_q())));
         }
+        let gain = self.gain.unwrap_or(0.0);
+        let slope = given(self.slope.filter(|_| self.kind.takes_slope()));
+        let (s, q) = match (slope, q) {
+            (Some(slope), _) => (slope / 12.0, slope_to_q(slope, gain)?),
+            (None, Some(q)) => (shelf_q_to_s(q, gain), q),
+            (None, None) => return Some((self.freq, shelf_s_to_q(DEFAULT_SHELF_S, gain)?)),
+        };
+        // APO's frequency adjustment "for DCX2496" (a Behringer crossover).
+        let shift = 10f64.powf(gain.abs() / 80.0 / s);
+        let freq = match self.kind {
+            FilterKind::LowShelf => self.freq * shift,
+            FilterKind::HighShelf => self.freq / shift,
+            _ => self.freq,
+        };
+        Some((freq, q))
     }
 }
+
+/// The cookbook shelf slope S Equalizer APO gives a shelf with neither a `Q`
+/// nor a slope: 0.9, "found out by experimentation with RoomEQWizard"
+/// (`BiQuadFilterFactory.cpp`). Mirrors `DEFAULT_SHELF_S` in `src/lib/eq.ts`.
+pub const DEFAULT_SHELF_S: f64 = 0.9;
 
 /// The Q equivalent to a shelf slope of `slope` dB/octave at `gain` dB.
 ///
 /// Equalizer APO reads `LSC 12 dB` as the RBJ cookbook's shelf slope
-/// S = slope / 12 (so 12 dB/oct is S = 1, the steepest shelf with no overshoot)
-/// and sets alpha = sin(w0)/2 · sqrt((A + 1/A)(1/S − 1) + 2). In Q form alpha is
-/// sin(w0)/(2Q), so Q = 1/sqrt(…) — which, unlike S, depends on the gain.
-/// `None` when the root isn't real (a slope too steep for the gain) or the slope
-/// isn't positive; APO has no usable filter there either. Mirrors `slopeToQ` in
-/// `src/lib/eq.ts`.
+/// S = slope / 12 (so 12 dB/oct is S = 1, the steepest shelf with no overshoot);
+/// see [`shelf_s_to_q`]. `None` when there's no real equivalent. Mirrors
+/// `slopeToQ` in `src/lib/eq.ts`.
 pub fn slope_to_q(slope: f64, gain: f64) -> Option<f64> {
-    let s = slope / 12.0;
+    shelf_s_to_q(slope / 12.0, gain)
+}
+
+/// The Q equivalent to the cookbook shelf slope `s` at `gain` dB.
+///
+/// The cookbook sets alpha = sin(w0)/2 · sqrt((A + 1/A)(1/S − 1) + 2). In Q form
+/// alpha is sin(w0)/(2Q), so Q = 1/sqrt(…) — which, unlike S, depends on the
+/// gain. `None` when the root isn't real (a slope too steep for the gain) or `s`
+/// isn't positive; APO has no usable filter there either. Mirrors `shelfSToQ`
+/// in `src/lib/eq.ts`.
+pub fn shelf_s_to_q(s: f64, gain: f64) -> Option<f64> {
     if s <= 0.0 {
         return None;
     }
     let a = 10f64.powf(gain / 40.0);
     let radicand = (a + 1.0 / a) * (1.0 / s - 1.0) + 2.0;
     (radicand > 0.0).then(|| 1.0 / radicand.sqrt())
+}
+
+/// The cookbook shelf slope equivalent to `q` at `gain` dB — the inverse of
+/// [`shelf_s_to_q`], as APO's `BiQuadFilter` derives it for a corner-frequency
+/// shelf given a Q. Mirrors `shelfQToS` in `src/lib/eq.ts`.
+fn shelf_q_to_s(q: f64, gain: f64) -> f64 {
+    let a = 10f64.powf(gain / 40.0);
+    1.0 / ((1.0 / (q * q) - 2.0) / (a + 1.0 / a) + 1.0)
 }
 
 /// The supported filter types, mapped to their APO tokens.
@@ -145,9 +194,10 @@ pub fn slope_to_q(slope: f64, gain: f64) -> Option<f64> {
 pub enum FilterKind {
     /// `PK` — peaking / parametric.
     Peak,
-    /// `LS` — low shelf (fixed slope).
+    /// `LS` — low shelf: fixed slope, or with a `Q` a corner-frequency shelf
+    /// (see [`Filter::apo_biquad`]).
     LowShelf,
-    /// `HS` — high shelf (fixed slope).
+    /// `HS` — high shelf: fixed slope, or with a `Q` a corner-frequency shelf.
     HighShelf,
     /// `LSC` — low shelf with adjustable Q/corner.
     LowShelfQ,
@@ -225,10 +275,27 @@ impl FilterKind {
     }
 
     /// Whether this type can take a slope in dB/octave in place of its `Q`
-    /// (`LSC 12 dB` / `HSC 6 dB`). APO also accepts `LS 6dB`, but that is a
-    /// corner-frequency shelf we don't model, so it stays a raw line.
+    /// (`LSC 12 dB` / `HSC 6 dB`). APO also accepts `LS 6dB`, a slope shelf
+    /// with a corner frequency, but that isn't modeled: it stays a raw line.
     pub fn takes_slope(self) -> bool {
         matches!(self, FilterKind::LowShelfQ | FilterKind::HighShelfQ)
+    }
+
+    /// Whether this is one of the four shelf types.
+    pub fn is_shelf(self) -> bool {
+        use FilterKind::*;
+        matches!(self, LowShelf | HighShelf | LowShelfQ | HighShelfQ)
+    }
+
+    /// The Q fastpeq gives a non-shelf band whose line has none (a shelf's
+    /// comes from [`DEFAULT_SHELF_S`] instead): 1 for a peak, which APO rejects
+    /// without a Q, and otherwise 1/√2 — APO's own default, except that APO
+    /// gives a notch Q 30. Mirrors `defaultQ` in `src/lib/eq.ts`.
+    pub fn default_q(self) -> f64 {
+        match self {
+            FilterKind::Peak => 1.0,
+            _ => std::f64::consts::FRAC_1_SQRT_2,
+        }
     }
 }
 
@@ -314,14 +381,88 @@ mod tests {
     }
 
     #[test]
-    fn effective_q_prefers_the_slope() {
-        let shelf = Filter {
-            kind: FilterKind::LowShelfQ,
-            q: None,
-            slope: Some(12.0),
-            ..Filter::peak(100.0, 6.0, 1.0)
+    fn shelf_q_to_s_inverts_shelf_s_to_q() {
+        for gain in [-12.0, -3.0, 0.0, 6.0, 15.0] {
+            for s in [0.3, 0.9, 1.0, 1.5] {
+                let q = shelf_s_to_q(s, gain).unwrap();
+                assert!(
+                    (shelf_q_to_s(q, gain) - s).abs() < 1e-12,
+                    "S {s} at {gain} dB"
+                );
+            }
+        }
+    }
+
+    /// A `kind` band with the given parameters.
+    fn band(kind: FilterKind, freq: f64, gain: f64, q: Option<f64>, slope: Option<f64>) -> Filter {
+        Filter {
+            kind,
+            q,
+            slope,
+            ..Filter::peak(freq, gain, 1.0)
+        }
+    }
+
+    #[test]
+    fn apo_biquad_matches_equalizer_apo() {
+        use FilterKind::*;
+        use std::f64::consts::FRAC_1_SQRT_2 as SQRT1_2;
+        let close = |got: Option<(f64, f64)>, (freq, q): (f64, f64)| {
+            got.is_some_and(|(f, g)| (f - freq).abs() < 5e-4 && (g - q).abs() < 5e-7)
         };
-        assert_eq!(shelf.effective_q(), slope_to_q(12.0, 6.0));
-        assert_eq!(Filter::peak(100.0, 6.0, 2.0).effective_q(), Some(2.0));
+        // Pinned in src/lib/eq.test.ts as well, so the two stay in step.
+        // No Q or slope: S = 0.9 at Fc, whether or not the type ends in C.
+        for kind in [LowShelf, HighShelf, LowShelfQ, HighShelfQ] {
+            assert!(close(
+                band(kind, 100.0, 6.0, None, None).apo_biquad(),
+                (100.0, 0.668809)
+            ));
+        }
+        assert!(close(
+            band(LowShelf, 100.0, 0.0, None, None).apo_biquad(),
+            (100.0, 0.670820) // sqrt(0.9 / 2)
+        ));
+        // An LS/HS given a Q reads Fc as a corner, so the biquad moves inward.
+        assert!(close(
+            band(LowShelf, 100.0, 6.0, Some(0.7), None).apo_biquad(),
+            (119.24595, 0.7)
+        ));
+        assert!(close(
+            band(HighShelf, 8000.0, -4.0, Some(1.0), None).apo_biquad(),
+            (7541.2195, 1.0)
+        ));
+        // At Q 1/√2 (S = 1) that's the textbook corner-to-centre factor √A.
+        let a = 10f64.powf(6.0 / 40.0);
+        assert!(close(
+            band(LowShelf, 100.0, 6.0, Some(SQRT1_2), None).apo_biquad(),
+            (100.0 * a.sqrt(), SQRT1_2)
+        ));
+        // LSC/HSC keep Fc as the centre, with a Q or a slope.
+        assert!(close(
+            band(LowShelfQ, 100.0, 6.0, Some(0.7), None).apo_biquad(),
+            (100.0, 0.7)
+        ));
+        assert!(close(
+            band(HighShelfQ, 100.0, 6.0, None, Some(10.0)).apo_biquad(),
+            (100.0, 0.642281)
+        ));
+        // A 0 reads as none given; a slope with no real Q is no filter.
+        assert!(close(
+            band(LowShelf, 100.0, 6.0, Some(0.0), None).apo_biquad(),
+            (100.0, 0.668809)
+        ));
+        assert_eq!(
+            band(LowShelfQ, 100.0, 24.0, None, Some(60.0)).apo_biquad(),
+            None
+        );
+        // Other types keep their Fc and Q, or take the type's default.
+        assert_eq!(
+            Filter::peak(100.0, 6.0, 2.0).apo_biquad(),
+            Some((100.0, 2.0))
+        );
+        assert_eq!(
+            band(Peak, 100.0, 6.0, None, None).apo_biquad(),
+            Some((100.0, 1.0))
+        );
     }
 }

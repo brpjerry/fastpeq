@@ -7,6 +7,10 @@ import {
   kindHasSlope,
   defaultQ,
   slopeToQ,
+  shelfSToQ,
+  shelfQToS,
+  apoBiquad,
+  DEFAULT_SHELF_S,
   parseConfigEq,
   responseCurve,
   peakGainDb,
@@ -19,6 +23,7 @@ import {
   GAIN_LIMIT_MIN,
   type CurveFilter,
 } from "./eq";
+import type { FilterKind } from "./types";
 
 const both = { kind: "both" } as const;
 const peak = (freq: number, gain: number, q: number): CurveFilter => ({
@@ -130,6 +135,78 @@ describe("clampGainTo", () => {
     expect(DEFAULT_GAIN_LIMIT).toBe(12);
     expect(GAIN_LIMIT_MIN).toBeLessThan(DEFAULT_GAIN_LIMIT);
     expect(GAIN_LIMIT_MAX).toBeGreaterThan(DEFAULT_GAIN_LIMIT);
+  });
+});
+
+describe("apoBiquad", () => {
+  const filter = (kind: FilterKind, freq: number, gain: number, q: number | null, slope: number | null = null): CurveFilter => ({
+    enabled: true,
+    kind,
+    freq,
+    gain,
+    q,
+    slope,
+    channel: both,
+  });
+  const expectBiquad = (f: CurveFilter, freq: number, q: number) => {
+    const got = apoBiquad(f);
+    expect(got).not.toBeNull();
+    expect(got!.freq).toBeCloseTo(freq, 3);
+    expect(got!.q).toBeCloseTo(q, 6);
+  };
+
+  // Pinned in crates/fastpeq-core/src/apo/model.rs as well, so the two stay in step.
+  it("gives a shelf with no Q or slope S = 0.9 at Fc, whatever its token", () => {
+    for (const kind of ["LowShelf", "HighShelf", "LowShelfQ", "HighShelfQ"] as const) {
+      expectBiquad(filter(kind, 100, 6, null), 100, 0.668809);
+    }
+    expectBiquad(filter("LowShelf", 100, 0, null), 100, Math.sqrt(DEFAULT_SHELF_S / 2));
+  });
+  it("reads an LS/HS given a Q as a corner frequency", () => {
+    expectBiquad(filter("LowShelf", 100, 6, 0.7), 119.24595, 0.7);
+    expectBiquad(filter("HighShelf", 8000, -4, 1), 7541.2195, 1);
+    // At Q 1/√2 (S = 1) that's the textbook corner-to-centre factor √A.
+    expectBiquad(filter("LowShelf", 100, 6, Math.SQRT1_2), 100 * Math.pow(10, 6 / 80), Math.SQRT1_2);
+  });
+  it("keeps Fc as an LSC/HSC's centre, with a Q or a slope", () => {
+    expectBiquad(filter("LowShelfQ", 100, 6, 0.7), 100, 0.7);
+    expectBiquad(filter("HighShelfQ", 100, 6, null, 10), 100, 0.642281);
+  });
+  it("reads a 0 as none given, and a slope with no real Q as no filter", () => {
+    expectBiquad(filter("LowShelf", 100, 6, 0), 100, 0.668809);
+    expect(apoBiquad(filter("LowShelfQ", 100, 24, null, 60))).toBeNull();
+  });
+  it("keeps any other type's Fc and Q, or its default", () => {
+    expect(apoBiquad(peak(100, 6, 2))).toEqual({ freq: 100, q: 2 });
+    expect(apoBiquad(filter("Peak", 100, 6, null))).toEqual({ freq: 100, q: 1 });
+    expect(apoBiquad(filter("LowPass", 100, 0, 2))).toEqual({ freq: 100, q: 2 });
+  });
+  it("draws a corner LS as the LSC it amounts to", () => {
+    const probe = [20, 60, 100, 150, 400, 2000];
+    const centre = apoBiquad(filter("LowShelf", 100, 6, 0.7))!.freq;
+    const corner = responseCurve([filter("LowShelf", 100, 6, 0.7)], 0, probe);
+    const lsc = responseCurve([filter("LowShelfQ", centre, 6, 0.7)], 0, probe);
+    corner.forEach((db, i) => expect(db).toBeCloseTo(lsc[i], 9));
+  });
+  it("inverts shelfSToQ with shelfQToS", () => {
+    for (const gain of [-12, 0, 6, 15]) {
+      for (const s of [0.3, 0.9, 1, 1.5]) expect(shelfQToS(shelfSToQ(s, gain)!, gain)).toBeCloseTo(s, 12);
+    }
+  });
+});
+
+describe("parseConfigEq Q seeding", () => {
+  const line = (kind: FilterKind, q: number | null) =>
+    ({ kind: "Filter", value: { enabled: true, kind, freq: 100, gain: 6, q, index: 1, channel: both } }) as const;
+  const qs = (...lines: ReturnType<typeof line>[]) => parseConfigEq({ lines: [...lines] }).filters.map((f) => f.q);
+
+  it("seeds a Q type's missing Q with the one Equalizer APO runs", () => {
+    const [shelf, pk] = qs(line("LowShelfQ", null), line("Peak", null));
+    expect(shelf).toBeCloseTo(0.668809, 6); // S = 0.9 at +6 dB
+    expect(pk).toBe(1);
+  });
+  it("leaves the other types without a Q unless their line had one", () => {
+    expect(qs(line("LowShelf", null), line("LowShelf", 0.7), line("LowPass", null))).toEqual([null, 0.7, null]);
   });
 });
 

@@ -35,6 +35,7 @@ const GAIN_KINDS = new Set<FilterKind>([
   "LowShelfQ",
   "HighShelfQ",
 ]);
+const SHELF_KINDS = new Set<FilterKind>(["LowShelf", "HighShelf", "LowShelfQ", "HighShelfQ"]);
 const Q_KINDS = new Set<FilterKind>([
   "Peak",
   "LowShelfQ",
@@ -47,23 +48,88 @@ const Q_KINDS = new Set<FilterKind>([
 ]);
 
 export const kindHasGain = (k: FilterKind) => GAIN_KINDS.has(k);
+/** The types that always carry a Q (the editor shows and seeds one). The others
+ *  — LS/HS/LP/HP — may still be given one, which Equalizer APO honours. */
 export const kindHasQ = (k: FilterKind) => Q_KINDS.has(k);
+/** The Q seeded for a type when it has none: 1 for a peak, otherwise 1/√2 —
+ *  mirrors `FilterKind::default_q` in crates/fastpeq-core/src/apo/model.rs. */
 export const defaultQ = (k: FilterKind) => (k === "Peak" ? 1 : Math.SQRT1_2);
 /** The types that can take a slope in dB/octave in place of their Q. */
 export const kindHasSlope = (k: FilterKind) => k === "LowShelfQ" || k === "HighShelfQ";
 
+/** The cookbook shelf slope S Equalizer APO gives a shelf with neither a Q nor
+ *  a slope: 0.9, "found out by experimentation with RoomEQWizard"
+ *  (BiQuadFilterFactory.cpp) — mirrors `DEFAULT_SHELF_S` in model.rs. */
+export const DEFAULT_SHELF_S = 0.9;
+
 /**
- * The Q equivalent to a shelf slope of `slope` dB/octave at `gain` dB, or null
- * when there is none (a slope too steep for the gain, or not positive).
- * Equalizer APO reads `LSC 12 dB` as the cookbook's shelf slope S = slope / 12
- * — mirrors `slope_to_q` in crates/fastpeq-core/src/apo/model.rs.
+ * The Q equivalent to the cookbook shelf slope `s` at `gain` dB, or null when
+ * there is none (a slope too steep for the gain, or not positive). From the
+ * cookbook's alpha = sin(w0)/2 · sqrt((A + 1/A)(1/S − 1) + 2) = sin(w0)/(2Q) —
+ * mirrors `shelf_s_to_q` in crates/fastpeq-core/src/apo/model.rs.
  */
-export function slopeToQ(slope: number, gain: number): number | null {
-  const s = slope / 12;
+export function shelfSToQ(s: number, gain: number): number | null {
   if (!(s > 0)) return null;
   const A = Math.pow(10, gain / 40);
   const radicand = (A + 1 / A) * (1 / s - 1) + 2;
   return radicand > 0 ? 1 / Math.sqrt(radicand) : null;
+}
+
+/**
+ * The Q equivalent to a shelf slope of `slope` dB/octave at `gain` dB, or null
+ * when there is none. Equalizer APO reads `LSC 12 dB` as the cookbook's shelf
+ * slope S = slope / 12 — mirrors `slope_to_q` in model.rs.
+ */
+export function slopeToQ(slope: number, gain: number): number | null {
+  return shelfSToQ(slope / 12, gain);
+}
+
+/** The cookbook shelf slope equivalent to `q` at `gain` dB — the inverse of
+ *  [shelfSToQ], as APO's BiQuadFilter derives it for a corner-frequency shelf
+ *  given a Q. Mirrors `shelf_q_to_s` in model.rs. */
+export function shelfQToS(q: number, gain: number): number {
+  const A = Math.pow(10, gain / 40);
+  return 1 / ((1 / (q * q) - 2) / (A + 1 / A) + 1);
+}
+
+/**
+ * The centre frequency and Q of the biquad Equalizer APO runs for a filter —
+ * for a shelf not always the line's Fc and Q. As APO's BiQuadFilterFactory and
+ * BiQuadFilter resolve them:
+ * - a slope of N dB is the cookbook shelf slope S = N / 12 ([slopeToQ]);
+ * - with neither a Q nor a slope (or either written as 0), S = [DEFAULT_SHELF_S];
+ * - an LS/HS given a Q or a slope reads Fc as a *corner* frequency and centres
+ *   the biquad at Fc · 10^(|gain| / (80 S)) (LS) or Fc / 10^(…) (HS), deriving
+ *   S from the Q when that's what it has. LSC/HSC, and an LS/HS with neither,
+ *   centre on Fc itself.
+ * Any other type keeps its Fc, and its Q or else [defaultQ]. Null for a slope
+ * with no real equivalent Q, which is no usable filter. Mirrors
+ * `Filter::apo_biquad` in model.rs; the two are pinned to the same numbers.
+ */
+export function apoBiquad(f: CurveFilter): { freq: number; q: number } | null {
+  // APO takes a Q or slope of 0 as none given.
+  const given = f.q || null;
+  if (!SHELF_KINDS.has(f.kind)) return { freq: f.freq, q: given ?? defaultQ(f.kind) };
+  const gain = f.gain ?? 0;
+  const slope = (kindHasSlope(f.kind) && f.slope) || null;
+  let s: number;
+  let q: number | null;
+  if (slope !== null) {
+    s = slope / 12;
+    q = slopeToQ(slope, gain);
+  } else if (given !== null) {
+    s = shelfQToS(given, gain);
+    q = given;
+  } else {
+    q = shelfSToQ(DEFAULT_SHELF_S, gain);
+    return q === null ? null : { freq: f.freq, q };
+  }
+  if (q === null) return null;
+  // APO's frequency adjustment "for DCX2496" (a Behringer crossover).
+  const shift = Math.pow(10, Math.abs(gain) / 80 / s);
+  if (f.kind === "LowShelf") return { freq: f.freq * shift, q };
+  if (f.kind === "HighShelf") return { freq: f.freq / shift, q };
+  return { freq: f.freq, q };
 }
 
 // How far a single filter's gain may be pushed, in dB either way. The default
@@ -120,6 +186,8 @@ export interface CurveFilter {
   kind: FilterKind;
   freq: number;
   gain: number | null;
+  /** Null for none. On an LS/HS a Q makes it a corner-frequency shelf (see
+   *  [apoBiquad]), so a plain one must leave it null. */
   q: number | null;
   /** A shelf's slope in dB/octave; when set it stands in for `q`. */
   slope?: number | null;
@@ -127,17 +195,21 @@ export interface CurveFilter {
 }
 
 /** An editable band as the editor, its graphs, and the undo history hold it:
- *  a [CurveFilter] whose gain/q are always plain numbers (defaulted per type
- *  on load, nulled back out per type on save) plus a stable id for keyed
- *  lists, drag targets, and history snapshots. The one definition — Editor,
- *  CurveEditor, and history all alias this. */
+ *  a [CurveFilter] whose gain is always a plain number (defaulted on load,
+ *  nulled back out per type on save) plus a stable id for keyed lists, drag
+ *  targets, and history snapshots. The one definition — Editor, CurveEditor,
+ *  and history all alias this. */
 export type EditorBand = {
   id: number;
   enabled: boolean;
   kind: FilterKind;
   freq: number;
   gain: number;
-  q: number;
+  /** Always set on the Q types (seeded on load — see [parseConfigEq]). The
+   *  other types (LS/HS/LP/HP) keep only a Q their line came with, which
+   *  Equalizer APO honours; the editor never adds one there, and it saves
+   *  whatever is set. */
+  q: number | null;
   /** Set only on a shelf given as a slope (see [kindHasSlope]); the editor then
    *  edits it in place of `q`, which stays at its default underneath. */
   slope: number | null;
@@ -168,8 +240,8 @@ export function balanceFromTrim(side: "left" | "right", trimDb: number): number 
 
 /** A Config split into the editor's shape (see [parseConfigEq]). */
 export interface ParsedConfigEq {
-  /** The `Filter:` lines, gain/q defaulted per type so they're plain numbers. */
-  filters: (CurveFilter & { gain: number; q: number; slope: number | null })[];
+  /** The `Filter:` lines, gain defaulted and q seeded as an [EditorBand]'s. */
+  filters: (CurveFilter & { gain: number; slope: number | null })[];
   /** The master (both-channel) preamp gain, 0 when absent. */
   preamp: number;
   /** Balance recovered from a one-sided preamp trim (see balanceFromTrim). */
@@ -178,6 +250,14 @@ export interface ParsedConfigEq {
   hadPreamp: boolean;
   /** Unmodeled lines (comments, Device:, …), preserved verbatim in order. */
   raw: string[];
+}
+
+/** The Q a Q type is seeded with when its line has none: for a shelf the one
+ *  Equalizer APO runs (S = [DEFAULT_SHELF_S] at its gain), so writing it out
+ *  leaves the sound as it was; otherwise [defaultQ]. */
+function missingQ(kind: FilterKind, gain: number): number {
+  const shelf = SHELF_KINDS.has(kind) ? shelfSToQ(DEFAULT_SHELF_S, gain) : null;
+  return shelf ?? defaultQ(kind);
 }
 
 /**
@@ -206,7 +286,7 @@ export function parseConfigEq(cfg: Config): ParsedConfigEq {
         kind: f.kind,
         freq: f.freq,
         gain: f.gain ?? 0,
-        q: f.q ?? defaultQ(f.kind),
+        q: f.q ?? (kindHasQ(f.kind) ? missingQ(f.kind, f.gain ?? 0) : null),
         slope: f.slope ?? null,
         channel: f.channel,
       });
@@ -233,16 +313,12 @@ interface BiquadCoeffs {
 function biquadCoeffs(f: CurveFilter, fs: number): BiquadCoeffs | null {
   if (f.kind === "AllPass") return null; // flat magnitude — phase only
 
-  const w0 = (2 * Math.PI * f.freq) / fs;
+  const biquad = apoBiquad(f);
+  if (biquad === null) return null; // no real filter for this slope and gain
+  const w0 = (2 * Math.PI * biquad.freq) / fs;
   const cw = Math.cos(w0);
   const sw = Math.sin(w0);
-  let q = (kindHasQ(f.kind) ? f.q ?? defaultQ(f.kind) : defaultQ(f.kind)) || defaultQ(f.kind);
-  if (f.slope != null && kindHasSlope(f.kind)) {
-    const equivalent = slopeToQ(f.slope, f.gain ?? 0);
-    if (equivalent === null) return null; // no real filter for this slope and gain
-    q = equivalent;
-  }
-  const alpha = sw / (2 * q);
+  const alpha = sw / (2 * biquad.q);
   const A = Math.pow(10, (f.gain ?? 0) / 40);
 
   let b0 = 1;
