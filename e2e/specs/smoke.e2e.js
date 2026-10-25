@@ -7,6 +7,14 @@ import { readConfig, readPreset, presetExists } from "../helpers/seed.js";
 
 const BYPASS = 'button[title^="Drop the EQ filters"]';
 
+// The Bypass button is disabled while an apply is in flight, and a click on a
+// disabled button does nothing — so wait for it to be live before clicking.
+async function clickBypass() {
+  const bypass = await $(BYPASS);
+  await bypass.waitForEnabled({ timeout: 10000 });
+  await bypass.click();
+}
+
 const rows = () => $$(".presets li:not(.empty)");
 
 // Selectors unique to the editor (the presets panel has none of these), so they
@@ -14,18 +22,35 @@ const rows = () => $$(".presets li:not(.empty)");
 const GRAPH = ".graph-wrap"; // present once a preset is selected
 const SAVE = ".actions .primary"; // the editor's Save / Saved button
 const bandRows = () => $$(".band");
+// `$` is strict since WebdriverIO 10 (it throws when a selector matches more
+// than one element), and a preset has several bands — so "the first band" is
+// spelled out as the first of `$$`.
+const firstBand = () => $$(".band")[0];
+const firstBandTok = () => $$(".band .ts-btn .tok")[0];
+
+// A preset row's name: the `.name` button's own text, without the "v2" badge
+// (`.ver`) it gains once the preset has saved history — getText() would run
+// the two together as "BassBoostv2".
+const nameOf = (button) =>
+  browser.execute(
+    (el) =>
+      [...el.childNodes]
+        .filter((n) => n.nodeType === Node.TEXT_NODE)
+        .map((n) => n.textContent)
+        .join("")
+        .trim(),
+    button,
+  );
 
 async function presetNames() {
   // WDIO's $$ .map() is async and resolves the callbacks itself — don't wrap it
   // in Promise.all (that would try to iterate a Promise).
-  const texts = await $$(".presets li:not(.empty) .name").map((el) => el.getText());
-  return texts.map((t) => t.trim());
+  return $$(".presets li:not(.empty) .name").map(nameOf);
 }
 
 async function rowFor(name) {
   for (const li of await rows()) {
-    const text = (await (await li.$(".name")).getText()).trim();
-    if (text === name) return li;
+    if ((await nameOf(await li.$(".name"))) === name) return li;
   }
   throw new Error(`preset row not found: ${name}`);
 }
@@ -107,7 +132,7 @@ describe("fastpeq E2E smokes", () => {
     await browser.waitUntil(() => readConfig().includes("Filter"), { timeout: 10000 });
 
     // Bypass: filters dropped, preamp kept.
-    await $(BYPASS).click();
+    await clickBypass();
     await browser.waitUntil(() => !readConfig().includes("Filter"), {
       timeout: 10000,
       timeoutMsg: "filters were not dropped on bypass",
@@ -115,7 +140,7 @@ describe("fastpeq E2E smokes", () => {
     expect(readConfig()).toContain("Preamp");
 
     // Un-bypass: the exact prior config (filters and all) comes back.
-    await $(BYPASS).click();
+    await clickBypass();
     await browser.waitUntil(() => readConfig().includes("Filter"), {
       timeout: 10000,
       timeoutMsg: "filters were not restored on un-bypass",
@@ -179,16 +204,15 @@ describe("editor: edit a band and save", () => {
     await apply("BassBoost"); // re-load so a re-run starts from the seeded PK bands
     await $(GRAPH).waitForExist({ timeout: 10000 });
 
-    const firstTok = () => $(".band .ts-btn .tok");
-    await browser.waitUntil(async () => (await (await firstTok()).getText()).trim() === "PK", {
+    await browser.waitUntil(async () => (await (await firstBandTok()).getText()).trim() === "PK", {
       timeout: 10000,
       timeoutMsg: "first band did not load as a Peak filter",
     });
 
     // Switch PK → LSC. This is the exact path that threw before the fix, because
     // the inline FilterList was missing onChangeKind.
-    await pickBandType(await $(".band"), "LSC");
-    await browser.waitUntil(async () => (await (await firstTok()).getText()).trim() === "LSC", {
+    await pickBandType(await firstBand(), "LSC");
+    await browser.waitUntil(async () => (await (await firstBandTok()).getText()).trim() === "LSC", {
       timeout: 5000,
       timeoutMsg: "type picker did not switch to LSC (onChangeKind regression?)",
     });
@@ -331,7 +355,7 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
     const compare = await $(".compare-btn");
     expect(await compare.isEnabled()).toBe(false); // nothing unsaved to compare yet
 
-    await pickBandType(await $(".band"), "LSC"); // an unsaved edit
+    await pickBandType(await firstBand(), "LSC"); // an unsaved edit
     await browser.waitUntil(async () => await compare.isEnabled(), {
       timeout: 8000,
       timeoutMsg: "compare stayed disabled after an edit",
@@ -355,8 +379,7 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
   it("undo reverts an edit and redo reapplies it", async () => {
     await apply("Studio");
     await $(GRAPH).waitForExist({ timeout: 10000 });
-    const tok = () => $(".band .ts-btn .tok");
-    await browser.waitUntil(async () => (await (await tok()).getText()).trim() === "PK", {
+    await browser.waitUntil(async () => (await (await firstBandTok()).getText()).trim() === "PK", {
       timeout: 10000,
       timeoutMsg: "Studio band did not load as PK",
     });
@@ -365,7 +388,7 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
     const redoBtn = await $(".redo-btn");
     expect(await undoBtn.isEnabled()).toBe(false);
 
-    await pickBandType(await $(".band"), "LSC");
+    await pickBandType(await firstBand(), "LSC");
     // History records the edit after a short debounce, enabling undo.
     await browser.waitUntil(async () => await undoBtn.isEnabled(), {
       timeout: 5000,
@@ -373,7 +396,7 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
     });
 
     await undoBtn.click();
-    await browser.waitUntil(async () => (await (await tok()).getText()).trim() === "PK", {
+    await browser.waitUntil(async () => (await (await firstBandTok()).getText()).trim() === "PK", {
       timeout: 5000,
       timeoutMsg: "undo did not revert the type change",
     });
@@ -383,7 +406,7 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
       timeoutMsg: "redo did not enable after undo",
     });
     await redoBtn.click();
-    await browser.waitUntil(async () => (await (await tok()).getText()).trim() === "LSC", {
+    await browser.waitUntil(async () => (await (await firstBandTok()).getText()).trim() === "LSC", {
       timeout: 5000,
       timeoutMsg: "redo did not reapply the type change",
     });
@@ -393,7 +416,7 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
     await apply("BassBoost");
     await $(GRAPH).waitForExist({ timeout: 10000 });
     const slider = await $('.preamp input[type="range"]');
-    const auto = await $(".preamp .switch"); // the only switch in the preamp row
+    const auto = await $(".pside .switch"); // the Auto toggle beside the preamp row
 
     // Normalize to Auto-off first (the setting persists in prefs.json).
     if (!(await slider.isEnabled())) {
