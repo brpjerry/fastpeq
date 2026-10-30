@@ -55,7 +55,11 @@ export function payloadForHotkey(h: Hotkey, ctx: OsdContext): OsdPayload | null 
     case "tone-down": {
       const control = h.tone ?? "bass";
       const value = ctx.tone[control];
-      return { title: TONE_LABEL[control], detail: fmtDb(value), bar: { value, min: -12, max: 12 } };
+      return {
+        title: TONE_LABEL[control],
+        detail: fmtDb(value),
+        bar: { value, min: -12, max: 12 },
+      };
     }
   }
 }

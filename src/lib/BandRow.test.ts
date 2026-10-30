@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vite-plus/test";
 import { render, fireEvent, cleanup } from "@testing-library/svelte";
 import BandRow from "./BandRow.svelte";
 import type { Channel, FilterKind } from "./types";
@@ -224,7 +224,13 @@ describe("BandRow", () => {
 
   it("shows OFF over APO/HW for a disabled band even in hybrid mode", () => {
     const { container } = render(BandRow, {
-      props: { band: band({ enabled: false }), hovered: false, hybrid: true, offloaded: true, ...cbs() },
+      props: {
+        band: band({ enabled: false }),
+        hovered: false,
+        hybrid: true,
+        offloaded: true,
+        ...cbs(),
+      },
     });
     expect(statusOf(container).textContent!.trim()).toBe("OFF");
   });

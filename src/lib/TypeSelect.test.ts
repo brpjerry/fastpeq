@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vite-plus/test";
 import { tick } from "svelte";
 import { render, fireEvent, cleanup } from "@testing-library/svelte";
 import TypeSelect from "./TypeSelect.svelte";

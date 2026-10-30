@@ -1,6 +1,10 @@
 export const CATEGORY_NONE = "__none";
 
-export const CATEGORIES: { value: string; label: string; group: "base" | "specialty" | "bluetooth" }[] = [
+export const CATEGORIES: {
+  value: string;
+  label: string;
+  group: "base" | "specialty" | "bluetooth";
+}[] = [
   { value: "headphone", label: "Headphone", group: "base" },
   { value: "iem", label: "IEM", group: "base" },
   { value: "estat", label: "Electrostatic", group: "specialty" },

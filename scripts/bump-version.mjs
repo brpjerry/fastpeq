@@ -57,9 +57,9 @@ function isSemver(value) {
   const identifier = "(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)";
   const prerelease = `(?:-${identifier}(?:\\.${identifier})*)?`;
   const build = "(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?";
-  return new RegExp(
-    `^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)${prerelease}${build}$`,
-  ).test(value);
+  return new RegExp(`^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)${prerelease}${build}$`).test(
+    value,
+  );
 }
 
 function updateJson(file, update) {

@@ -27,3 +27,4 @@ Thumbs.db
 # AI Rules
 .clinerules
 
+.vitest/

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vite-plus/test";
 import * as api from "./api";
 import { ACCENTS, currentAccentId, applyAccent, setAccent, initTheme } from "./theme";
 

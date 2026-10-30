@@ -12,6 +12,17 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
+      # `vite-plus` and the `vite` alias to `@voidzero-dev/vite-plus-core` (in
+      # devDependencies and overrides) must stay on the same version, and the
+      # `vitest` override must match the Vitest that `vite-plus` bundles
+      # (`npx vp toolchain vitest`). If an update leaves them out of step,
+      # re-pin them all with
+      # `npx --package=vite-plus@<version> vp migrate --no-interactive`.
+      # Listed first so it wins over npm-minor-patch.
+      vite-plus:
+        patterns:
+          - "vite-plus"
+          - "@voidzero-dev/vite-plus-core"
       npm-minor-patch:
         update-types:
           - "minor"

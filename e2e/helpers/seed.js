@@ -15,7 +15,8 @@ export const CONFIG_PATH = path.join(DATA_DIR, "config.txt");
 
 /** Seeded presets: name -> APO file body (valid for the core parser). */
 export const SEED_PRESETS = {
-  BassBoost: "Preamp: -6 dB\nFilter 1: ON PK Fc 60 Hz Gain 6 dB Q 0.7\nFilter 2: ON PK Fc 200 Hz Gain -2 dB Q 1\n",
+  BassBoost:
+    "Preamp: -6 dB\nFilter 1: ON PK Fc 60 Hz Gain 6 dB Q 0.7\nFilter 2: ON PK Fc 200 Hz Gain -2 dB Q 1\n",
   Vocal: "Preamp: -3 dB\nFilter 1: ON PK Fc 2500 Hz Gain 3 dB Q 1.5\n",
   Studio: "Preamp: -4 dB\nFilter 1: ON PK Fc 8000 Hz Gain 2 dB Q 0.7\n",
 };

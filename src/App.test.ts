@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
 import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
 import { emit } from "@tauri-apps/api/event";
 import * as api from "./lib/api";
@@ -15,7 +15,13 @@ import {
   getToneStep,
   setToneStep,
 } from "./lib/prefs.svelte";
-import { addHotkey, updateHotkey, removeHotkey, getHotkeys, initHotkeys } from "./lib/hotkeys.svelte";
+import {
+  addHotkey,
+  updateHotkey,
+  removeHotkey,
+  getHotkeys,
+  initHotkeys,
+} from "./lib/hotkeys.svelte";
 import App from "./App.svelte";
 
 // Capture event listeners (to fire "hotkey-pressed") and the window focus
@@ -432,7 +438,6 @@ describe("App global hotkeys", () => {
     removeHotkey(id);
   });
 
-
   it("keeps a preset hotkey working after the preset is renamed", async () => {
     withLibrary(); // includes "Sennheiser HD600"
     const { container } = render(App);
@@ -546,9 +551,16 @@ describe("App global hotkeys", () => {
     const { container, getByRole } = render(App);
     await waitFor(() => expect(rows(container).length).toBe(2));
     const id = addHotkey();
-    updateHotkey(id, { key: "D", action: "device", device: "old", deviceName: "Speakers (USB DAC)" });
+    updateHotkey(id, {
+      key: "D",
+      action: "device",
+      device: "old",
+      deviceName: "Speakers (USB DAC)",
+    });
     await fireEvent.click(getByRole("button", { name: "Hotkeys" }));
-    await waitFor(() => expect(container.textContent).toContain("Speakers (USB DAC) (unavailable)"));
+    await waitFor(() =>
+      expect(container.textContent).toContain("Speakers (USB DAC) (unavailable)"),
+    );
     // Endpoint changes after startup; there is no focus event to refresh it.
     vi.mocked(api.listAudioDevices).mockResolvedValue([
       { id: "new", name: "Speakers (2- USB DAC)", is_default: false },
@@ -560,12 +572,19 @@ describe("App global hotkeys", () => {
     await waitFor(() => expect(getHotkeys().find((h) => h.id === id)?.device).toBe("new"));
     expect(api.setDefaultAudioDevice).toHaveBeenCalledWith("new");
     const saved = vi.mocked(api.saveHotkeyBindings).mock.calls.at(-1)![0];
-    expect(JSON.parse(saved)).toContainEqual(expect.objectContaining({
-      id, device: "new", deviceName: "Speakers (2- USB DAC)",
-    }));
+    expect(JSON.parse(saved)).toContainEqual(
+      expect.objectContaining({
+        id,
+        device: "new",
+        deviceName: "Speakers (2- USB DAC)",
+      }),
+    );
     expect(localStorage.getItem("fastpeq.hotkeys")).toBe(saved);
     await waitFor(() => expect(container.textContent).not.toContain("(unavailable)"));
-    expect(emit).toHaveBeenCalledWith("osd:show", expect.objectContaining({ detail: "Speakers (2- USB DAC)" }));
+    expect(emit).toHaveBeenCalledWith(
+      "osd:show",
+      expect.objectContaining({ detail: "Speakers (2- USB DAC)" }),
+    );
     // A restart loads the repaired association from the authoritative file.
     vi.mocked(api.loadHotkeyBindings).mockResolvedValueOnce(saved);
     await initHotkeys();
@@ -578,24 +597,30 @@ describe("App global hotkeys", () => {
   });
 
   it.each(["missing", "ambiguous", "switch failure", "enumeration failure"])(
-    "does not rewrite a device binding or show success on %s", async (failure) => {
+    "does not rewrite a device binding or show success on %s",
+    async (failure) => {
       withLibrary();
       const { container } = render(App);
       await waitFor(() => expect(rows(container).length).toBe(2));
       const id = addHotkey();
       updateHotkey(id, { key: "D", action: "device", device: "old", deviceName: "USB DAC" });
       const candidates = [{ id: "new", name: "USB DAC", is_default: false }];
-      if (failure === "ambiguous") candidates.push({ id: "other", name: "USB DAC", is_default: true });
+      if (failure === "ambiguous")
+        candidates.push({ id: "other", name: "USB DAC", is_default: true });
       vi.mocked(api.listAudioDevices).mockResolvedValue(failure === "missing" ? [] : candidates);
-      if (failure === "switch failure") vi.mocked(api.setDefaultAudioDevice).mockRejectedValueOnce("Switch failed");
-      if (failure === "enumeration failure") vi.mocked(api.listAudioDevices).mockRejectedValueOnce("Enumeration failed");
+      if (failure === "switch failure")
+        vi.mocked(api.setDefaultAudioDevice).mockRejectedValueOnce("Switch failed");
+      if (failure === "enumeration failure")
+        vi.mocked(api.listAudioDevices).mockRejectedValueOnce("Enumeration failed");
       vi.mocked(api.saveHotkeyBindings).mockClear();
       focus.cb?.({ payload: false });
       vi.mocked(emit).mockClear();
       listeners["hotkey-pressed"]({ payload: id });
       const message = {
-        missing: "is unavailable", ambiguous: "Multiple audio outputs match",
-        "switch failure": "Switch failed", "enumeration failure": "Enumeration failed",
+        missing: "is unavailable",
+        ambiguous: "Multiple audio outputs match",
+        "switch failure": "Switch failed",
+        "enumeration failure": "Enumeration failed",
       }[failure]!;
       await waitFor(() => expect(container.textContent).toContain(message));
       expect(getHotkeys().find((h) => h.id === id)?.device).toBe("old");
@@ -612,9 +637,16 @@ describe("App global hotkeys", () => {
     await waitFor(() => expect(rows(container).length).toBe(2));
     const id = addHotkey();
     updateHotkey(id, { key: "D", action: "device", device: "old", deviceName: "USB DAC" });
-    vi.mocked(api.listAudioDevices).mockResolvedValue([{ id: "new", name: "USB DAC", is_default: false }]);
+    vi.mocked(api.listAudioDevices).mockResolvedValue([
+      { id: "new", name: "USB DAC", is_default: false },
+    ]);
     let finish!: () => void;
-    vi.mocked(api.setDefaultAudioDevice).mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    vi.mocked(api.setDefaultAudioDevice).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
     listeners["hotkey-pressed"]({ payload: id });
     await waitFor(() => expect(api.setDefaultAudioDevice).toHaveBeenCalledWith("new"));
     updateHotkey(id, { device: "user-choice", deviceName: "HDMI" });
@@ -633,7 +665,12 @@ describe("App global hotkeys", () => {
     const id = addHotkey();
     updateHotkey(id, { key: "D", action: "device", device: "old", deviceName: "USB DAC" });
     let finish!: (devices: api.AudioDevice[]) => void;
-    vi.mocked(api.listAudioDevices).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    vi.mocked(api.listAudioDevices).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
     listeners["hotkey-pressed"]({ payload: id });
     removeHotkey(id);
     vi.mocked(api.saveHotkeyBindings).mockClear();
@@ -656,7 +693,10 @@ describe("App global hotkeys", () => {
     listeners["hotkey-pressed"]({ payload: id });
 
     await waitFor(() =>
-      expect(emit).toHaveBeenCalledWith("osd:show", { title: "Preset", detail: "Sennheiser HD600" }),
+      expect(emit).toHaveBeenCalledWith("osd:show", {
+        title: "Preset",
+        detail: "Sennheiser HD600",
+      }),
     );
     removeHotkey(id);
   });
@@ -895,7 +935,9 @@ describe("App undo-delete", () => {
     await waitFor(() =>
       expect(api.setCategory).toHaveBeenCalledWith("Sennheiser HD600", "headphone"),
     );
-    await waitFor(() => expect(container.querySelector(".toast")!.textContent).toContain("Restored"));
+    await waitFor(() =>
+      expect(container.querySelector(".toast")!.textContent).toContain("Restored"),
+    );
     // Taking the action consumed the Undo button.
     expect(container.querySelector(".toast-action")).toBeNull();
   });

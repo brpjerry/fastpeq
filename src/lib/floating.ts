@@ -17,20 +17,20 @@ export function anchorBelow(el: HTMLElement, minWidth = 0): Anchor {
   const r = el.getBoundingClientRect();
   const width = Math.max(r.width, minWidth);
   const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-  
+
   if (r.bottom > window.innerHeight * 0.8) {
     return {
       left,
       bottom: window.innerHeight - r.top + 4,
       minWidth: width,
-      maxHeight: r.top - 12
+      maxHeight: r.top - 12,
     };
   }
 
-  return { 
-    left, 
-    top: r.bottom + 4, 
+  return {
+    left,
+    top: r.bottom + 4,
     minWidth: width,
-    maxHeight: window.innerHeight - r.bottom - 12
+    maxHeight: window.innerHeight - r.bottom - 12,
   };
 }

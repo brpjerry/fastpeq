@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vite-plus/test";
 import { render, fireEvent, cleanup } from "@testing-library/svelte";
 import HotkeyRow from "./HotkeyRow.svelte";
 import type { Hotkey } from "./hotkeys.svelte";
@@ -52,7 +52,12 @@ describe("HotkeyRow", () => {
 
   it("seeds a default preset when switching to the preset action", async () => {
     const onUpdate = vi.fn();
-    const { container } = renderRow(base({ action: "bypass" }), ["First", "Second"], {}, { onUpdate });
+    const { container } = renderRow(
+      base({ action: "bypass" }),
+      ["First", "Second"],
+      {},
+      { onUpdate },
+    );
     // sm-btn order: [0] modifier, [1] action (no principal picker while bypass).
     await fireEvent.click(container.querySelectorAll(".sm-btn")[1]);
     const item = [...container.querySelectorAll(".sm-menu .sm-item")].find(
@@ -80,7 +85,11 @@ describe("HotkeyRow", () => {
       (i) => i.textContent!.trim() === "Switch output device",
     )!;
     await fireEvent.click(item);
-    expect(onUpdate).toHaveBeenCalledWith({ action: "device", device: "d1", deviceName: "Speakers" });
+    expect(onUpdate).toHaveBeenCalledWith({
+      action: "device",
+      device: "d1",
+      deviceName: "Speakers",
+    });
   });
 
   it("marks a bound device that is no longer present as unavailable", () => {
@@ -91,7 +100,9 @@ describe("HotkeyRow", () => {
       {},
       { devices },
     );
-    expect(container.querySelector(".principal .sm-label")?.textContent).toBe("Old DAC (unavailable)");
+    expect(container.querySelector(".principal .sm-label")?.textContent).toBe(
+      "Old DAC (unavailable)",
+    );
   });
 
   it("fires onRemove from the delete button", async () => {
@@ -110,6 +121,8 @@ describe("HotkeyRow", () => {
   it("flags a duplicate combo with its own warning", () => {
     const { container } = renderRow(base(), [], {}, { duplicate: true });
     expect(container.querySelector(".hk-row")!.classList.contains("duplicate")).toBe(true);
-    expect(container.querySelector(".warn")!.getAttribute("title")).toContain("duplicates another hotkey");
+    expect(container.querySelector(".warn")!.getAttribute("title")).toContain(
+      "duplicates another hotkey",
+    );
   });
 });

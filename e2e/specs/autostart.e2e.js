@@ -30,7 +30,11 @@ function runValue() {
   if (out === null) return null;
   const line = out.split(/\r?\n/).find((l) => l.trim().startsWith(NAME));
   // "    fastpeq    REG_SZ    C:\...\fastpeq.exe --minimized"
-  return line.trim().split(/\s{2,}/).slice(2).join(" ");
+  return line
+    .trim()
+    .split(/\s{2,}/)
+    .slice(2)
+    .join(" ");
 }
 
 /** The `REG_SZ`/`REG_BINARY` data of a value, verbatim, for save/restore. */

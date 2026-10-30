@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vite-plus/test";
 import { render, cleanup, waitFor } from "@testing-library/svelte";
 
 // Capture the OSD event listener and stub the native presentation IPC call.
@@ -48,7 +48,9 @@ describe("Osd overlay", () => {
     const { container } = render(Osd);
     await waitFor(() => expect(ev.cb).toBeTruthy());
 
-    ev.cb!({ payload: { title: "Bass", detail: "+0.5 dB", bar: { value: 0.5, min: -12, max: 12 } } });
+    ev.cb!({
+      payload: { title: "Bass", detail: "+0.5 dB", bar: { value: 0.5, min: -12, max: 12 } },
+    });
     ev.cb!({ payload: { title: "Bass", detail: "+1.0 dB", bar: { value: 1, min: -12, max: 12 } } });
 
     await waitFor(() => expect(container.querySelector(".detail")?.textContent).toBe("+1.0 dB"));

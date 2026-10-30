@@ -4,8 +4,7 @@ const normalizeName = (name: string) => name.trim().replace(/\s+/g, " ").toLower
 
 // Windows can add an instance number after reinstalling an endpoint, e.g.
 // "Speakers (2- USB DAC)". Keep model numbers and the rest of the name intact.
-const withoutInstance = (name: string) =>
-  name.replace(/(^|\()\d+\s*-\s*/g, "$1");
+const withoutInstance = (name: string) => name.replace(/(^|\()\d+\s*-\s*/g, "$1");
 
 /** Resolve a saved output, preferring its id, then a unique full-name match. */
 export function resolveAudioDevice(

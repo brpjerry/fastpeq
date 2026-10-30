@@ -143,8 +143,7 @@ export const GAIN_LIMIT_MIN = 1;
 export const GAIN_LIMIT_MAX = 30;
 
 /** A filter gain pulled inside ±`limit` dB. */
-export const clampGainTo = (gain: number, limit: number) =>
-  Math.max(-limit, Math.min(limit, gain));
+export const clampGainTo = (gain: number, limit: number) => Math.max(-limit, Math.min(limit, gain));
 
 /** The band-list channel views. */
 export type BandView = "both" | "left" | "right";
@@ -506,7 +505,15 @@ export function peakGainDb(
   freqs: number[] = FREQS,
 ): number {
   const trim = balanceTrim(balance);
-  const left = responseCurve(filters.filter((f) => inChannel(f.channel, "left")), preamp + trim.left, freqs);
-  const right = responseCurve(filters.filter((f) => inChannel(f.channel, "right")), preamp + trim.right, freqs);
+  const left = responseCurve(
+    filters.filter((f) => inChannel(f.channel, "left")),
+    preamp + trim.left,
+    freqs,
+  );
+  const right = responseCurve(
+    filters.filter((f) => inChannel(f.channel, "right")),
+    preamp + trim.right,
+    freqs,
+  );
   return Math.max(...left, ...right);
 }
