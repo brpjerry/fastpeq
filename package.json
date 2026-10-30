@@ -35,6 +35,7 @@
   },
   "overrides": {
     "serialize-javascript": "^7.0.6",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0"
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+    "vitest": "5.0.5"
   }
 }
