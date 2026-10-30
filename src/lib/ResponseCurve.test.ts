@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vite-plus/test";
 import { render, cleanup } from "@testing-library/svelte";
 import ResponseCurve from "./ResponseCurve.svelte";
 

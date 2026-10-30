@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { parseRew, normalize, sampleAt, downsample, type MeasPoint } from "./measurement";
 
 describe("parseRew", () => {

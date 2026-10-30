@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vite-plus/test";
 import { dismissable } from "./dismiss";
 
 afterEach(() => {
@@ -15,7 +15,8 @@ function setup(opts: { ignore?: HTMLElement } = {}) {
   return { menu, outside, onDismiss, action };
 }
 
-const pointerdown = (el: EventTarget) => el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+const pointerdown = (el: EventTarget) =>
+  el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
 
 describe("dismissable", () => {
   it("dismisses on an outside pointerdown", () => {

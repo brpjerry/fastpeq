@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vite-plus/test";
 import { render, fireEvent, cleanup } from "@testing-library/svelte";
 import SelectMenu from "./SelectMenu.svelte";
 
@@ -26,7 +26,11 @@ describe("SelectMenu", () => {
 
     await fireEvent.click(container.querySelector(".sm-btn")!);
     expect(container.querySelector(".sm-menu")).not.toBeNull();
-    expect(items(container).map((i) => i.textContent!.trim())).toEqual(["Flat", "Harman", "Bright"]);
+    expect(items(container).map((i) => i.textContent!.trim())).toEqual([
+      "Flat",
+      "Harman",
+      "Bright",
+    ]);
 
     await fireEvent.click(items(container).find((i) => i.textContent!.trim() === "Bright")!);
     expect(onChange).toHaveBeenCalledWith("c");
@@ -44,7 +48,9 @@ describe("SelectMenu", () => {
   // covered by dismiss.test.ts and TypeSelect's equivalent; not re-tested here.
 
   it("falls back to the raw value when no option matches", () => {
-    const { container } = render(SelectMenu, { props: { value: "missing", options, onChange: vi.fn() } });
+    const { container } = render(SelectMenu, {
+      props: { value: "missing", options, onChange: vi.fn() },
+    });
     expect(container.querySelector(".sm-label")?.textContent).toBe("missing");
   });
 });

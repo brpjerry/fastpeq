@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
 import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
 import PresetPreview from "./PresetPreview.svelte";
 import * as api from "./api";
@@ -22,7 +22,15 @@ const config: Config = {
     },
     {
       kind: "Filter",
-      value: { enabled: true, kind: "HighPass", freq: 30, gain: null, q: null, index: 3, channel: both },
+      value: {
+        enabled: true,
+        kind: "HighPass",
+        freq: 30,
+        gain: null,
+        q: null,
+        index: 3,
+        channel: both,
+      },
     },
   ],
 };

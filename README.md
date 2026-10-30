@@ -71,7 +71,10 @@ no restart, no process churn.
 
 ## Building from source
 
-Requires the **Rust toolchain (MSVC)** and **Node.js**.
+Requires the **Rust toolchain (MSVC)** and **Node.js** (`^22.18`, `^24.11` or `>=26`, for
+[Vite+](https://viteplus.dev)). The frontend toolchain — Vite, Vitest, Oxlint and
+Oxfmt — comes from the `vite-plus` dev dependency, so no global install is needed;
+run its CLI as `npx vp …`.
 
 ```sh
 # Core library only (fast; no frontend needed) — the default workspace member.
@@ -84,8 +87,9 @@ npm run tauri dev               # run fastpeq with hot-reload
 npm run tauri build             # produce the NSIS + MSI installers
 
 # Frontend checks
-npm run check                   # svelte-check (types)
-npx vitest run                  # unit/component tests
+npm run check                   # vp check (format, lint, types) + svelte-check
+npm test                        # unit/component tests (vp test)
+npx vp fmt                      # apply formatting
 ```
 
 ## Releasing

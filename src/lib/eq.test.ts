@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import {
   balanceTrim,
   balanceFromTrim,
@@ -111,7 +111,15 @@ describe("slope shelves", () => {
     expect(responseCurve([shelf({ slope: 600 })], 0, probe)).toEqual([0, 0, 0, 0, 0]);
   });
   it("carry their slope through parseConfigEq", () => {
-    const filter = { enabled: true, kind: "HighShelfQ", freq: 8000, gain: -3, q: null, index: 1, channel: both } as const;
+    const filter = {
+      enabled: true,
+      kind: "HighShelfQ",
+      freq: 8000,
+      gain: -3,
+      q: null,
+      index: 1,
+      channel: both,
+    } as const;
     const parsed = parseConfigEq({
       lines: [
         { kind: "Filter", value: { ...filter, slope: 9 } },
@@ -139,7 +147,13 @@ describe("clampGainTo", () => {
 });
 
 describe("apoBiquad", () => {
-  const filter = (kind: FilterKind, freq: number, gain: number, q: number | null, slope: number | null = null): CurveFilter => ({
+  const filter = (
+    kind: FilterKind,
+    freq: number,
+    gain: number,
+    q: number | null,
+    slope: number | null = null,
+  ): CurveFilter => ({
     enabled: true,
     kind,
     freq,
@@ -166,7 +180,11 @@ describe("apoBiquad", () => {
     expectBiquad(filter("LowShelf", 100, 6, 0.7), 119.24595, 0.7);
     expectBiquad(filter("HighShelf", 8000, -4, 1), 7541.2195, 1);
     // At Q 1/√2 (S = 1) that's the textbook corner-to-centre factor √A.
-    expectBiquad(filter("LowShelf", 100, 6, Math.SQRT1_2), 100 * Math.pow(10, 6 / 80), Math.SQRT1_2);
+    expectBiquad(
+      filter("LowShelf", 100, 6, Math.SQRT1_2),
+      100 * Math.pow(10, 6 / 80),
+      Math.SQRT1_2,
+    );
   });
   it("keeps Fc as an LSC/HSC's centre, with a Q or a slope", () => {
     expectBiquad(filter("LowShelfQ", 100, 6, 0.7), 100, 0.7);
@@ -190,15 +208,20 @@ describe("apoBiquad", () => {
   });
   it("inverts shelfSToQ with shelfQToS", () => {
     for (const gain of [-12, 0, 6, 15]) {
-      for (const s of [0.3, 0.9, 1, 1.5]) expect(shelfQToS(shelfSToQ(s, gain)!, gain)).toBeCloseTo(s, 12);
+      for (const s of [0.3, 0.9, 1, 1.5])
+        expect(shelfQToS(shelfSToQ(s, gain)!, gain)).toBeCloseTo(s, 12);
     }
   });
 });
 
 describe("parseConfigEq Q seeding", () => {
   const line = (kind: FilterKind, q: number | null) =>
-    ({ kind: "Filter", value: { enabled: true, kind, freq: 100, gain: 6, q, index: 1, channel: both } }) as const;
-  const qs = (...lines: ReturnType<typeof line>[]) => parseConfigEq({ lines: [...lines] }).filters.map((f) => f.q);
+    ({
+      kind: "Filter",
+      value: { enabled: true, kind, freq: 100, gain: 6, q, index: 1, channel: both },
+    }) as const;
+  const qs = (...lines: ReturnType<typeof line>[]) =>
+    parseConfigEq({ lines: [...lines] }).filters.map((f) => f.q);
 
   it("seeds a Q type's missing Q with the one Equalizer APO runs", () => {
     const [shelf, pk] = qs(line("LowShelfQ", null), line("Peak", null));
@@ -206,7 +229,11 @@ describe("parseConfigEq Q seeding", () => {
     expect(pk).toBe(1);
   });
   it("leaves the other types without a Q unless their line had one", () => {
-    expect(qs(line("LowShelf", null), line("LowShelf", 0.7), line("LowPass", null))).toEqual([null, 0.7, null]);
+    expect(qs(line("LowShelf", null), line("LowShelf", 0.7), line("LowPass", null))).toEqual([
+      null,
+      0.7,
+      null,
+    ]);
   });
 });
 

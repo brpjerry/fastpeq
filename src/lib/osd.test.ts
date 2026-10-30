@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { payloadForHotkey, OSD_EVENT, type OsdContext } from "./osd";
 import type { Hotkey } from "./hotkeys.svelte";
 
@@ -47,10 +47,16 @@ describe("payloadForHotkey", () => {
 
   it("tone up/down show a signed dB detail and a ±12 bar", () => {
     expect(
-      payloadForHotkey(hk({ action: "tone-up", tone: "treble" }), ctx({ tone: { bass: 0, mid: 0, treble: 3 } })),
+      payloadForHotkey(
+        hk({ action: "tone-up", tone: "treble" }),
+        ctx({ tone: { bass: 0, mid: 0, treble: 3 } }),
+      ),
     ).toEqual({ title: "Treble", detail: "+3.0 dB", bar: { value: 3, min: -12, max: 12 } });
     expect(
-      payloadForHotkey(hk({ action: "tone-down", tone: "bass" }), ctx({ tone: { bass: -1.5, mid: 0, treble: 0 } })),
+      payloadForHotkey(
+        hk({ action: "tone-down", tone: "bass" }),
+        ctx({ tone: { bass: -1.5, mid: 0, treble: 0 } }),
+      ),
     ).toEqual({ title: "Bass", detail: "-1.5 dB", bar: { value: -1.5, min: -12, max: 12 } });
   });
 

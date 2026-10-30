@@ -7,10 +7,7 @@ export type Snapshot = {
   balance: number;
 };
 
-export function createHistory(
-  onRestore: (s: Snapshot) => void,
-  isComparing: () => boolean
-) {
+export function createHistory(onRestore: (s: Snapshot) => void, isComparing: () => boolean) {
   let history = $state<Snapshot[]>([]);
   let histIndex = $state(-1);
   const HIST_MAX = 100;
@@ -43,6 +40,6 @@ export function createHistory(
       this.flush(currentSnap);
       if (histIndex >= history.length - 1) return;
       onRestore(history[++histIndex]);
-    }
+    },
   };
 }

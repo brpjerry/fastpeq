@@ -69,8 +69,7 @@ export const setHotkeys = (bindings: { id: string; accelerator: string }[]) =>
  *  stored by the backend as hotkeys.json in the app data dir (atomic writes),
  *  so bindings survive webview profile loss. `null` = never saved. */
 export const loadHotkeyBindings = () => invoke<string | null>("load_hotkey_bindings");
-export const saveHotkeyBindings = (json: string) =>
-  invoke<void>("save_hotkey_bindings", { json });
+export const saveHotkeyBindings = (json: string) => invoke<void>("save_hotkey_bindings", { json });
 
 /** A frontend store's persisted UI state document (preset view state, targets,
  *  prefs, theme) — a raw JSON document stored by the backend as `<key>.json` in
@@ -138,8 +137,7 @@ export const hardwareStatus = () => invoke<HardwareStatus>("hardware_status");
 /** Reconcile offload with the active output (off the UI thread), then return status.
  *  Call on demand — focus, opening the panel, a mode change, an output switch. */
 export const refreshHardware = () => invoke<HardwareStatus>("refresh_hardware");
-export const setOffloadMode = (mode: OffloadMode) =>
-  invoke<void>("set_offload_mode", { mode });
+export const setOffloadMode = (mode: OffloadMode) => invoke<void>("set_offload_mode", { mode });
 /** Filter positions (document order) in `config` currently sent to hardware. */
 export const offloadSelection = (config: Config) =>
   invoke<number[]>("offload_selection", { config });
@@ -150,8 +148,7 @@ export const offloadSelection = (config: Config) =>
 export const autostartEnabled = () => invoke<boolean>("autostart_enabled");
 /** Add or remove the startup entry. The registered command line carries
  *  `--minimized`, so a login launch goes straight to the tray. */
-export const setAutostart = (enabled: boolean) =>
-  invoke<void>("set_autostart", { enabled });
+export const setAutostart = (enabled: boolean) => invoke<void>("set_autostart", { enabled });
 
 export const readTextFile = (path: string) => invoke<string>("read_text_file", { path });
 

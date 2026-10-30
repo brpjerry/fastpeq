@@ -34,7 +34,8 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Svelte type-check
+      # `vp check` (Oxfmt + Oxlint, type-aware) followed by svelte-check.
+      - name: Format, lint, and type-check
         run: npm run check
 
       - name: Frontend unit tests

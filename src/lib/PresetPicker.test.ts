@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vite-plus/test";
 import { render, fireEvent, cleanup } from "@testing-library/svelte";
 import PresetPicker from "./PresetPicker.svelte";
 
@@ -36,7 +36,9 @@ describe("PresetPicker", () => {
 
   it("filters by device type and selects a preset", async () => {
     const onChange = vi.fn();
-    const { container } = render(PresetPicker, { props: { value: "", presets, categories, onChange } });
+    const { container } = render(PresetPicker, {
+      props: { value: "", presets, categories, onChange },
+    });
     await openMenu(container);
 
     const iemChip = [...container.querySelectorAll(".pp-chip")].find(

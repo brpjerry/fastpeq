@@ -118,7 +118,8 @@ describe("fastpeq E2E smokes", () => {
     await apply("BassBoost");
 
     await browser.waitUntil(
-      async () => ((await (await rowFor("BassBoost")).getAttribute("class")) || "").includes("active"),
+      async () =>
+        ((await (await rowFor("BassBoost")).getAttribute("class")) || "").includes("active"),
       { timeout: 10000, timeoutMsg: "preset never became active in the list" },
     );
 
@@ -197,7 +198,7 @@ describe("editor: edit a band and save", () => {
       timeoutMsg: "editor did not show BassBoost's two bands",
     });
     // The editor heading carries a title attribute; the presets heading doesn't.
-    expect(await (await $('.panel-head h2[title]')).getText()).toBe("BassBoost");
+    expect(await (await $(".panel-head h2[title]")).getText()).toBe("BassBoost");
   });
 
   it("changes a band's filter type and persists it on save", async () => {

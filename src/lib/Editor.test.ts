@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vite-plus/test";
 import { tick } from "svelte";
 import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -49,7 +49,15 @@ function cfg(preamp: number, peaks: Array<[number, number, number]>): Config {
   peaks.forEach(([freq, gain, q], i) =>
     lines.push({
       kind: "Filter",
-      value: { enabled: true, kind: "Peak", freq, gain, q, index: i + 1, channel: { kind: "both" } },
+      value: {
+        enabled: true,
+        kind: "Peak",
+        freq,
+        gain,
+        q,
+        index: i + 1,
+        channel: { kind: "both" },
+      },
     }),
   );
   return { lines };
@@ -58,7 +66,14 @@ function cfg(preamp: number, peaks: Array<[number, number, number]>): Config {
 function renderEditor(config: Config, props: Record<string, unknown> = {}) {
   vi.mocked(api.getPreset).mockResolvedValue(config);
   return render(Editor, {
-    props: { name: "Test", tone: FLAT_TONE, bypassed: false, reloadToken: 0, onApplied: vi.fn(), ...props },
+    props: {
+      name: "Test",
+      tone: FLAT_TONE,
+      bypassed: false,
+      reloadToken: 0,
+      onApplied: vi.fn(),
+      ...props,
+    },
   });
 }
 
@@ -68,7 +83,12 @@ afterEach(cleanup);
 
 describe("Editor", () => {
   it("loads a preset's filters as bands", async () => {
-    const { container } = renderEditor(cfg(-10, [[100, 3, 1], [1000, -2, 2]]));
+    const { container } = renderEditor(
+      cfg(-10, [
+        [100, 3, 1],
+        [1000, -2, 2],
+      ]),
+    );
     await waitFor(() => expect(bandCount(container)).toBe(2));
   });
 
@@ -81,9 +101,15 @@ describe("Editor", () => {
 
   it("filters the full L+R list with the APO/HW-only buttons in a hybrid offload mode", async () => {
     vi.mocked(api.offloadSelection).mockResolvedValue([0]); // only the first band
-    const { container } = renderEditor(cfg(0, [[100, 3, 1], [1000, 3, 1]]), {
-      offloadActive: true,
-    });
+    const { container } = renderEditor(
+      cfg(0, [
+        [100, 3, 1],
+        [1000, 3, 1],
+      ]),
+      {
+        offloadActive: true,
+      },
+    );
     // The tabs stay the plain channel lists; the full L+R list shows both bands
     // with their engine statuses once the backend selection lands.
     await waitFor(() => expect(bandCount(container)).toBe(2));
@@ -98,7 +124,9 @@ describe("Editor", () => {
 
     // "HW only" narrows the list to the offloaded band; clicking it again
     // restores the full list; "APO only" shows the software remainder.
-    const engineBtns = () => [...container.querySelectorAll<HTMLButtonElement>(".engine-seg button")];
+    const engineBtns = () => [
+      ...container.querySelectorAll<HTMLButtonElement>(".engine-seg button"),
+    ];
     expect(engineBtns().map((b) => b.textContent!.trim())).toEqual(["APO only", "HW only"]);
     await fireEvent.click(engineBtns()[1]);
     expect(statuses()).toEqual(["HW"]);
@@ -111,11 +139,17 @@ describe("Editor", () => {
 
   it("mutes enabled bands that don't fit the device in Hardware Only mode", async () => {
     vi.mocked(api.offloadSelection).mockResolvedValue([0]); // only the first band fits
-    const { container } = renderEditor(cfg(0, [[100, 3, 1], [1000, 3, 1]]), {
-      offloadActive: true,
-      hardwareOnly: true,
-      forceAutoPreamp: true,
-    });
+    const { container } = renderEditor(
+      cfg(0, [
+        [100, 3, 1],
+        [1000, 3, 1],
+      ]),
+      {
+        offloadActive: true,
+        hardwareOnly: true,
+        forceAutoPreamp: true,
+      },
+    );
     // Hardware Only keeps binary ON/OFF statuses and offers no engine filter —
     // there is only one engine.
     await waitFor(() => expect(bandCount(container)).toBe(2));
@@ -223,14 +257,25 @@ describe("Editor", () => {
   });
 
   it("removes a band", async () => {
-    const { container } = renderEditor(cfg(-10, [[100, 0, 1], [1000, 0, 2]]));
+    const { container } = renderEditor(
+      cfg(-10, [
+        [100, 0, 1],
+        [1000, 0, 2],
+      ]),
+    );
     await waitFor(() => expect(bandCount(container)).toBe(2));
     await fireEvent.click(container.querySelector(".band .remove")!);
     expect(bandCount(container)).toBe(1);
   });
 
   it("removes all gain filters sitting at 0 dB", async () => {
-    const { container } = renderEditor(cfg(-10, [[100, 3, 1], [1000, 0, 1], [5000, 0, 2]]));
+    const { container } = renderEditor(
+      cfg(-10, [
+        [100, 3, 1],
+        [1000, 0, 1],
+        [5000, 0, 2],
+      ]),
+    );
     await waitFor(() => expect(bandCount(container)).toBe(3));
     await fireEvent.click(container.querySelector(".clear-flat")!);
     expect(bandCount(container)).toBe(1); // only the +3 dB band survives
@@ -329,7 +374,16 @@ describe("Editor", () => {
       lines: [
         {
           kind: "Filter",
-          value: { enabled: true, kind: "LowShelfQ", freq: 100, gain: 6, q: null, slope: 12, index: 1, channel: { kind: "both" } },
+          value: {
+            enabled: true,
+            kind: "LowShelfQ",
+            freq: 100,
+            gain: 6,
+            q: null,
+            slope: 12,
+            index: 1,
+            channel: { kind: "both" },
+          },
         },
       ],
     };
@@ -352,7 +406,12 @@ describe("Editor", () => {
   });
 
   it("keeps the Q a fixed shelf came with, and gives a Q-less one none", async () => {
-    const shelf = (kind: "LowShelf" | "LowShelfQ", freq: number, q: number | null, index: number) => ({
+    const shelf = (
+      kind: "LowShelf" | "LowShelfQ",
+      freq: number,
+      q: number | null,
+      index: number,
+    ) => ({
       kind: "Filter" as const,
       value: { enabled: true, kind, freq, gain: 6, q, index, channel: { kind: "both" as const } },
     });
@@ -360,7 +419,11 @@ describe("Editor", () => {
     // change the sound. A plain LS must stay plain, and a Q-less LSC gets the
     // Q Equalizer APO already runs it at (S = 0.9 at +6 dB).
     const { container } = renderEditor({
-      lines: [shelf("LowShelf", 100, 0.7, 1), shelf("LowShelf", 200, null, 2), shelf("LowShelfQ", 300, null, 3)],
+      lines: [
+        shelf("LowShelf", 100, 0.7, 1),
+        shelf("LowShelf", 200, null, 2),
+        shelf("LowShelfQ", 300, null, 3),
+      ],
     });
     await waitFor(() => expect(bandCount(container)).toBe(3));
     vi.mocked(api.applyLive).mockClear();
@@ -392,7 +455,10 @@ describe("Editor", () => {
     await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
     const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
     // Keeping the peak's Q would turn the new LS into a corner-frequency shelf.
-    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({ kind: "LowShelf", q: null });
+    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({
+      kind: "LowShelf",
+      q: null,
+    });
     expect(container.querySelector(".field.q")).toBeNull();
   });
 
@@ -420,7 +486,9 @@ describe("Editor", () => {
     await fireEvent.click(container.querySelector(".expand-btn")!);
 
     // With no measurement yet, the reference switch is disabled and off.
-    const before = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
+    const before = container.querySelector<HTMLInputElement>(
+      ".meas-group .switch input[type='checkbox']",
+    )!;
     expect(before.disabled).toBe(true);
     expect(before.checked).toBe(false);
 
@@ -434,10 +502,14 @@ describe("Editor", () => {
     await fireEvent.click(importBtn);
 
     // After import: the name shows, it's persisted per preset, and the switch auto-enables.
-    await waitFor(() => expect(container.querySelector(".meas-name")?.textContent).toContain("harman.txt"));
+    await waitFor(() =>
+      expect(container.querySelector(".meas-name")?.textContent).toContain("harman.txt"),
+    );
     expect(getMeasurement("ImportMeas")?.name).toBe("harman.txt");
     await waitFor(() => {
-      const sw = container.querySelector<HTMLInputElement>(".meas-group .switch input[type='checkbox']")!;
+      const sw = container.querySelector<HTMLInputElement>(
+        ".meas-group .switch input[type='checkbox']",
+      )!;
       expect(sw.disabled).toBe(false);
       expect(sw.checked).toBe(true);
     });
@@ -447,7 +519,10 @@ describe("Editor", () => {
   it("auto-loads a saved measurement for the preset", async () => {
     setMeasurement("AutoLoad", {
       name: "saved.txt",
-      points: [{ freq: 100, spl: 2 }, { freq: 1000, spl: 0 }],
+      points: [
+        { freq: 100, spl: 2 },
+        { freq: 1000, spl: 0 },
+      ],
     });
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "AutoLoad" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
@@ -455,7 +530,9 @@ describe("Editor", () => {
     expect(container.querySelector(".graph-wrap .resp.reference")).toBeTruthy();
     // The expanded meas-tools reflect the saved name.
     await fireEvent.click(container.querySelector(".expand-btn")!);
-    await waitFor(() => expect(container.querySelector(".meas-name")?.textContent).toContain("saved.txt"));
+    await waitFor(() =>
+      expect(container.querySelector(".meas-name")?.textContent).toContain("saved.txt"),
+    );
   });
 
   it("wraps the expanded graph in the fixed-aspect container", async () => {
@@ -467,7 +544,10 @@ describe("Editor", () => {
   });
 
   it("offers the target dropdown and persists the selection per preset", async () => {
-    const id = addTarget("Harman", [{ freq: 100, spl: 1 }, { freq: 1000, spl: 0 }]);
+    const id = addTarget("Harman", [
+      { freq: 100, spl: 1 },
+      { freq: 1000, spl: 0 },
+    ]);
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "TgtPreset" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
     await fireEvent.click(container.querySelector(".expand-btn")!);
@@ -492,7 +572,10 @@ describe("Editor", () => {
   });
 
   it("toggles compensate per preset (with a non-flat target)", async () => {
-    const id = addTarget("Tc", [{ freq: 100, spl: 1 }, { freq: 1000, spl: 0 }]);
+    const id = addTarget("Tc", [
+      { freq: 100, spl: 1 },
+      { freq: 1000, spl: 0 },
+    ]);
     setTargetId("CompPreset", id);
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "CompPreset" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
@@ -532,7 +615,10 @@ describe("Editor", () => {
   });
 
   it("aligns the target offset to the response at the align frequency", async () => {
-    const id = addTarget("Tm", [{ freq: 100, spl: 2 }, { freq: 1000, spl: 6 }]);
+    const id = addTarget("Tm", [
+      { freq: 100, spl: 2 },
+      { freq: 1000, spl: 6 },
+    ]);
     setTargetId("AlignPreset", id);
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "AlignPreset" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
@@ -553,7 +639,13 @@ describe("Editor", () => {
   });
 
   it("toggles the measurement reference per preset", async () => {
-    setMeasurement("RefPreset", { name: "m.txt", points: [{ freq: 100, spl: 1 }, { freq: 1000, spl: 0 }] });
+    setMeasurement("RefPreset", {
+      name: "m.txt",
+      points: [
+        { freq: 100, spl: 1 },
+        { freq: 1000, spl: 0 },
+      ],
+    });
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "RefPreset" });
     await waitFor(() => expect(bandCount(container)).toBe(1));
     await fireEvent.click(container.querySelector(".expand-btn")!);
@@ -573,7 +665,10 @@ describe("Editor", () => {
   });
 
   it("forces the target switch on and disabled while compensating", async () => {
-    const id = addTarget("Tf", [{ freq: 100, spl: 1 }, { freq: 1000, spl: 0 }]);
+    const id = addTarget("Tf", [
+      { freq: 100, spl: 1 },
+      { freq: 1000, spl: 0 },
+    ]);
     setTargetId("CompTgt", id);
     setCompensate("CompTgt", true);
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]), { name: "CompTgt" });
@@ -641,7 +736,9 @@ describe("Editor", () => {
     // Preamp pulled to ~-10 dB, the clip warning clears, and the slider locks.
     await waitFor(() => expect(container.querySelector(".clip")).toBeNull());
     expect(container.querySelector<HTMLInputElement>(".pval input")!.value).toContain("-10");
-    expect(container.querySelector<HTMLInputElement>(".preamp input[type='range']")!.disabled).toBe(true);
+    expect(container.querySelector<HTMLInputElement>(".preamp input[type='range']")!.disabled).toBe(
+      true,
+    );
   });
 
   it("applies a preamp typed into the dB textbox", async () => {
@@ -690,10 +787,15 @@ describe("Editor", () => {
     // so config.txt's preamp tracks it instead of going stale until the next edit.
     setAutoPreamp(false); // start from a known state, then toggle on
     const props = { name: "Test", bypassed: false, reloadToken: 0, onApplied: vi.fn() };
-    const { container, rerender } = renderEditor(cfg(0, [[1000, 0, 1]]), { ...props, tone: FLAT_TONE });
+    const { container, rerender } = renderEditor(cfg(0, [[1000, 0, 1]]), {
+      ...props,
+      tone: FLAT_TONE,
+    });
     await waitFor(() => expect(bandCount(container)).toBe(1));
 
-    const auto = [...container.querySelectorAll(".switch")].find((l) => l.textContent!.includes("Auto"))!;
+    const auto = [...container.querySelectorAll(".switch")].find((l) =>
+      l.textContent!.includes("Auto"),
+    )!;
     const cb = auto.querySelector<HTMLInputElement>("input[type='checkbox']")!;
     cb.checked = true;
     await fireEvent.change(cb);
@@ -714,7 +816,10 @@ describe("Editor", () => {
   it("does not re-apply on tone changes while Auto Preamp is off", async () => {
     setAutoPreamp(false); // the persisted switch can leak between tests
     const props = { name: "Test", bypassed: false, reloadToken: 0, onApplied: vi.fn() };
-    const { container, rerender } = renderEditor(cfg(-10, [[1000, 0, 1]]), { ...props, tone: FLAT_TONE });
+    const { container, rerender } = renderEditor(cfg(-10, [[1000, 0, 1]]), {
+      ...props,
+      tone: FLAT_TONE,
+    });
     await waitFor(() => expect(bandCount(container)).toBe(1));
     vi.mocked(api.applyLive).mockClear();
 
@@ -771,9 +876,7 @@ describe("Editor loudness-matched compare", () => {
     await fireEvent.click(compareBtn);
     await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
     const onB = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
-    const bPre = onB.lines.find(
-      (l) => l.kind === "Preamp" && l.value.channel.kind === "both",
-    );
+    const bPre = onB.lines.find((l) => l.kind === "Preamp" && l.value.channel.kind === "both");
     expect(bPre && bPre.kind === "Preamp" && bPre.value.gain).toBeLessThan(0);
     // The saved side is the quieter one — no extra offset on it.
     expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto (−0.0 dB)");
@@ -784,9 +887,7 @@ describe("Editor loudness-matched compare", () => {
     await fireEvent.click(compareBtn);
     await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
     const onA = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
-    const aPre = onA.lines.find(
-      (l) => l.kind === "Preamp" && l.value.channel.kind === "both",
-    );
+    const aPre = onA.lines.find((l) => l.kind === "Preamp" && l.value.channel.kind === "both");
     expect(aPre && aPre.kind === "Preamp" && aPre.value.gain).toBeLessThan(0);
     const label = container.querySelector(".pside .sw-label")!.textContent!;
     expect(label).toMatch(/^Auto \(−\d+\.\d dB\)$/);
@@ -798,9 +899,9 @@ describe("Editor loudness-matched compare", () => {
     await fireEvent.click(container.querySelector(".pside .switch input")!);
     await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
     const raw = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
-    expect(
-      raw.lines.some((l) => l.kind === "Preamp" && l.value.channel.kind === "both"),
-    ).toBe(false);
+    expect(raw.lines.some((l) => l.kind === "Preamp" && l.value.channel.kind === "both")).toBe(
+      false,
+    );
     expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto");
   });
 
@@ -815,9 +916,7 @@ describe("Editor loudness-matched compare", () => {
 
     await fireEvent.click(compareBtn);
     await waitFor(() =>
-      expect(container.querySelector(".pside .sw-label")!.textContent).toBe(
-        "Auto (−0.0 dB)",
-      ),
+      expect(container.querySelector(".pside .sw-label")!.textContent).toBe("Auto (−0.0 dB)"),
     );
     // Esc exits AND disarms the session: the label returns to plain Auto.
     await fireEvent.keyDown(window, { key: "Escape" });
@@ -892,9 +991,7 @@ describe("Editor history browser", () => {
   });
 
   it("hides a deleted revision while refreshing the version count", async () => {
-    vi.mocked(api.presetHistory)
-      .mockResolvedValueOnce([REV])
-      .mockResolvedValueOnce([]);
+    vi.mocked(api.presetHistory).mockResolvedValueOnce([REV]).mockResolvedValueOnce([]);
     const onSaved = vi.fn();
     const { container } = renderEditor(cfg(0, [[3000, 6, 1]]), { onSaved });
     await waitFor(() => expect(bandCount(container)).toBe(1));

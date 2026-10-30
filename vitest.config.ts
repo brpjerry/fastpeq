@@ -1,8 +1,9 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite-plus";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { svelteTesting } from "@testing-library/svelte/vite";
 
-// Test runner config (separate from vite.config.ts, which is for dev/build).
+// Test runner config for `vp test` (separate from vite.config.ts, which is for
+// dev/build and lint/format).
 // The svelte plugin compiles components; svelteTesting wires up the browser
 // resolve conditions and auto-cleanup for @testing-library/svelte.
 export default defineConfig({

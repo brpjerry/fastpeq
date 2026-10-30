@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { freqToX, xToFreq, dbToY, yToGain, dbGridLines, F_MIN, F_MAX, type PlotBox } from "./graph";
 
 const box: PlotBox = { padL: 40, padT: 10, plotW: 600, plotH: 200 };

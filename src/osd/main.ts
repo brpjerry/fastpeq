@@ -26,7 +26,7 @@ async function position() {
     /* best effort — fall back to the configured position */
   }
 }
-position();
+void position();
 
 const app = mount(Osd, { target: document.getElementById("osd")! });
 

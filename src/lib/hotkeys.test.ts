@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vite-plus/test";
 import * as api from "./api";
 import {
   getHotkeys,
@@ -22,7 +22,10 @@ vi.mock("./api", () => ({
 }));
 
 const KEY = "fastpeq.hotkeys";
-const clearAll = () => getHotkeys().slice().forEach((h) => removeHotkey(h.id));
+const clearAll = () =>
+  getHotkeys()
+    .slice()
+    .forEach((h) => removeHotkey(h.id));
 
 describe("hotkeys persistence", () => {
   beforeEach(() => {
@@ -94,14 +97,16 @@ describe("hotkeys store", () => {
     expect(getHotkeys().find((h) => h.id === a)!.preset).toBe("HD600");
 
     // Move b to the front.
-    moveHotkey(getHotkeys().findIndex((h) => h.id === b), 0);
+    moveHotkey(
+      getHotkeys().findIndex((h) => h.id === b),
+      0,
+    );
     expect(getHotkeys()[0].id).toBe(b);
 
     removeHotkey(a);
     removeHotkey(b);
     expect(getHotkeys().length).toBe(0);
   });
-
 
   it("follows a preset rename so the binding keeps working", () => {
     clearAll();
@@ -144,8 +149,12 @@ describe("hotkeys store", () => {
   });
 
   it("builds an accelerator string per modifier", () => {
-    expect(accelerator({ id: "x", mod: "ctrl-alt", key: "B", action: "bypass" })).toBe("Ctrl+Alt+B");
-    expect(accelerator({ id: "y", mod: "ctrl-shift", key: "1", action: "bypass" })).toBe("Ctrl+Shift+1");
+    expect(accelerator({ id: "x", mod: "ctrl-alt", key: "B", action: "bypass" })).toBe(
+      "Ctrl+Alt+B",
+    );
+    expect(accelerator({ id: "y", mod: "ctrl-shift", key: "1", action: "bypass" })).toBe(
+      "Ctrl+Shift+1",
+    );
     const bad: Hotkey = { id: "z", mod: "ctrl-alt", key: "", action: "bypass" };
     expect(accelerator(bad)).toBeNull();
   });

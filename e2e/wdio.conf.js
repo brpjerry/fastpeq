@@ -115,7 +115,7 @@ export const config = {
       }));
       console.log(`===DIAG=== ${JSON.stringify(info)}`);
     } catch (e) {
-      console.log(`diag failed: ${e}`);
+      console.log(`diag failed: ${String(e)}`);
     }
   },
 

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
 import { render, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
 import HardwarePanel from "./HardwarePanel.svelte";
 import * as api from "./api";

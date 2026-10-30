@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { anchorBelow } from "./floating";
 
 const elWith = (rect: { left: number; top?: number; bottom: number; width: number }) =>
