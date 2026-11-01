@@ -468,11 +468,11 @@ describe("sub-presets (pad / tip variants)", () => {
     await apply("Vocal"); // iem
     const btn = await $("button.variant-btn");
     await btn.waitForEnabled({ timeout: 10000 });
-    expect(await btn.getText()).toBe("Tip roll");
+    expect(await btn.getText()).toBe("+ New Tips");
     await apply("BassBoost"); // headphone
-    await browser.waitUntil(async () => (await btn.getText()) === "Pad roll", {
+    await browser.waitUntil(async () => (await btn.getText()) === "+ New Pads", {
       timeout: 5000,
-      timeoutMsg: "create button did not switch to Pad roll",
+      timeoutMsg: "create button did not switch to + New Pads",
     });
 
     // An edit left unsaved is what a roll is for: it goes into the new pads.
@@ -513,22 +513,22 @@ describe("sub-presets (pad / tip variants)", () => {
       timeoutMsg: "the editor did not settle on the saved variant",
     });
 
-    // The row grew a dropdown trigger naming the selected pads.
+    // The row grew an expand caret, and its list opened marking the new pads.
     const row = await rowFor("BassBoost");
     await browser.waitUntil(
-      async () => (await (await row.$(".variant-current")).getText()).trim() === "Dekoni pads",
+      async () => (await (await row.$(".variant-item.sel")).getText()).trim() === "Dekoni pads",
       { timeout: 10000, timeoutMsg: "row did not show the selected variant" },
     );
+    expect(await (await row.$(".variant-toggle")).getAttribute("aria-expanded")).toBe("true");
     // No extra list rows: variants live inside the preset's row.
     expect((await presetNames()).filter((n) => n === "BassBoost").length).toBe(1);
   });
 
-  it("picks another variant from the row's dropdown, and the preset keeps loading it", async () => {
+  it("picks another variant from the row's list, and the preset keeps loading it", async () => {
     const row = await rowFor("BassBoost");
-    await (await row.$(".variant-trigger")).click();
-    const menu = await $(".variant-menu");
-    await menu.waitForExist({ timeout: 5000 });
-    for (const item of await menu.$$(".variant-item")) {
+    const list = await row.$(".variants"); // still open from creating the pads
+    await list.waitForExist({ timeout: 5000 });
+    for (const item of await list.$$(".variant-item")) {
       if ((await item.getText()).trim() === "Default pads") {
         await item.click();
         break;
@@ -542,7 +542,7 @@ describe("sub-presets (pad / tip variants)", () => {
       { timeout: 10000, timeoutMsg: "picking Default pads did not update the selection" },
     );
     await browser.waitUntil(
-      async () => (await (await row.$(".variant-current")).getText()).trim() === "Default pads",
+      async () => (await (await row.$(".variant-item.sel")).getText()).trim() === "Default pads",
       { timeout: 10000, timeoutMsg: "row did not show Default pads" },
     );
 

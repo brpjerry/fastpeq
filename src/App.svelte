@@ -466,7 +466,7 @@
   const editorSubtitle = $derived(variantSubtitle(selected) ?? null);
   let editor = $state.raw<ReturnType<typeof Editor> | undefined>(undefined); // bind:this
 
-  // Picking from a row's dropdown is the explicit selection: it sticks (the
+  // Picking from a row's variant list is the explicit selection: it sticks (the
   // row click and the hotkey load it from now on) and plays right away. The
   // preset file changes under the editor, so the editor follows it *before*
   // the live apply: should that fail, it must not keep showing the old
@@ -510,7 +510,7 @@
           return;
         }
       }
-      await reload(); // the dropdown appears whatever the apply below does
+      await reload(); // the variant list shows it whatever the apply below does
       selected = parent;
       editorReloadToken++;
       await api.applyPreset(parent);
