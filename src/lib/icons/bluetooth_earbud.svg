@@ -10,7 +10,7 @@
    version="1.1"
    id="svg1"
    sodipodi:docname="bluetooth_earbud.svg"
-   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -49,7 +49,7 @@
      inkscape:window-width="3840"
      inkscape:window-height="2126"
      inkscape:window-x="-11"
-     inkscape:window-y="1083"
+     inkscape:window-y="896"
      inkscape:window-maximized="1"
      inkscape:current-layer="svg1" />
   <circle
@@ -67,7 +67,7 @@
      sodipodi:nodetypes="ccc"
      transform="translate(0,-0.99999914)" />
   <path
-     style="fill:none;stroke-width:1.04159;stroke-dasharray:none"
+     style="fill:none;stroke-width:1;stroke-dasharray:none"
      d="m 9.7820124,6.3320094 4.1663546,4.1663546 -2.083178,2.083177 V 4.2488323 l 2.083178,2.0831771 -4.1663546,4.1663546"
      id="path3-9"
      sodipodi:nodetypes="cccccc" />
