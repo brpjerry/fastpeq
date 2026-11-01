@@ -665,13 +665,14 @@
     display: block;
   }
 
-  /* The list reaches into the panel's 14px left padding (and pads it back), so
-     that gutter lies inside its scroll box: the expand carets hang there
-     without being clipped or moving the rows. */
+  /* The list reaches into the panel's 14px left padding and pads 20px back,
+     so a 20px gutter lies inside its scroll box: the expand carets hang there
+     without being clipped. The rows sit 6px in from the panel padding; the
+     icon-to-name spacing gives those 6px back (see .cat, .name). */
   .presets {
     list-style: none;
     margin: 0 0 0 -14px;
-    padding: 0 0 0 14px;
+    padding: 0 0 0 20px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -710,6 +711,7 @@
     border-radius: 6px;
     color: var(--text);
     overflow: hidden;
+    margin-right: -2px; /* 2px to the name, not the row's 4px gap */
   }
   .cat:hover:not(:disabled) {
     background: #2b3038;
@@ -735,7 +737,7 @@
     text-align: left;
     background: transparent;
     border: none;
-    padding: 5px 8px;
+    padding: 5px 8px 5px 4px;
   }
   /* Version badge: stays small and gray even on the accent-colored
      active/selected row. */
@@ -755,9 +757,9 @@
      the name's own text stays clean for scanning and tests. */
   .variant-toggle {
     position: absolute;
-    left: -15px; /* from the li's padding box: its 1px border + the 14px gutter */
+    left: -21px; /* from the li's padding box: its 1px border + the 20px gutter */
     top: 3px; /* level with the row, below the li's top padding */
-    width: 14px;
+    width: 20px;
     height: 26px;
     display: flex;
     align-items: center;
@@ -782,10 +784,10 @@
   }
   /* The expanded variants: a guide line hangs from the category icon's centre
      (half its 26px) and the items line up with the name button (26px icon +
-     4px gap). */
+     2px). */
   .variants {
     margin: 1px 0 2px 13px;
-    padding-left: 16px;
+    padding-left: 14px;
     border-left: 1px solid var(--border);
   }
   .variant-row {
@@ -803,7 +805,7 @@
     text-align: left;
     background: transparent;
     border: none;
-    padding: 3px 8px;
+    padding: 3px 8px 3px 4px; /* the dot starts where the name's text does */
     font-size: 12px;
     color: var(--muted);
   }
