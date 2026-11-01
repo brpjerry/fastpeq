@@ -953,6 +953,13 @@
     schedule();
   }
 
+  /** What Save would write, while there are unsaved changes — else `null`.
+   *  For actions that carry the live tuning along instead of dropping it: a
+   *  Pad roll made while tuning saves it into the new variant. */
+  export function unsavedConfig(): Config | null {
+    return dirty ? buildConfig(true) : null;
+  }
+
   // Persist the current state to the preset file (separate from the live config).
   async function save() {
     busy = true;

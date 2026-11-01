@@ -1169,6 +1169,59 @@ describe("App sub-presets", () => {
     expect(api.savePreset).not.toHaveBeenCalled(); // never "from scratch"
   });
 
+  it("saves unsaved editor edits into the new variant, not into the previous pads", async () => {
+    withVariants();
+    vi.mocked(api.savePreset).mockClear();
+    vi.mocked(api.getPreset).mockResolvedValue({
+      lines: [
+        {
+          kind: "Filter",
+          value: {
+            enabled: true,
+            kind: "Peak",
+            freq: 120,
+            gain: 2,
+            q: 1.2,
+            index: 1,
+            channel: { kind: "both" },
+          },
+        },
+      ],
+    });
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    await fireEvent.click(rowFor(container, "Sennheiser HD600").querySelector(".name")!);
+    const gain = await waitFor(() => {
+      const el = container.querySelector<HTMLInputElement>(".field.gain input[type='range']");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    await fireEvent.input(gain, { target: { value: "5" } });
+    const saveBtn = container.querySelector<HTMLButtonElement>(".actions .primary")!;
+    await waitFor(() => expect(saveBtn.disabled).toBe(false)); // the editor is dirty
+
+    await fireEvent.click(variantBtn(container));
+    const input = container.querySelector<HTMLInputElement>(".create input")!;
+    await fireEvent.input(input, { target: { value: "Brainwavz" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    // Create first (the previous pads keep what was saved), then save the
+    // tuning: the preset file mirrors the new variant, so that is where it lands.
+    await waitFor(() =>
+      expect(api.savePreset).toHaveBeenCalledWith("Sennheiser HD600", expect.anything()),
+    );
+    const saved = vi.mocked(api.savePreset).mock.calls[0][1];
+    expect(saved.lines.some((l) => l.kind === "Filter" && l.value.gain === 5)).toBe(true);
+    const first = (fn: { mock: { invocationCallOrder: number[] } }) =>
+      fn.mock.invocationCallOrder[0];
+    expect(first(vi.mocked(api.createVariant))).toBeLessThan(first(vi.mocked(api.savePreset)));
+    await waitFor(() => expect(api.applyPreset).toHaveBeenCalledTimes(2)); // row click, then the roll
+    expect(first(vi.mocked(api.savePreset))).toBeLessThan(
+      vi.mocked(api.applyPreset).mock.invocationCallOrder[1],
+    );
+    vi.mocked(api.getPreset).mockResolvedValue({ lines: [] });
+  });
+
   it("rejects a variant name that is taken — including the Default a first roll seeds", async () => {
     withLibrary(); // no variants anywhere yet
     const { container } = render(App);

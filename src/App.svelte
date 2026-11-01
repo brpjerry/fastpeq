@@ -464,6 +464,7 @@
     return current ? labelFor(name, current) : undefined;
   }
   const editorSubtitle = $derived(variantSubtitle(selected) ?? null);
+  let editor = $state.raw<ReturnType<typeof Editor> | undefined>(undefined); // bind:this
 
   // Picking from a row's dropdown is the explicit selection: it sticks (the
   // row click and the hotkey load it from now on) and plays right away. The
@@ -494,6 +495,11 @@
         return;
       }
       await api.createVariant(parent, name);
+      // Rolled while tuning: the tuning was meant for these pads. Saving it now
+      // lands it in the new variant (the preset file mirrors it), while the
+      // previous pads — Default, on a first roll — keep what was saved.
+      const tuning = selected === parent ? (editor?.unsavedConfig() ?? null) : null;
+      if (tuning) await api.savePreset(parent, tuning);
       await reload(); // the dropdown appears whatever the apply below does
       selected = parent;
       editorReloadToken++;
@@ -809,6 +815,7 @@
 
     {#if selected}
       <Editor
+        bind:this={editor}
         name={selected}
         subtitle={editorSubtitle}
         {tone}

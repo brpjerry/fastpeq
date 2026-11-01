@@ -475,6 +475,18 @@ describe("sub-presets (pad / tip variants)", () => {
       timeoutMsg: "create button did not switch to Pad roll",
     });
 
+    // An edit left unsaved is what a roll is for: it goes into the new pads.
+    // (BassBoost has two seeded bands, Vocal one — so two rows means loaded.)
+    await browser.waitUntil(async () => (await bandRows()).length === 2, {
+      timeout: 10000,
+      timeoutMsg: "BassBoost's bands did not load",
+    });
+    await pickBandType(await firstBand(), "HSC");
+    await browser.waitUntil(async () => (await (await firstBandTok()).getText()).trim() === "HSC", {
+      timeout: 5000,
+      timeoutMsg: "type picker did not switch to HSC",
+    });
+
     await btn.click();
     const input = await $(".create input");
     expect(await input.getAttribute("placeholder")).toBe("Pad name");
@@ -493,6 +505,13 @@ describe("sub-presets (pad / tip variants)", () => {
     );
     expect(readPreset("BassBoost")).toBe(readVariant("BassBoost", "Dekoni"));
     expect(readPreset("BassBoost")).toContain("Fc 60 Hz"); // BassBoost's own filters
+    // The unsaved edit went into the new pads; Default kept what was saved.
+    expect(readVariant("BassBoost", "Dekoni")).toContain("HSC");
+    expect(readVariant("BassBoost", "Default")).not.toContain("HSC");
+    await browser.waitUntil(async () => (await (await $(SAVE)).getText()).trim() === "Saved", {
+      timeout: 10000,
+      timeoutMsg: "the editor did not settle on the saved variant",
+    });
 
     // The row grew a dropdown trigger naming the selected pads.
     const row = await rowFor("BassBoost");

@@ -444,7 +444,7 @@
             class="primary"
             onclick={submitVariant}
             disabled={busy || !status || !selected}
-            title={`Copy “${selected}” as it is saved into a new ${variantNoun(parentCategory) ?? "sub-preset"} variant and switch to it`}
+            title={`Copy “${selected}”, unsaved edits included, into a new ${variantNoun(parentCategory) ?? "sub-preset"} variant and switch to it`}
           >
             Create
           </button>
@@ -484,7 +484,7 @@
           onclick={startCreateVariant}
           disabled={busy || !status || !selected}
           title={selected
-            ? `Add a ${variantNoun(categories[selected]) ?? "sub-preset"} variant of “${selected}”, starting from its saved settings`
+            ? `Add a ${variantNoun(categories[selected]) ?? "sub-preset"} variant of “${selected}”, starting from what the editor shows`
             : "Select a preset first"}
         >
           {variantCreateLabel(categories[selected ?? ""])}

@@ -39,7 +39,8 @@ no restart, no process churn.
   L / R swap), and a sine tone generator.
 - **Preset organisation** — search, device-type filter, and per-preset category icons.
 - **Sub-presets** — keep one tuning per set of ear pads or IEM tips inside a preset:
-  **Pad roll** / **Tip roll** copies the selected preset into a new variant, the preset's list
+  **Pad roll** / **Tip roll** copies the selected preset — unsaved editor edits included, so a
+  tuning made for new pads lands in the new variant — the preset's list
   entry becomes a dropdown ("Default pads", "Dekoni pads", …), and clicking the preset or
   pressing its hotkey loads whichever variant was last picked. A Settings switch hides the
   feature.

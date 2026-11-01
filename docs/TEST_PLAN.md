@@ -86,7 +86,8 @@ active preset, status) with a builder so each test sets up its own scenario.
 10. ✅ **Sub-presets**: the row's variant dropdown (only for presets that have
     variants; pick → `selectVariant` then `applyPreset`, rename/delete with
     Undo), the Pad roll / Tip roll / + sub-preset button and its one-button
-    create form (name-conflict guard incl. the seeded "Default"), the global
+    create form (name-conflict guard incl. the seeded "Default"; unsaved
+    editor edits are saved into the new variant, after the create), the global
     switch hiding both, undo-delete restoring a preset's parked variants, the
     OSD naming the variant, and the editor following a picked variant (and
     Undo staying on offer) even when the live apply fails.
