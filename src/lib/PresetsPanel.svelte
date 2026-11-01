@@ -665,14 +665,14 @@
     display: block;
   }
 
-  /* The list reaches into the panel's 14px left padding and pads 20px back,
-     so a 20px gutter lies inside its scroll box: the expand carets hang there
-     without being clipped. The rows sit 6px in from the panel padding; the
-     icon-to-name spacing gives those 6px back (see .cat, .name). */
+  /* The list reaches into the panel's 14px left padding and pads 21px back,
+     so a 21px gutter lies inside its scroll box: the expand carets hang there
+     without being clipped. The rows sit 7px in from the panel padding; the
+     icon-to-name spacing gives 6px of that back (see .cat, .name). */
   .presets {
     list-style: none;
     margin: 0 0 0 -14px;
-    padding: 0 0 0 20px;
+    padding: 0 0 0 21px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -757,14 +757,14 @@
      the name's own text stays clean for scanning and tests. */
   .variant-toggle {
     position: absolute;
-    left: -21px; /* from the li's padding box: its 1px border + the 20px gutter */
+    left: -22px; /* from the li's padding box: its 1px border + the 21px gutter */
     top: 3px; /* level with the row, below the li's top padding */
-    width: 20px;
+    width: 21px;
     height: 26px;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0;
+    padding: 0 0 0 1px; /* 1px more room left of the chevron than right of it */
     border: none;
     background: transparent;
     border-radius: 4px;
