@@ -227,14 +227,11 @@
     onRename(from, renameValue);
   }
 
-  // A preset's variants expand inline under its row (the caret between the
-  // category icon and the name). The variant rows never carry `.active` — that
-  // class marks the preset row alone (scrollCurrentIntoView keys off it).
+  // A preset's variants expand inline under its row (the caret left of the
+  // category icon). The variant rows never carry `.active` — that class marks
+  // the preset row alone (scrollCurrentIntoView keys off it).
   const hasVariants = (name: string) =>
     subPresets && (variants[name]?.variants.length ?? 0) > 0;
-  // While any listed preset has a caret, the others keep its slot empty so
-  // every name stays aligned.
-  const caretColumn = $derived(filteredPresets.some(hasVariants));
   const expanded = new SvelteSet<string>();
   let renamingVariant = $state<{ name: string; variant: string } | null>(null);
   let renameVariantValue = $state("");
@@ -359,16 +356,6 @@
               }}
             />
           {:else}
-            <button
-              class="cat"
-              class:empty={!categories[name]}
-              onclick={() => cycleCategory(name)}
-              oncontextmenu={(e) => openCatMenu(e, name)}
-              disabled={busy}
-              title={`${categoryLabel(categories[name])} — click to cycle, right-click to choose`}
-            >
-              <CategoryIcon category={categories[name]} />
-            </button>
             {#if hasVariants(name)}
               {@const what = variantNoun(categories[name]) ?? "sub-presets"}
               <button
@@ -383,9 +370,17 @@
                   <path d="M9 6l6 6-6 6" />
                 </svg>
               </button>
-            {:else if caretColumn}
-              <span class="caret-slot" aria-hidden="true"></span>
             {/if}
+            <button
+              class="cat"
+              class:empty={!categories[name]}
+              onclick={() => cycleCategory(name)}
+              oncontextmenu={(e) => openCatMenu(e, name)}
+              disabled={busy}
+              title={`${categoryLabel(categories[name])} — click to cycle, right-click to choose`}
+            >
+              <CategoryIcon category={categories[name]} />
+            </button>
             <button
               class="name"
               onclick={() => onOpen(name)}
@@ -670,15 +665,19 @@
     display: block;
   }
 
+  /* The list reaches into the panel's 14px left padding (and pads it back), so
+     that gutter lies inside its scroll box: the expand carets hang there
+     without being clipped or moving the rows. */
   .presets {
     list-style: none;
-    margin: 0;
-    padding: 0;
+    margin: 0 0 0 -14px;
+    padding: 0 0 0 14px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
   }
   .presets li {
+    position: relative; /* anchors the expand caret */
     padding: 3px 4px;
     border-radius: 8px;
     border: 1px solid transparent;
@@ -750,20 +749,15 @@
   .name:hover {
     background: var(--panel-2);
   }
-  /* The expand caret between the category icon and the name; an empty slot
-     keeps its place on rows without variants. A sibling of the name button,
-     so the name's own text stays clean for scanning and tests. */
-  .variant-toggle,
-  .caret-slot {
-    flex: none;
-    width: 14px;
-    margin-right: -4px; /* cancels the row gap: the name follows tightly */
-  }
-  .variant-toggle + .name,
-  .caret-slot + .name {
-    padding-left: 4px;
-  }
+  /* The expand caret, left of the category icon: it hangs in the list's
+     gutter (see .presets), outside the row's border, so rows with and
+     without variants keep the same layout. A sibling of the name button, so
+     the name's own text stays clean for scanning and tests. */
   .variant-toggle {
+    position: absolute;
+    left: -15px; /* from the li's padding box: its 1px border + the 14px gutter */
+    top: 3px; /* level with the row, below the li's top padding */
+    width: 14px;
     height: 26px;
     display: flex;
     align-items: center;
@@ -786,11 +780,12 @@
   .variant-toggle.open svg {
     transform: rotate(90deg);
   }
-  /* The expanded variants: a guide line hangs from the caret (26px icon + 4px
-     gap + half the 14px caret) and the items line up with the name button. */
+  /* The expanded variants: a guide line hangs from the category icon's centre
+     (half its 26px) and the items line up with the name button (26px icon +
+     4px gap). */
   .variants {
-    margin: 1px 0 2px 37px;
-    padding-left: 6px;
+    margin: 1px 0 2px 13px;
+    padding-left: 16px;
     border-left: 1px solid var(--border);
   }
   .variant-row {
@@ -808,7 +803,7 @@
     text-align: left;
     background: transparent;
     border: none;
-    padding: 3px 8px 3px 4px;
+    padding: 3px 8px;
     font-size: 12px;
     color: var(--muted);
   }
