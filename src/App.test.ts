@@ -1004,6 +1004,61 @@ describe("App sub-presets", () => {
     vi.mocked(api.renameVariant).mockClear();
   });
 
+  it("names the selected variant in the OSD, as the editor words it", async () => {
+    withVariants();
+    const { container } = render(App);
+    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+
+    focus.cb?.({ payload: false }); // window lost focus
+    vi.mocked(emit).mockClear();
+    const id = addHotkey();
+    updateHotkey(id, { key: "1", action: "preset", preset: "Sennheiser HD600" });
+    listeners["hotkey-pressed"]({ payload: id });
+    await waitFor(() =>
+      expect(emit).toHaveBeenCalledWith("osd:show", {
+        title: "Preset",
+        detail: "Sennheiser HD600 · Dekoni pads",
+      }),
+    );
+    removeHotkey(id);
+  });
+
+  it("keeps the editor on the picked variant even when applying it fails", async () => {
+    withVariants();
+    vi.mocked(api.applyPreset).mockRejectedValueOnce("config.txt is read-only");
+    const { container } = render(App);
+    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+    vi.mocked(api.getPreset).mockClear();
+
+    const menu = await openMenu(container, "Sennheiser HD600");
+    await fireEvent.click(menuRow(menu, "Default pads").querySelector(".variant-item")!);
+    await waitFor(() =>
+      expect(container.querySelector(".toast")!.textContent).toContain("read-only"),
+    );
+    // The file already mirrors Default, so the editor opened on it regardless
+    // (a Save must never write the old variant's filters into the new one)...
+    expect(api.getPreset).toHaveBeenCalledWith("Sennheiser HD600");
+    expect(trigger(container, "Sennheiser HD600")!.textContent!.trim()).toBe("Default pads");
+    // ...while nothing claims it is playing.
+    expect(rowFor(container, "Sennheiser HD600").classList).not.toContain("active");
+  });
+
+  it("still offers Undo when the fallback variant fails to apply", async () => {
+    withVariants();
+    vi.mocked(api.deleteVariant).mockResolvedValue("Dekoni.txt");
+    vi.mocked(api.activePreset).mockResolvedValue("Sennheiser HD600"); // it is playing
+    const { container } = render(App);
+    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+
+    vi.mocked(api.applyPreset).mockRejectedValueOnce("config.txt is read-only");
+    const menu = await openMenu(container, "Sennheiser HD600");
+    await fireEvent.click(menuRow(menu, "Dekoni pads").querySelector(".danger.variant-action")!);
+    await waitFor(() => expect(container.querySelector(".toast-action")).toBeTruthy());
+    const text = container.querySelector(".toast")!.textContent!;
+    expect(text).toContain("Deleted “Dekoni pads”");
+    expect(text).toContain("could not apply: config.txt is read-only");
+  });
+
   it("shows the selected variant on a dropdown trigger, only for presets that have any", async () => {
     withVariants();
     const { container } = render(App);
@@ -1152,7 +1207,7 @@ describe("App sub-presets", () => {
 
   it("deletes a variant from the dropdown, with Undo re-selecting it", async () => {
     withVariants();
-    vi.mocked(api.deleteVariant).mockResolvedValue("1783300512345-delete");
+    vi.mocked(api.deleteVariant).mockResolvedValue("Dekoni.txt");
     const { container } = render(App);
     await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
 
@@ -1166,11 +1221,7 @@ describe("App sub-presets", () => {
 
     await fireEvent.click(container.querySelector(".toast-action")!);
     await waitFor(() =>
-      expect(api.restoreVariant).toHaveBeenCalledWith(
-        "Sennheiser HD600",
-        "Dekoni",
-        "1783300512345-delete",
-      ),
+      expect(api.restoreVariant).toHaveBeenCalledWith("Sennheiser HD600", "Dekoni", "Dekoni.txt"),
     );
     // It was the selected variant, so the undo re-selects it.
     await waitFor(() =>

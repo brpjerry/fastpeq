@@ -1037,15 +1037,19 @@ fn delete_variant_reselects_default_then_first_and_undo_restores() {
             .exists(),
         "the file is archived, not removed"
     );
-    // ...and undo brings the file back, ready to be re-selected.
+    // ...and undo moves the exact file back, ready to be re-selected.
+    assert_eq!(undo, "Brainwavz.txt");
     manager
         .restore_variant("HD600", "Brainwavz", &undo)
         .unwrap();
-    let back = manager.store().load_variant("HD600", "Brainwavz").unwrap();
-    assert_eq!(
-        fastpeq_core::history::normalize(&back),
-        fastpeq_core::history::normalize(&pads)
+    assert!(
+        !presets
+            .path()
+            .join(".history/.deleted/HD600/Brainwavz.txt")
+            .exists()
     );
+    let back = manager.store().load_variant("HD600", "Brainwavz").unwrap();
+    assert_eq!(back, pads);
     manager.select_variant("HD600", "Brainwavz").unwrap();
     assert_eq!(manager.load_preset("HD600").unwrap(), back);
 
@@ -1250,14 +1254,212 @@ fn sidecar_naming_a_missing_variant_reads_as_unselected() {
     // A save has nothing to mirror into...
     manager.save_preset("HD600", &band(500.0, 1.0)).unwrap();
     assert!(!presets.path().join(".variants/HD600/Dekoni.txt").exists());
-    // ...and the next pick repairs the selection.
+    // ...and the next pick repairs the selection, recording that save (which
+    // no variant holds) instead of silently overwriting it.
     manager.select_variant("HD600", "Default").unwrap();
     assert_eq!(
         manager.selected_variant("HD600").as_deref(),
         Some("Default")
     );
+    let kept = fastpeq_core::history::normalize(&band(500.0, 1.0));
+    assert!(
+        manager
+            .preset_history("HD600")
+            .unwrap()
+            .iter()
+            .any(|r| manager.load_revision("HD600", &r.id).unwrap() == kept)
+    );
 
     // An unreadable sidecar reads as empty, never as an error.
     fs::write(presets.path().join(".variants.json"), "{corrupt").unwrap();
     assert_eq!(manager.variant_sets().unwrap()["HD600"].selected, None);
+}
+
+#[test]
+fn select_variant_snapshots_content_no_variant_holds() {
+    let (_apo, presets, manager) = history_manager("var-drift");
+    let stock = band(1000.0, 3.0);
+    manager.save_preset("HD600", &stock).unwrap();
+    manager.create_variant("HD600", "Dekoni").unwrap(); // selected, == stock
+
+    // Edited behind the app's back: the preset file no longer mirrors Dekoni.
+    let edited = band(3000.0, -4.0);
+    fs::write(presets.path().join("HD600.txt"), serialize(&edited)).unwrap();
+    manager.select_variant("HD600", "Default").unwrap();
+    assert_eq!(manager.load_preset("HD600").unwrap(), stock);
+    // The edit is recorded rather than lost...
+    let revs = manager.preset_history("HD600").unwrap();
+    assert_eq!(revs.len(), 1);
+    assert!(revs[0].id.ends_with("-save"), "{}", revs[0].id);
+    assert_eq!(
+        manager.load_revision("HD600", &revs[0].id).unwrap(),
+        fastpeq_core::history::normalize(&edited)
+    );
+    // ...and Dekoni's own file is left as it was.
+    assert_eq!(
+        manager.store().load_variant("HD600", "Dekoni").unwrap(),
+        stock
+    );
+    // A switch in the normal case still records nothing.
+    manager.select_variant("HD600", "Dekoni").unwrap();
+    manager.select_variant("HD600", "Default").unwrap();
+    assert_eq!(manager.preset_history("HD600").unwrap().len(), 1);
+}
+
+#[test]
+fn variant_undo_survives_history_dedupe_and_refuses_to_clobber() {
+    use std::io::ErrorKind;
+    let (_apo, presets, manager) = history_manager("var-undo-stable");
+    let stock = band(1000.0, 3.0);
+    manager.save_preset("HD600", &stock).unwrap();
+    manager.create_variant("HD600", "Dekoni").unwrap(); // Default == Dekoni == stock
+
+    let handle = manager
+        .delete_variant("HD600", "Default")
+        .unwrap()
+        .expect("undo handle");
+    assert_eq!(handle, "Default.txt");
+    // Saving over the identical remaining variant displaces the same content:
+    // the history dedupes the delete revision away into a fresh save one...
+    manager.save_preset("HD600", &band(2000.0, -2.0)).unwrap();
+    let revs = manager.preset_history("HD600").unwrap();
+    assert_eq!(revs.len(), 1);
+    assert!(revs[0].id.ends_with("-save"), "{}", revs[0].id);
+    // ...which cannot invalidate the undo: its handle is the archived file.
+    manager
+        .restore_variant("HD600", "Default", &handle)
+        .unwrap();
+    assert_eq!(
+        manager.store().load_variant("HD600", "Default").unwrap(),
+        stock
+    );
+    assert!(
+        !presets
+            .path()
+            .join(".history/.deleted/HD600/Default.txt")
+            .exists()
+    );
+    // The content is a variant again, so no revision keeps it.
+    assert!(manager.preset_history("HD600").unwrap().is_empty());
+
+    // A second undo cannot clobber the restored (or a recreated) variant, a
+    // bad handle never reaches the filesystem, and a stale one is NotFound.
+    assert_eq!(
+        manager
+            .restore_variant("HD600", "Default", &handle)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::AlreadyExists
+    );
+    assert_eq!(
+        manager
+            .restore_variant("HD600", "Stock", "../x")
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        manager
+            .restore_variant("HD600", "Stock", "Nope.txt")
+            .unwrap_err()
+            .kind(),
+        ErrorKind::NotFound
+    );
+}
+
+#[test]
+fn parent_rename_onto_a_deleted_name_carries_parked_variants_along() {
+    let (_apo, presets, manager) = history_manager("var-rename-merge");
+    // "HD600" once existed and was deleted, so its archive is there...
+    manager.save_preset("HD600", &band(1000.0, 3.0)).unwrap();
+    manager.delete_preset("HD600").unwrap();
+    // ...and "HD650" had variants, was deleted (parking them) and recreated.
+    manager.save_preset("HD650", &band(2000.0, -2.0)).unwrap();
+    manager.create_variant("HD650", "Dekoni").unwrap();
+    manager.delete_preset("HD650").unwrap();
+    manager.save_preset("HD650", &band(3000.0, 1.0)).unwrap();
+
+    // Renaming it onto the deleted name merges the two archives, the parked
+    // directory included, so those variants stay recoverable under the new name.
+    manager.rename_preset("HD650", "HD600").unwrap();
+    let archive = presets.path().join(".history/.deleted/HD600");
+    assert!(archive.join("HD600.txt").exists());
+    assert!(archive.join("HD650.txt").exists());
+    assert!(!presets.path().join(".history/.deleted/HD650").exists());
+    let parked: Vec<String> = fs::read_dir(&archive)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(parked.len(), 1, "{parked:?}");
+    assert!(parked[0].starts_with(".variants-"), "{}", parked[0]);
+    manager.restore_variants("HD600", &parked[0]).unwrap();
+    assert_eq!(
+        manager.variant_sets().unwrap()["HD600"],
+        VariantSet {
+            variants: vec!["Default".into(), "Dekoni".into()],
+            selected: None,
+        }
+    );
+}
+
+/// A delete that fails part-way must leave the preset whole, not stripped of
+/// its variants: they are parked first and come back when the preset file
+/// itself cannot be archived. (A file open without sharing blocks the move —
+/// a Windows-only way to provoke that failure.)
+#[cfg(windows)]
+#[test]
+fn delete_preset_leaves_the_preset_whole_when_its_file_cannot_be_archived() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_apo, presets, manager) = history_manager("var-delete-locked");
+    let stock = band(1000.0, 3.0);
+    manager.save_preset("HD600", &stock).unwrap();
+    manager.create_variant("HD600", "Dekoni").unwrap();
+
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(presets.path().join("HD600.txt"))
+        .unwrap();
+    assert!(manager.delete_preset("HD600").is_err());
+    drop(lock);
+
+    assert_eq!(manager.list_presets().unwrap(), vec!["HD600"]);
+    assert_eq!(manager.load_preset("HD600").unwrap(), stock);
+    assert_eq!(
+        manager.variant_sets().unwrap()["HD600"],
+        set(&["Default", "Dekoni"], "Dekoni")
+    );
+    let archive = presets.path().join(".history/.deleted/HD600");
+    assert!(
+        !archive.exists() || fs::read_dir(&archive).unwrap().next().is_none(),
+        "nothing is left parked"
+    );
+}
+
+/// The counterpart for rename: when the variants directory cannot move, the
+/// preset file goes back, so nothing is stranded under either name.
+#[cfg(windows)]
+#[test]
+fn rename_preset_rolls_back_when_its_variants_cannot_move() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_apo, presets, manager) = history_manager("var-rename-locked");
+    manager.save_preset("HD600", &band(1000.0, 3.0)).unwrap();
+    manager.create_variant("HD600", "Dekoni").unwrap();
+
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(presets.path().join(".variants/HD600/Dekoni.txt"))
+        .unwrap();
+    assert!(manager.rename_preset("HD600", "HD650").is_err());
+    drop(lock);
+
+    assert_eq!(manager.list_presets().unwrap(), vec!["HD600"]);
+    assert!(!presets.path().join(".variants/HD650").exists());
+    assert_eq!(
+        manager.variant_sets().unwrap()["HD600"],
+        set(&["Default", "Dekoni"], "Dekoni")
+    );
 }

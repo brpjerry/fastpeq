@@ -151,7 +151,7 @@
       tone, // setKnob already updated this synchronously
       bypassed: !isBypassed, // toggleBypass flips it; this is the state it becomes
       presetName: h.preset && presets.includes(h.preset) ? h.preset : undefined,
-      presetVariant: h.preset && getSubPresets() ? (variants[h.preset]?.selected ?? undefined) : undefined,
+      presetVariant: variantSubtitle(h.preset),
     });
     if (payload) emit(OSD_EVENT, payload).catch(() => {});
   }
@@ -455,25 +455,30 @@
   const variantNounFor = (name: string) => variantNoun(categories[name]);
   const labelFor = (name: string, variant: string) => variantLabel(variant, variantNounFor(name));
 
-  // What the editor header shows after the name: the selected variant, when the
-  // feature is on and the preset has any.
-  const editorSubtitle = $derived.by(() => {
-    if (!selected || !getSubPresets()) return null;
-    const vs = variants[selected];
-    return vs?.selected ? labelFor(selected, vs.selected) : null;
-  });
+  // "<variant> pads" for a preset with a selected variant, when the feature is
+  // on — what the editor header and the OSD show after the preset's name (the
+  // tray words its label the same way, backend-side).
+  function variantSubtitle(name: string | null | undefined): string | undefined {
+    if (!name || !getSubPresets()) return undefined;
+    const current = variants[name]?.selected;
+    return current ? labelFor(name, current) : undefined;
+  }
+  const editorSubtitle = $derived(variantSubtitle(selected) ?? null);
 
   // Picking from a row's dropdown is the explicit selection: it sticks (the
-  // row click and the hotkey load it from now on) and plays right away.
+  // row click and the hotkey load it from now on) and plays right away. The
+  // preset file changes under the editor, so the editor follows it *before*
+  // the live apply: should that fail, it must not keep showing the old
+  // variant's filters under the new name (a Save would write them into it).
   const pickVariant = (name: string, variant: string) =>
     guard(async () => {
       await api.selectVariant(name, variant);
       const vs = variants[name];
       if (vs) variants = { ...variants, [name]: { ...vs, selected: variant } };
+      selected = name;
+      editorReloadToken++;
       await api.applyPreset(name);
       active = name;
-      selected = name;
-      editorReloadToken++; // the preset file changed under the editor
       await tick();
       scrollCurrentIntoView();
     });
@@ -489,48 +494,55 @@
         return;
       }
       await api.createVariant(parent, name);
-      await api.applyPreset(parent);
-      await reload();
-      active = parent;
+      await reload(); // the dropdown appears whatever the apply below does
       selected = parent;
       editorReloadToken++;
+      await api.applyPreset(parent);
+      active = parent;
       flash(`Created “${labelFor(parent, name)}” for “${parent}”`);
     });
 
   // Deleting the selected variant makes the backend fall back to another one
-  // (rewriting the preset file), so the live sound and the editor follow it.
+  // (rewriting the preset file), so the editor and the live sound follow it.
   const removeVariant = (name: string, variant: string) =>
     guard(async () => {
       const wasSelected = variants[name]?.selected === variant;
-      const revision = await api.deleteVariant(name, variant);
+      const handle = await api.deleteVariant(name, variant);
       await reload();
-      if (wasSelected) {
-        if (active === name) await api.applyPreset(name);
-        if (selected === name) editorReloadToken++;
+      if (wasSelected && selected === name) editorReloadToken++;
+      // The delete is done whatever the live apply does: its Undo is offered
+      // either way, with any apply error on the same toast.
+      let applyError: string | null = null;
+      if (wasSelected && active === name) {
+        try {
+          await api.applyPreset(name);
+        } catch (e) {
+          applyError = String(e);
+        }
       }
-      const label = labelFor(name, variant);
-      if (revision) {
+      const text =
+        `Deleted “${labelFor(name, variant)}”` +
+        (applyError ? `, but could not apply: ${applyError}` : "");
+      if (handle) {
         showToast(
           {
-            text: `Deleted “${label}”`,
-            action: { label: "Undo", run: () => undoDeleteVariant(name, variant, revision, wasSelected) },
+            text,
+            action: { label: "Undo", run: () => undoDeleteVariant(name, variant, handle, wasSelected) },
           },
           8000,
         );
       } else {
-        flash(`Deleted “${label}”`);
+        flash(text);
       }
     });
 
-  const undoDeleteVariant = (name: string, variant: string, revision: string, reselect: boolean) =>
+  const undoDeleteVariant = (name: string, variant: string, handle: string, reselect: boolean) =>
     guard(async () => {
-      await api.restoreVariant(name, variant, revision);
-      if (reselect) {
-        await api.selectVariant(name, variant);
-        if (active === name) await api.applyPreset(name);
-      }
+      await api.restoreVariant(name, variant, handle);
+      if (reselect) await api.selectVariant(name, variant);
       await reload();
       if (reselect && selected === name) editorReloadToken++;
+      if (reselect && active === name) await api.applyPreset(name);
       flash(`Restored “${labelFor(name, variant)}”`);
     });
 

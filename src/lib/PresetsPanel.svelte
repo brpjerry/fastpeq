@@ -262,6 +262,11 @@
   $effect(() => {
     if (variantMenu && !hasVariants(variantMenu.name)) variantMenu = null;
   });
+  // The variant form creates for the selected preset; should that selection go
+  // away while it is open (the preset was deleted), there is nothing to create for.
+  $effect(() => {
+    if (creating === "variant" && !selected) cancelCreate();
+  });
 
   let prevQuery = "";
   let prevFilter = "";
@@ -438,7 +443,7 @@
           <button
             class="primary"
             onclick={submitVariant}
-            disabled={busy || !status}
+            disabled={busy || !status || !selected}
             title={`Copy “${selected}” as it is saved into a new ${variantNoun(parentCategory) ?? "sub-preset"} variant and switch to it`}
           >
             Create
@@ -579,8 +584,7 @@
             role="option"
             aria-selected={sel}
             onclick={() => pickVariant(menu.name, v)}
-            ondblclick={() => startRenameVariant(v)}
-            title="Click to load · double-click to rename"
+            title="Click to load"
           >
             {variantLabel(v, noun)}
           </button>

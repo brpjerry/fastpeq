@@ -144,7 +144,9 @@ impl Manager {
     /// too. The receipt carries the undo handles: the normalized `delete`
     /// snapshot's id (`None` when there was nothing to snapshot or history
     /// recording was unavailable — the UI then offers no Undo instead of a dead
-    /// button) and the parked variants.
+    /// button) and the parked variants. A delete that fails part-way leaves
+    /// the preset whole: the variants are parked first (nothing has moved if
+    /// that fails) and come back if the preset file then cannot be archived.
     pub fn delete_preset(&self, name: &str) -> io::Result<DeleteReceipt> {
         let source = self.store.path_for(name)?;
         let history = self.history();
@@ -152,7 +154,6 @@ impl Manager {
             Ok(prior) => log_history(history.record(name, &prior, RevisionOp::Delete)),
             Err(_) => None,
         };
-        history.archive_preset(name, &source)?;
         let variants_dir = self.store.variants_dir(name)?;
         let variants = if variants_dir.is_dir() {
             let selected = self
@@ -164,6 +165,12 @@ impl Manager {
         } else {
             None
         };
+        if let Err(e) = history.archive_preset(name, &source) {
+            if let Some(parked) = &variants {
+                let _ = history.unarchive_variants(name, &parked.archive, &variants_dir);
+            }
+            return Err(e);
+        }
         self.set_selected(name, None)?;
         let mut map = self.categories()?;
         if map.remove(name).is_some() {
@@ -302,53 +309,121 @@ impl Manager {
     }
 
     /// Make `variant` the one `name`'s preset file mirrors: record it, then
-    /// copy its content over `<name>.txt`. No history is recorded — the content
-    /// being replaced is the previously selected variant's, which its own file
-    /// already holds.
+    /// copy its content over `<name>.txt`. Normally no history is recorded —
+    /// the content being replaced is the previously selected variant's, which
+    /// its own file already holds; content no variant holds is snapshotted
+    /// first (see [`snapshot_drift`](Self::snapshot_drift)).
     pub fn select_variant(&self, name: &str, variant: &str) -> io::Result<()> {
         let config = self.store.load_variant(name, variant)?; // NotFound when missing
-        self.set_selected(name, Some(variant.trim()))?;
-        self.store.save(name, &config)
+        self.snapshot_drift(name, &config);
+        self.mirror_variant(name, variant, &config)
     }
 
-    /// Delete a variant: its content is recorded as a `delete` revision of the
-    /// preset (the undo handle, as for [`delete_preset`](Self::delete_preset))
-    /// and its file archived. Deleting the selected variant selects
-    /// [`DEFAULT_VARIANT`] if present, else the first remaining; deleting the
-    /// last one leaves a plain preset holding its current content.
+    /// Record `variant` as selected and copy `config` (its content) over
+    /// `<name>.txt`.
+    fn mirror_variant(&self, name: &str, variant: &str, config: &Config) -> io::Result<()> {
+        self.set_selected(name, Some(variant.trim()))?;
+        self.store.save(name, config)
+    }
+
+    /// The mirror invariant can be broken from outside: `<name>.txt` is plain
+    /// text and may be hand-edited, or a save may have landed while the
+    /// sidecar named a variant whose file was gone. Before such content is
+    /// overwritten with `incoming`, record it as a `save` revision so the
+    /// switch cannot silently lose it. In the normal case — the file mirrors
+    /// the selected variant — or when it already holds `incoming`, nothing is
+    /// recorded.
+    fn snapshot_drift(&self, name: &str, incoming: &Config) {
+        let Ok(current) = self.store.load(name) else {
+            return;
+        };
+        let normal = history::normalize(&current);
+        if normal == history::normalize(incoming) {
+            return;
+        }
+        let mirrored = self
+            .selected_variant(name)
+            .and_then(|v| self.store.load_variant(name, &v).ok());
+        if mirrored.is_some_and(|m| history::normalize(&m) == normal) {
+            return;
+        }
+        log_history(self.history().record(name, &current, RevisionOp::Save));
+    }
+
+    /// Delete a variant: its exact file is archived — the handle returned is
+    /// what [`restore_variant`](Self::restore_variant) takes, and unlike a
+    /// revision id it cannot be invalidated by later saves — and its content
+    /// recorded as a `delete` revision of the preset for the history browser.
+    /// Deleting the selected variant selects [`DEFAULT_VARIANT`] if present,
+    /// else the first remaining; deleting the last one leaves a plain preset
+    /// holding its current content. `None` when there was no file to archive.
     pub fn delete_variant(&self, name: &str, variant: &str) -> io::Result<Option<String>> {
+        let variant = variant.trim();
         let path = self.store.variant_path(name, variant)?;
         let history = self.history();
-        let revision = match self.store.load_variant(name, variant) {
-            Ok(prior) => log_history(history.record(name, &prior, RevisionOp::Delete)),
-            Err(_) => None,
-        };
         let was_selected = self
             .variant_meta()?
             .get(name)
             .is_some_and(|m| m.selected.as_deref() == Some(variant));
-        history.archive_preset(name, &path)?;
-        let remaining = self.store.list_variants(name)?;
-        if remaining.is_empty() {
-            self.set_selected(name, None)?;
-            self.store.remove_variants_dir(name);
-        } else if was_selected {
-            let next = remaining
+        // The fallback is resolved up front and mirrored directly, not through
+        // `select_variant`: once the file is archived the preset file holds
+        // content no variant has (the deleted one's), which that path would
+        // snapshot again — displacing the delete revision recorded below.
+        // Snapshotting any real drift happens here, while the selection still
+        // resolves.
+        let next = if was_selected {
+            let remaining: Vec<String> = self
+                .store
+                .list_variants(name)?
+                .into_iter()
+                .filter(|v| v.to_lowercase() != variant.to_lowercase())
+                .collect();
+            remaining
                 .iter()
                 .find(|v| *v == DEFAULT_VARIANT)
-                .unwrap_or(&remaining[0])
-                .clone();
-            self.select_variant(name, &next)?;
+                .or(remaining.first())
+                .map(|v| self.store.load_variant(name, v).map(|c| (c, v.clone())))
+                .transpose()?
+        } else {
+            None
+        };
+        if let Some((config, _)) = &next {
+            self.snapshot_drift(name, config);
         }
-        Ok(revision)
+        if let Ok(prior) = self.store.load_variant(name, variant) {
+            log_history(history.record(name, &prior, RevisionOp::Delete));
+        }
+        let handle = history.archive_preset(name, &path)?;
+        if let Some((config, v)) = next {
+            self.mirror_variant(name, &v, &config)?;
+        } else if self.store.list_variants(name)?.is_empty() {
+            self.set_selected(name, None)?;
+            self.store.remove_variants_dir(name);
+        }
+        Ok(handle)
     }
 
-    /// Undo a variant delete: write the revision back as `variant`'s file (the
-    /// master preamp recomputed, as [`restore_revision`](Self::restore_revision)
-    /// does). The caller re-selects it if it had been selected.
-    pub fn restore_variant(&self, name: &str, variant: &str, id: &str) -> io::Result<()> {
-        let restored = with_recomputed_preamp(self.history().load(name, id)?);
-        self.store.save_variant(name, variant, &restored)
+    /// Undo a variant delete: move the archived file (`handle`, as
+    /// [`delete_variant`](Self::delete_variant) returned it) back as
+    /// `variant`'s — the exact file, master preamp included. A variant
+    /// recreated under that name meanwhile is not clobbered. The `delete`
+    /// revision recorded for the content is removed: it is a variant again.
+    /// The caller re-selects it if it had been selected.
+    pub fn restore_variant(&self, name: &str, variant: &str, handle: &str) -> io::Result<()> {
+        let variant = variant.trim();
+        if self.store.variant_exists(name, variant) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("variant already exists: {variant}"),
+            ));
+        }
+        let target = self.store.variant_path(name, variant)?;
+        let history = self.history();
+        history.unarchive_file(name, handle, &target)?;
+        if let Ok(restored) = self.store.load_variant(name, variant) {
+            log_history(history.remove_matching(name, &restored));
+        }
+        Ok(())
     }
 
     /// Rename a variant; the selection follows it.

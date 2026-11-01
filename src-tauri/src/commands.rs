@@ -233,8 +233,8 @@ pub fn select_variant(
     Ok(())
 }
 
-/// Delete a variant. Resolves to the id of the `delete` revision holding its
-/// content (the undo handle for `restore_variant`), or `null`.
+/// Delete a variant. Resolves to its undo handle for `restore_variant` (the
+/// archived file's name), or `null` when there was no file to archive.
 #[tauri::command]
 pub fn delete_variant(
     app: AppHandle,
@@ -247,16 +247,16 @@ pub fn delete_variant(
     Ok(revision)
 }
 
-/// Undo a variant delete: write the revision back as that variant's file.
+/// Undo a variant delete: move the archived file back as that variant's.
 #[tauri::command]
 pub fn restore_variant(
     app: AppHandle,
     state: State<'_, AppState>,
     name: String,
     variant: String,
-    id: String,
+    handle: String,
 ) -> Result<(), String> {
-    state.restore_variant(&name, &variant, &id)?;
+    state.restore_variant(&name, &variant, &handle)?;
     let _ = tray::refresh(&app);
     Ok(())
 }

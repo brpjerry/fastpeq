@@ -87,7 +87,9 @@ active preset, status) with a builder so each test sets up its own scenario.
     variants; pick → `selectVariant` then `applyPreset`, rename/delete with
     Undo), the Pad roll / Tip roll / + sub-preset button and its one-button
     create form (name-conflict guard incl. the seeded "Default"), the global
-    switch hiding both, and undo-delete restoring a preset's parked variants.
+    switch hiding both, undo-delete restoring a preset's parked variants, the
+    OSD naming the variant, and the editor following a picked variant (and
+    Undo staying on offer) even when the live apply fails.
 
 ### Known limitation
 happy-dom has no real layout — `getBoundingClientRect` returns zeros — so menu

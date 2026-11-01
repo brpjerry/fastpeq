@@ -329,19 +329,56 @@ impl PresetHistory {
         Ok(())
     }
 
-    /// Move a whole preset file out of the live library without deleting it.
-    /// Its original file name is retained in `.history/.deleted/<name>/`; a
-    /// suffix prevents a later deletion of the same preset from overwriting an
-    /// older archived copy. A missing preset remains a no-op.
-    pub(crate) fn archive_preset(&self, name: &str, source: &Path) -> io::Result<()> {
+    /// Move a whole preset (or variant) file out of the live library without
+    /// deleting it. Its original file name is retained in
+    /// `.history/.deleted/<name>/`; a suffix prevents a later deletion of the
+    /// same file from overwriting an older archived copy. Returns the archived
+    /// file's name — the handle [`unarchive_file`](Self::unarchive_file)
+    /// takes — or `None` for a missing source, which remains a no-op.
+    pub(crate) fn archive_preset(&self, name: &str, source: &Path) -> io::Result<Option<String>> {
         let archive = self.archive_dir(name)?;
         match fs::metadata(source) {
             Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e),
         }
         fs::create_dir_all(&archive)?;
-        fs::rename(source, unique_archive_path(&archive, source))
+        let target = unique_archive_path(&archive, source);
+        fs::rename(source, &target)?;
+        Ok(target
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(str::to_string))
+    }
+
+    /// Move an archived file back to `target` — the undo of
+    /// [`archive_preset`](Self::archive_preset), whose returned name is the
+    /// `handle`. It comes back over IPC, so it is checked before it reaches
+    /// the filesystem; an existing `target` is never clobbered.
+    pub(crate) fn unarchive_file(&self, name: &str, handle: &str, target: &Path) -> io::Result<()> {
+        if handle.is_empty() || !is_safe_name(handle) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid archive handle: {handle:?}"),
+            ));
+        }
+        let source = self.archive_dir(name)?.join(handle);
+        if !source.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("archived file not found: {handle}"),
+            ));
+        }
+        if target.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("already exists: {}", target.display()),
+            ));
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(source, target)
     }
 
     /// Park a deleted preset's variants directory (`source`) in its archive,

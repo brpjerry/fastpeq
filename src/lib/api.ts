@@ -74,12 +74,13 @@ export const createVariant = (name: string, variant: string) =>
 /** Make `variant` the one the preset file mirrors; apply the preset to hear it. */
 export const selectVariant = (name: string, variant: string) =>
   invoke<void>("select_variant", { name, variant });
-/** Delete a variant. Resolves to the `delete` revision id holding its content
- *  (the undo handle for restoreVariant), or `null`. */
+/** Delete a variant. Resolves to its undo handle for restoreVariant (the
+ *  archived file), or `null` when there was no file to archive. */
 export const deleteVariant = (name: string, variant: string) =>
   invoke<string | null>("delete_variant", { name, variant });
-export const restoreVariant = (name: string, variant: string, id: string) =>
-  invoke<void>("restore_variant", { name, variant, id });
+/** Undo a variant delete: move the archived file back under that name. */
+export const restoreVariant = (name: string, variant: string, handle: string) =>
+  invoke<void>("restore_variant", { name, variant, handle });
 export const renameVariant = (name: string, from: string, to: string) =>
   invoke<void>("rename_variant", { name, from, to });
 /** Undo-delete's second half: bring a deleted preset's parked variants back. */

@@ -75,9 +75,10 @@ impl PresetStore {
         }
     }
 
-    /// Rename a preset, taking its variants directory along. Fails if `from` is
-    /// missing or `to` already exists (so a rename never silently clobbers
-    /// another preset); a case-only rename of the same files is allowed.
+    /// Rename a preset, taking its variants directory along — both move or
+    /// neither does. Fails if `from` is missing or `to` already exists (so a
+    /// rename never silently clobbers another preset); a case-only rename of
+    /// the same files is allowed.
     pub fn rename(&self, from: &str, to: &str) -> io::Result<()> {
         let from_path = self.path_for(from)?;
         let to_path = self.path_for(to)?;
@@ -91,12 +92,18 @@ impl PresetStore {
         {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!("preset already exists: {to}"),
+                format!("variants already exist for preset: {to}"),
             ));
         }
         rename_file(&from_path, &to_path, "preset")?;
-        if from_variants.exists() {
-            fs::rename(&from_variants, &to_variants)?;
+        if from_variants.exists()
+            && let Err(e) = fs::rename(&from_variants, &to_variants)
+        {
+            // A file open inside the directory can block the move (Windows):
+            // put the preset file back rather than leave it apart from its
+            // variants under the old name.
+            let _ = fs::rename(&to_path, &from_path);
+            return Err(e);
         }
         Ok(())
     }
@@ -153,15 +160,6 @@ impl PresetStore {
         write_config_atomic(&path, &crate::provenance::strip(config))
     }
 
-    /// Delete a variant file. A missing one is a no-op.
-    pub fn delete_variant(&self, name: &str, variant: &str) -> io::Result<()> {
-        match fs::remove_file(self.variant_path(name, variant)?) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
-
     /// Drop `name`'s variants directory once it is empty. Best-effort: a
     /// non-empty or missing directory is simply left alone.
     pub fn remove_variants_dir(&self, name: &str) {
@@ -210,7 +208,7 @@ fn checked_name(name: &str) -> io::Result<&str> {
     if name.is_empty() || !is_safe_name(name) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("invalid preset name: {name:?}"),
+            format!("invalid name: {name:?}"),
         ));
     }
     Ok(name)
