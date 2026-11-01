@@ -353,11 +353,21 @@ impl Manager {
     /// save into the wrong variant.
     fn mirror_variant(&self, name: &str, variant: &str, config: &Config) -> io::Result<()> {
         let path = self.store.path_for(name)?;
-        let prior = fs::read_to_string(&path).ok();
+        let prior = match fs::read_to_string(&path) {
+            Ok(text) => Some(text),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e),
+        };
         self.store.save(name, config)?;
         if let Err(e) = self.set_selected(name, Some(variant.trim())) {
-            if let Some(text) = &prior {
-                let _ = writer::write_text_atomic(&path, text);
+            let back = match &prior {
+                Some(text) => writer::write_text_atomic(&path, text),
+                None => fs::remove_file(&path),
+            };
+            if let Err(back) = back {
+                return Err(io::Error::other(format!(
+                    "{e}; and the preset file could not be put back: {back}"
+                )));
             }
             return Err(e);
         }
@@ -772,7 +782,10 @@ impl Manager {
             report.skipped.push(stem.to_string());
             return Ok(());
         }
-        self.store.save(stem, &config)?;
+        // Through `write_preset`, like every preset write: a name whose file
+        // vanished behind the app's back must not hand its leftover variants
+        // to the import.
+        self.write_preset(stem, &config)?;
         report.imported.push(stem.to_string());
         Ok(())
     }

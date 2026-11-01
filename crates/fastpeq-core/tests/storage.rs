@@ -1527,3 +1527,33 @@ fn select_variant_puts_the_preset_file_back_when_the_sidecar_cannot_be_written()
         stock
     );
 }
+
+#[test]
+fn an_imported_preset_never_inherits_variants_left_under_its_name() {
+    let (apo, presets, manager) = history_manager("var-orphan-import");
+    manager.save_preset("HD600", &band(1000.0, 3.0)).unwrap();
+    manager.create_variant("HD600", "Dekoni").unwrap();
+    fs::remove_file(presets.path().join("HD600.txt")).unwrap();
+
+    // A .peace import under the vanished name takes the same write path as a
+    // save, so the leftovers are parked rather than inherited.
+    let peace = apo.path().join("HD600.peace");
+    fs::write(
+        &peace,
+        "[General]\nPreAmp=-3\n[Frequencies]\nFrequency1=100\n[Gains]\nGain1=4\n\
+         [Qualities]\nQuality1=1.5\n[Speakers]\nSpeakerId0=0\nSpeakerTargets0=all\n",
+    )
+    .unwrap();
+    let report = manager.import_peace_files(&[peace]).unwrap();
+    assert_eq!(report.imported, vec!["HD600"]);
+    assert!(manager.variant_sets().unwrap().is_empty());
+    assert_eq!(manager.selected_variant("HD600"), None);
+    assert!(!presets.path().join(".variants/HD600").exists());
+    assert!(
+        fs::read_dir(presets.path().join(".history/.deleted/HD600"))
+            .unwrap()
+            .flatten()
+            .any(|e| e.path().is_dir()),
+        "the old variants are parked"
+    );
+}
