@@ -12,10 +12,21 @@ export const applyPreset = (name: string) => invoke<void>("apply_preset", { name
 export const toggleBypass = () => invoke<void>("toggle_bypass");
 export const bypassed = () => invoke<boolean>("bypassed");
 export const captureCurrent = (name: string) => invoke<void>("capture_current", { name });
-/** Delete a preset. Resolves to the id of its `delete` history revision — the
- *  undo handle for restoreRevision — or `null` when nothing could be
- *  snapshotted (offer no Undo then). */
-export const deletePreset = (name: string) => invoke<string | null>("delete_preset", { name });
+/** A deleted preset's variants, parked in the history archive (see DeleteReceipt). */
+export interface ArchivedVariants {
+  /** The handle restoreVariants takes. */
+  archive: string;
+  /** The variant that was selected at delete time, to re-select on undo. */
+  selected: string | null;
+}
+/** What deletePreset set aside — the undo handles. `revision` is `null` when
+ *  nothing could be snapshotted (offer no Undo then). */
+export interface DeleteReceipt {
+  revision: string | null;
+  variants: ArchivedVariants | null;
+}
+/** Delete a preset (and park its variants). Resolves to the undo receipt. */
+export const deletePreset = (name: string) => invoke<DeleteReceipt>("delete_preset", { name });
 /** Restore a preset-history revision into the preset file (undo-delete). */
 export const restoreRevision = (name: string, id: string) =>
   invoke<void>("restore_revision", { name, id });
@@ -47,6 +58,33 @@ export type Category = string; // free-form: speaker / headphone / iem / estat /
 export const presetCategories = () => invoke<Record<string, Category>>("preset_categories");
 export const setCategory = (name: string, category: Category | null) =>
   invoke<void>("set_category", { name, category });
+
+/** A preset's sub-presets (pad / tip variants) and the one its file mirrors —
+ *  `selected` is `null` only when the sidecar names nothing usable. */
+export interface VariantSet {
+  variants: string[];
+  selected: string | null;
+}
+/** Every preset that has variants; the rest are absent. */
+export const presetVariants = () => invoke<Record<string, VariantSet>>("preset_variants");
+/** Add a variant copied from the preset's current content and select it (the
+ *  first one also seeds "Default" from that content). */
+export const createVariant = (name: string, variant: string) =>
+  invoke<void>("create_variant", { name, variant });
+/** Make `variant` the one the preset file mirrors; apply the preset to hear it. */
+export const selectVariant = (name: string, variant: string) =>
+  invoke<void>("select_variant", { name, variant });
+/** Delete a variant. Resolves to the `delete` revision id holding its content
+ *  (the undo handle for restoreVariant), or `null`. */
+export const deleteVariant = (name: string, variant: string) =>
+  invoke<string | null>("delete_variant", { name, variant });
+export const restoreVariant = (name: string, variant: string, id: string) =>
+  invoke<void>("restore_variant", { name, variant, id });
+export const renameVariant = (name: string, from: string, to: string) =>
+  invoke<void>("rename_variant", { name, from, to });
+/** Undo-delete's second half: bring a deleted preset's parked variants back. */
+export const restoreVariants = (name: string, archive: string) =>
+  invoke<void>("restore_variants", { name, archive });
 
 export const getPreset = (name: string) => invoke<Config>("get_preset", { name });
 export const savePreset = (name: string, config: Config) =>

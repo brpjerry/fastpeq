@@ -28,6 +28,7 @@ interface Prefs {
   autoPreamp?: boolean;
   bandCount?: number;
   gainLimit?: number;
+  subPresets?: boolean;
 }
 
 const KEY = "fastpeq.prefs";
@@ -197,6 +198,16 @@ export function getGainLimit(): number {
 }
 export function setGainLimit(v: number): void {
   set({ gainLimit: Math.max(GAIN_LIMIT_MIN, Math.min(GAIN_LIMIT_MAX, v)) });
+}
+
+// Sub-presets (pad / tip variants inside a preset). On by default; off hides
+// the per-preset dropdown and the create button, nothing more — a preset still
+// loads whichever variant it has selected, because its file mirrors it.
+export function getSubPresets(): boolean {
+  return prefs.subPresets !== false;
+}
+export function setSubPresets(v: boolean): void {
+  set({ subPresets: v });
 }
 
 // How many bands a new preset starts with (the Settings "New presets" choice).

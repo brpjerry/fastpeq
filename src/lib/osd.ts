@@ -27,6 +27,9 @@ export interface OsdContext {
   bypassed: boolean;
   /** The preset name, if the binding's preset still exists (else omitted). */
   presetName?: string;
+  /** The preset's selected sub-preset (pad / tip variant), when it has one and
+   *  the feature is on — shown after the name. */
+  presetVariant?: string;
 }
 
 const TONE_LABEL: Record<ToneControl, string> = { bass: "Bass", mid: "Mids", treble: "Treble" };
@@ -45,8 +48,13 @@ export function payloadForHotkey(h: Hotkey, ctx: OsdContext): OsdPayload | null 
   switch (h.action) {
     case "bypass":
       return { title: "Bypass", detail: ctx.bypassed ? "Filters off" : "EQ on" };
-    case "preset":
-      return ctx.presetName ? { title: "Preset", detail: ctx.presetName } : null;
+    case "preset": {
+      if (!ctx.presetName) return null;
+      const detail = ctx.presetVariant
+        ? `${ctx.presetName} · ${ctx.presetVariant}`
+        : ctx.presetName;
+      return { title: "Preset", detail };
+    }
     case "device":
       return h.device ? { title: "Output device", detail: h.deviceName ?? h.device } : null;
     case "tone-reset":

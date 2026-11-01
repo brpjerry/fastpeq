@@ -20,6 +20,8 @@ import {
   setDefaultBandCount,
   getGainLimit,
   setGainLimit,
+  getSubPresets,
+  setSubPresets,
 } from "./prefs.svelte";
 
 vi.mock("./api", () => ({
@@ -118,6 +120,7 @@ describe("prefs defaults and clamping", () => {
     expect(getAutoPreamp()).toBe(false);
     expect(defaultBandCount()).toBe(10);
     expect(getGainLimit()).toBe(12);
+    expect(getSubPresets()).toBe(true);
   });
 
   it("clamps writes to each pref's range", () => {
@@ -146,5 +149,13 @@ describe("prefs defaults and clamping", () => {
     expect(getAutoPreamp()).toBe(false);
     setDefaultBandCount(15);
     expect(defaultBandCount()).toBe(15);
+  });
+
+  it("round-trips the sub-presets switch, which is on until turned off", () => {
+    setSubPresets(false);
+    expect(getSubPresets()).toBe(false);
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ subPresets: false });
+    setSubPresets(true);
+    expect(getSubPresets()).toBe(true);
   });
 });

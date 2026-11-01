@@ -59,3 +59,26 @@ export function readPreset(name) {
 export function presetExists(name) {
   return fs.existsSync(path.join(PRESETS_DIR, `${name}.txt`));
 }
+
+/** A sub-preset (variant) file's body, or empty if it doesn't exist. */
+export function readVariant(name, variant) {
+  try {
+    return fs.readFileSync(path.join(PRESETS_DIR, ".variants", name, `${variant}.txt`), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** Whether a sub-preset (variant) file exists on disk. */
+export function variantExists(name, variant) {
+  return fs.existsSync(path.join(PRESETS_DIR, ".variants", name, `${variant}.txt`));
+}
+
+/** The `.variants.json` sidecar (preset name -> { selected }), or {} if absent. */
+export function readVariants() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(PRESETS_DIR, ".variants.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}

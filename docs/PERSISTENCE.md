@@ -25,6 +25,11 @@ rules it follows. Current as of v0.5.0.
 - **Provenance over inference.** Which preset is active is *recorded* (a stamp
   in `config.txt`), not re-derived from content equivalence, so Auto Preamp
   rewrites and hardware offload can't confuse it.
+- **A preset file is the projection of its selected sub-preset.** When a
+  preset has pad/tip variants, `<Name>.txt` always equals the selected
+  variant's file under `.variants/`, so every reader of the preset — apply,
+  hotkeys, the editor, history, offload — sees the variant in use without
+  knowing variants exist. Only the selection ever changes which one that is.
 
 ## Storage locations
 
@@ -66,7 +71,7 @@ Owner: `AppState` in [state.rs](../src-tauri/src/state.rs).
 | `hotkeys.json` | JSON array (opaque) | The global hotkey bindings. The backend never interprets the document — the schema belongs to [hotkeys.svelte.ts](../src/lib/hotkeys.svelte.ts) — but a write must at least be a JSON array. |
 | `preset-view.json` | JSON object (opaque) | Per-preset curve-editor view state keyed by preset name: selected target, compensate/reference toggles, target offset/align frequency, and the **imported FR measurement** (the highest-value data here — a user can't trivially re-create an import). Owner: [preset-view.svelte.ts](../src/lib/preset-view.svelte.ts). |
 | `targets.json` | JSON array (opaque) | User-imported target curves (id, name, points), normalised to a 0 dB midband. Owner: [targets.svelte.ts](../src/lib/targets.svelte.ts). |
-| `prefs.json` | JSON object (opaque) | One document for all UI prefs: `filterSet`, `toneVolumeCap`, `toneStep`, `toneHeadroom`, `specialtyIcons`, `bluetoothIcons`, `filterShapes`, `autoPreamp`, `bandCount`, `gainLimit`. Every read validates its field (the file is hand-editable), so a bad value falls back to its default. Owner: [prefs.svelte.ts](../src/lib/prefs.svelte.ts). |
+| `prefs.json` | JSON object (opaque) | One document for all UI prefs: `filterSet`, `toneVolumeCap`, `toneStep`, `toneHeadroom`, `specialtyIcons`, `bluetoothIcons`, `filterShapes`, `autoPreamp`, `bandCount`, `gainLimit`, `subPresets` (the sub-presets switch, default on — off only hides the UI). Every read validates its field (the file is hand-editable), so a bad value falls back to its default. Owner: [prefs.svelte.ts](../src/lib/prefs.svelte.ts). |
 | `theme.json` | JSON object (opaque) | `{ "accent": "<id>" }` — the accent color. Owner: [theme.ts](../src/lib/theme.ts). |
 | `config.backup.txt` | APO text | The user's pre-fastpeq `config.txt`, copied **exactly once** (`backup_once`) before fastpeq's first live write, and never touched again. |
 
@@ -108,8 +113,11 @@ files.
 | --- | --- | --- |
 | `<Name>.txt` | Native APO config text | One preset per file — deliberately plain APO text so presets are shareable/importable as-is. The parse/serialize round-trip is the core invariant (`parse(serialize(c)) == c`); unmodeled lines survive as `Line::Raw`. Presets **never** contain a provenance stamp (stripped on save) or the tone overlay (stripped on capture). |
 | `.categories.json` | JSON object | Preset name → device-type category (`headphone`, `iem`, `speaker`, …). Tracks renames and deletes. |
+| `.variants/<Name>/<Variant>.txt` | Native APO config text | The preset's **sub-presets** (one per set of ear pads / IEM tips), every one including the one in use. The first "Pad roll" seeds `Default.txt` from the preset's content; after that "Default" is an ordinary variant. **Invariant:** `<Name>.txt` equals the selected variant's file — selecting copies the variant over the preset file, and every preset write (`Manager::write_preset`: save, restore) writes both. Switching records no history; the preset's single `.history/<Name>/` timeline covers saves from every variant. The directory follows renames; deleting the last variant removes it. Owner: `Manager` (`create_variant` / `select_variant` / `delete_variant` / `rename_variant`). |
+| `.variants.json` | JSON object | Preset name → `{ "selected": "<Variant>" }`: which variant `<Name>.txt` currently mirrors. Tracks renames and deletes. If it names a variant whose file is gone, the preset reads as "none selected" until the next pick — a lost sidecar only loses the highlight, never a variant. |
 | `.history/<name>/<unix-ms>-<op>.txt` | Native APO config text | Per-preset version history (see `PRESET-HISTORY.md`): the content each save/delete/restore displaced, **normalized** (master preamp, no-op filters, and stamp stripped; trims/disabled bands/raw lines verbatim), plus an optional user **version tag** as a `# fastpeq:tag=` comment that rides with its content (into `config.txt`/the preset file on restore, back to the snapshot when displaced). Content-unique per preset (tags don't count as content), newest 30 kept, renames follow. History failures never fail the user's operation. |
-| `.history/.deleted/<name>/` | Native APO config text | Archive for user-deleted history revisions and whole preset files. Each source file is moved here instead of removed, with a numeric suffix on name collisions, so it is preserved for manual recovery but ignored by preset/history lists and version counts. |
+| `.history/.deleted/<name>/` | Native APO config text | Archive for user-deleted history revisions, whole preset files, and deleted variant files. Each source file is moved here instead of removed, with a numeric suffix on name collisions, so it is preserved for manual recovery but ignored by preset/history lists and version counts. A deleted variant's content is also recorded as a `delete` revision of its preset, which is the Undo handle. |
+| `.history/.deleted/<name>/.variants-<unix-ms>/` | Directory of APO text | A deleted preset's whole `.variants/<name>/` directory, parked intact. `delete_preset` returns its name in the undo receipt alongside the preset's own `delete` revision; Undo restores the preset file, moves this directory back, and re-selects the variant that was selected (which also restores that exact file, master preamp included). |
 | `.tone.json` | JSON object | The global tone overlay's knob values: `bass`/`mid`/`treble` (dB) + `invert`/`swap`. The sidecar is the persistence layer; `AppState` holds a cache so live knob drags don't re-read it. Written even while Hardware Only offload keeps the overlay out of the live config (`Manager::save_tone`), so the knobs come back when the mode changes. |
 
 ## The live `config.txt` (APO's config dir)

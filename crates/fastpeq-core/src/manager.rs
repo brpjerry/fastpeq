@@ -15,7 +15,7 @@ use crate::parse;
 use crate::provenance;
 use crate::store::PresetStore;
 use crate::tone::{self, Tone};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -30,6 +30,52 @@ pub struct ImportReport {
     pub skipped: Vec<String>,
     /// Files ignored (no EQ content, or an unusable name).
     pub ignored: u32,
+}
+
+/// The name the pre-existing config gets when a preset grows its first
+/// variant ("Default pads"). Only special at that moment — afterwards it is
+/// an ordinary variant that can be renamed or deleted.
+pub const DEFAULT_VARIANT: &str = "Default";
+
+/// One preset's entry in the `.variants.json` sidecar: which variant the
+/// preset file currently mirrors. A struct (not a bare string) so it can grow
+/// without a migration.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct VariantMeta {
+    #[serde(default)]
+    selected: Option<String>,
+}
+
+/// A preset's variants (sub-presets), as listed to the UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VariantSet {
+    /// Every variant, sorted case-insensitively.
+    pub variants: Vec<String>,
+    /// The one `<name>.txt` mirrors — `None` only if the sidecar names nothing
+    /// (or something that no longer exists); the UI then highlights nothing
+    /// until the next pick.
+    pub selected: Option<String>,
+}
+
+/// What [`Manager::delete_preset`] set aside, so the UI's Undo can bring all
+/// of it back: the preset's own `delete` revision, and its variants directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeleteReceipt {
+    /// The undo handle for the preset file, or `None` when nothing could be
+    /// snapshotted (the UI offers no Undo then).
+    pub revision: Option<String>,
+    /// The parked variants, when the preset had any.
+    pub variants: Option<ArchivedVariants>,
+}
+
+/// A deleted preset's variants, parked in the history archive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArchivedVariants {
+    /// The handle [`Manager::restore_variants`] takes.
+    pub archive: String,
+    /// Which variant was selected when the preset was deleted, so the undo can
+    /// re-select it.
+    pub selected: Option<String>,
 }
 
 #[derive(Clone)]
@@ -75,19 +121,31 @@ impl Manager {
         {
             log_history(history.record(name, &prior, RevisionOp::Save));
         }
-        self.store.save(name, config)?;
+        self.write_preset(name, config)?;
         // Invariant 2: the preset's new content must not linger as a revision
         // (e.g. the user hand-edited their way back to an old snapshot).
         log_history(history.remove_matching(name, config));
         Ok(())
     }
 
+    /// Write a preset file — and, when the preset has a selected variant, the
+    /// variant file it mirrors, so the two never drift apart. Every path that
+    /// writes `<name>.txt` for an existing preset goes through here.
+    fn write_preset(&self, name: &str, config: &Config) -> io::Result<()> {
+        self.store.save(name, config)?;
+        if let Some(variant) = self.selected_variant(name) {
+            self.store.save_variant(name, &variant, config)?;
+        }
+        Ok(())
+    }
+
     /// Delete a preset (and its category) by moving its exact source file into
-    /// the hidden history archive. Returns the id of the normalized `delete`
-    /// history snapshot — the undo-delete handle — or `None` when there was
-    /// nothing to snapshot or history recording was unavailable (the UI then
-    /// offers no Undo instead of a dead button).
-    pub fn delete_preset(&self, name: &str) -> io::Result<Option<String>> {
+    /// the hidden history archive, and parking its variants directory there
+    /// too. The receipt carries the undo handles: the normalized `delete`
+    /// snapshot's id (`None` when there was nothing to snapshot or history
+    /// recording was unavailable — the UI then offers no Undo instead of a dead
+    /// button) and the parked variants.
+    pub fn delete_preset(&self, name: &str) -> io::Result<DeleteReceipt> {
         let source = self.store.path_for(name)?;
         let history = self.history();
         let revision = match self.store.load(name) {
@@ -95,22 +153,222 @@ impl Manager {
             Err(_) => None,
         };
         history.archive_preset(name, &source)?;
+        let variants_dir = self.store.variants_dir(name)?;
+        let variants = if variants_dir.is_dir() {
+            let selected = self
+                .variant_meta()?
+                .get(name)
+                .and_then(|meta| meta.selected.clone());
+            let archive = history.archive_variants(name, &variants_dir)?;
+            Some(ArchivedVariants { archive, selected })
+        } else {
+            None
+        };
+        self.set_selected(name, None)?;
         let mut map = self.categories()?;
         if map.remove(name).is_some() {
             self.write_categories(&map)?;
         }
-        Ok(revision)
+        Ok(DeleteReceipt { revision, variants })
     }
 
     pub fn rename_preset(&self, from: &str, to: &str) -> io::Result<()> {
-        self.store.rename(from, to)?;
+        self.store.rename(from, to)?; // moves the variants directory too
         log_history(self.history().rename(from, to));
         let mut map = self.categories()?;
         if let Some(category) = map.remove(from) {
             map.insert(to.to_string(), category);
             self.write_categories(&map)?;
         }
+        let mut meta = self.variant_meta()?;
+        if let Some(entry) = meta.remove(from) {
+            meta.insert(to.to_string(), entry);
+            self.write_variant_meta(&meta)?;
+        }
         Ok(())
+    }
+
+    // --- Variants (sub-presets): `.variants/<name>/<variant>.txt` + `.variants.json`
+    //
+    // The invariant: `<name>.txt` always equals the *selected* variant's file.
+    // Selecting copies the variant in; saving ([`write_preset`]) writes both.
+    // Everything that merely reads a preset is unaware variants exist.
+
+    fn variants_path(&self) -> PathBuf {
+        self.store.dir().join(".variants.json")
+    }
+
+    fn variant_meta(&self) -> io::Result<BTreeMap<String, VariantMeta>> {
+        match fs::read_to_string(self.variants_path()) {
+            Ok(text) => Ok(serde_json::from_str(&text).unwrap_or_default()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn write_variant_meta(&self, map: &BTreeMap<String, VariantMeta>) -> io::Result<()> {
+        self.store.ensure_dir()?;
+        let text = serde_json::to_string_pretty(map).unwrap_or_else(|_| "{}".to_string());
+        writer::write_text_atomic(&self.variants_path(), &text)
+    }
+
+    /// Record which variant `name`'s preset file mirrors (`None` forgets the
+    /// preset — it has no variants any more).
+    fn set_selected(&self, name: &str, variant: Option<&str>) -> io::Result<()> {
+        let mut map = self.variant_meta()?;
+        match variant {
+            Some(v) => {
+                map.insert(
+                    name.to_string(),
+                    VariantMeta {
+                        selected: Some(v.to_string()),
+                    },
+                );
+            }
+            None if map.remove(name).is_none() => return Ok(()), // nothing to forget
+            None => {}
+        }
+        self.write_variant_meta(&map)
+    }
+
+    /// The variant `name`'s preset file mirrors, if the sidecar names one that
+    /// still exists.
+    pub fn selected_variant(&self, name: &str) -> Option<String> {
+        let selected = self.variant_meta().ok()?.remove(name)?.selected?;
+        self.store
+            .variant_exists(name, &selected)
+            .then_some(selected)
+    }
+
+    /// Every preset that has variants, with its selection. Presets without a
+    /// variants directory (or with an empty one) are absent.
+    pub fn variant_sets(&self) -> io::Result<BTreeMap<String, VariantSet>> {
+        let entries = match fs::read_dir(self.store.variants_root()) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+            Err(e) => return Err(e),
+        };
+        let meta = self.variant_meta()?;
+        let mut out = BTreeMap::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Ok(variants) = self.store.list_variants(name) else {
+                continue; // an unsafe directory name is not a preset of ours
+            };
+            if variants.is_empty() {
+                continue;
+            }
+            let selected = meta
+                .get(name)
+                .and_then(|m| m.selected.clone())
+                .filter(|s| variants.iter().any(|v| v == s));
+            out.insert(name.to_string(), VariantSet { variants, selected });
+        }
+        Ok(out)
+    }
+
+    /// Add a variant to `name`, copying the preset's current content (the
+    /// selected variant), and select it. The first variant also seeds
+    /// [`DEFAULT_VARIANT`] from that same content, so the original config
+    /// stays available as "Default". Rejects a name already in use (case-
+    /// insensitively — the files live on a Windows filesystem).
+    pub fn create_variant(&self, name: &str, variant: &str) -> io::Result<()> {
+        let current = self.store.load(name)?; // NotFound when the preset is missing
+        let variant = variant.trim();
+        self.store.variant_path(name, variant)?; // validate before writing anything
+        let mut taken = self.store.list_variants(name)?;
+        let seeding = taken.is_empty();
+        if seeding {
+            taken.push(DEFAULT_VARIANT.to_string());
+        }
+        let wanted = variant.to_lowercase();
+        if taken.iter().any(|v| v.to_lowercase() == wanted) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("variant already exists: {variant}"),
+            ));
+        }
+        if seeding {
+            self.store.save_variant(name, DEFAULT_VARIANT, &current)?;
+        }
+        self.store.save_variant(name, variant, &current)?;
+        self.set_selected(name, Some(variant))
+    }
+
+    /// Make `variant` the one `name`'s preset file mirrors: record it, then
+    /// copy its content over `<name>.txt`. No history is recorded — the content
+    /// being replaced is the previously selected variant's, which its own file
+    /// already holds.
+    pub fn select_variant(&self, name: &str, variant: &str) -> io::Result<()> {
+        let config = self.store.load_variant(name, variant)?; // NotFound when missing
+        self.set_selected(name, Some(variant.trim()))?;
+        self.store.save(name, &config)
+    }
+
+    /// Delete a variant: its content is recorded as a `delete` revision of the
+    /// preset (the undo handle, as for [`delete_preset`](Self::delete_preset))
+    /// and its file archived. Deleting the selected variant selects
+    /// [`DEFAULT_VARIANT`] if present, else the first remaining; deleting the
+    /// last one leaves a plain preset holding its current content.
+    pub fn delete_variant(&self, name: &str, variant: &str) -> io::Result<Option<String>> {
+        let path = self.store.variant_path(name, variant)?;
+        let history = self.history();
+        let revision = match self.store.load_variant(name, variant) {
+            Ok(prior) => log_history(history.record(name, &prior, RevisionOp::Delete)),
+            Err(_) => None,
+        };
+        let was_selected = self
+            .variant_meta()?
+            .get(name)
+            .is_some_and(|m| m.selected.as_deref() == Some(variant));
+        history.archive_preset(name, &path)?;
+        let remaining = self.store.list_variants(name)?;
+        if remaining.is_empty() {
+            self.set_selected(name, None)?;
+            self.store.remove_variants_dir(name);
+        } else if was_selected {
+            let next = remaining
+                .iter()
+                .find(|v| *v == DEFAULT_VARIANT)
+                .unwrap_or(&remaining[0])
+                .clone();
+            self.select_variant(name, &next)?;
+        }
+        Ok(revision)
+    }
+
+    /// Undo a variant delete: write the revision back as `variant`'s file (the
+    /// master preamp recomputed, as [`restore_revision`](Self::restore_revision)
+    /// does). The caller re-selects it if it had been selected.
+    pub fn restore_variant(&self, name: &str, variant: &str, id: &str) -> io::Result<()> {
+        let restored = with_recomputed_preamp(self.history().load(name, id)?);
+        self.store.save_variant(name, variant, &restored)
+    }
+
+    /// Rename a variant; the selection follows it.
+    pub fn rename_variant(&self, name: &str, from: &str, to: &str) -> io::Result<()> {
+        self.store.rename_variant(name, from, to)?;
+        let mut map = self.variant_meta()?;
+        if let Some(meta) = map.get_mut(name)
+            && meta.selected.as_deref() == Some(from)
+        {
+            meta.selected = Some(to.trim().to_string());
+            self.write_variant_meta(&map)?;
+        }
+        Ok(())
+    }
+
+    /// Undo-delete's second half: move a deleted preset's parked variants back
+    /// under `name` (see [`DeleteReceipt`]). The caller then re-selects.
+    pub fn restore_variants(&self, name: &str, archive: &str) -> io::Result<()> {
+        let target = self.store.variants_dir(name)?;
+        self.history().unarchive_variants(name, archive, &target)
     }
 
     // --- History: normalized snapshots of displaced preset content ------------
@@ -152,17 +410,13 @@ impl Manager {
     /// hand-set manual preamp is the one thing history doesn't preserve.
     pub fn restore_revision(&self, name: &str, id: &str) -> io::Result<()> {
         let history = self.history();
-        let mut restored = history.load(name, id)?;
+        let restored = with_recomputed_preamp(history.load(name, id)?);
         if let Ok(current) = self.store.load(name)
             && history::normalize(&current) != history::normalize(&restored)
         {
             log_history(history.record(name, &current, RevisionOp::Restore));
         }
-        let preamp = (offload::auto_preamp(&restored, &Tone::default()) * 10.0).round() / 10.0;
-        if preamp != 0.0 {
-            offload::set_master_preamp(&mut restored, preamp);
-        }
-        self.store.save(name, &restored)?;
+        self.write_preset(name, &restored)?;
         // The restored revision now IS the preset — invariant 2 removes it.
         log_history(history.remove_matching(name, &restored));
         Ok(())
@@ -415,6 +669,17 @@ impl Manager {
         writer::backup_once(&config_file, &self.backup_path)?;
         writer::write_config_atomic(&config_file, config)
     }
+}
+
+/// A history snapshot made whole again: snapshots carry no master preamp, so
+/// a restored config gets the *recomputed* anti-clip value over its bands — a
+/// hand-set manual preamp is the one thing history doesn't preserve.
+fn with_recomputed_preamp(mut restored: Config) -> Config {
+    let preamp = (offload::auto_preamp(&restored, &Tone::default()) * 10.0).round() / 10.0;
+    if preamp != 0.0 {
+        offload::set_master_preamp(&mut restored, preamp);
+    }
+    restored
 }
 
 /// History is the safety net, not the payload: a failed snapshot must never

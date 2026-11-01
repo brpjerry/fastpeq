@@ -61,6 +61,14 @@ general mechanism.
 - Preset names already pass `is_safe_name` (no separators/traversal/reserved
   device names), so they are safe as directory names; the history module
   still re-validates (defense in depth, same as `path_for`).
+- A preset's **sub-presets** (pad/tip variants, `.variants/<name>/`) share its
+  one timeline: the preset file always mirrors the selected variant, so its
+  history is simply the history of that file, whichever variant was selected
+  at each save. Switching variants records nothing (the displaced content is
+  the other variant's own file). A deleted variant's content is recorded as a
+  `delete` revision — the Undo handle — and a deleted preset's whole variants
+  directory is parked under `.history/.deleted/<name>/.variants-<ms>/` so Undo
+  can move it back (see `docs/PERSISTENCE.md`).
 
 ### Revision files
 

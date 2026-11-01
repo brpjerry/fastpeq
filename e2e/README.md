@@ -29,7 +29,8 @@ fails with `session not created: Chrome instance exited`.
 - `wdio.conf.js` — boots `tauri-driver`, points it at the debug build, injects the
   test data dir, seeds the library.
 - `helpers/seed.js` — seeds the data dir; reads back `config.txt`.
-- `specs/smoke.e2e.js` — launch, apply, bypass round-trip, create, device filter.
+- `specs/smoke.e2e.js` — launch, apply, bypass round-trip, create, device filter,
+  sub-presets (create a pad variant, pick one from the row's dropdown).
 
 ## Running locally (Windows)
 

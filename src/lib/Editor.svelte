@@ -48,9 +48,14 @@
     hwUserPregain = true,
     hwCommitToApply = false,
     hwCommitDelay = 500,
+    subtitle = null,
   }: {
     name: string;
     reloadToken: number;
+    /** Shown muted after the name — the preset's selected sub-preset ("Dekoni
+     * pads"), when it has one. Purely a label: the editor still reads and
+     * writes the preset file, which mirrors that variant. */
+    subtitle?: string | null;
     onApplied: (name: string) => void;
     /** A save landed (it may have minted a history revision — the parent
      * refreshes the preset list's version badges). */
@@ -1171,7 +1176,9 @@
 {#if !expanded}
   <section class="panel" class:comparing class:committing>
     <div class="panel-head">
-      <h2 title={name}>{name}</h2>
+      <h2 title={subtitle ? `${name} · ${subtitle}` : name}>
+        {name}{#if subtitle}<span class="subtitle">&nbsp;· {subtitle}</span>{/if}
+      </h2>
       <div class="actions">
         {@render headActions()}
       </div>
@@ -1200,7 +1207,9 @@
 {#if expanded}
   <div class="overlay" class:comparing class:committing>
     <div class="overlay-head">
-      <h2 title={name}>{name}</h2>
+      <h2 title={subtitle ? `${name} · ${subtitle}` : name}>
+        {name}{#if subtitle}<span class="subtitle">&nbsp;· {subtitle}</span>{/if}
+      </h2>
       <div class="actions">
         {@render headActions()}
         <button
@@ -1520,6 +1529,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  h2 .subtitle {
+    color: var(--muted);
+    font-weight: 400;
   }
   .overlay-body {
     flex: 1;

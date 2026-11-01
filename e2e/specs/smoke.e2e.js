@@ -3,7 +3,14 @@
 // runs the whole file, so tests re-apply what they depend on rather than
 // assuming a clean slate.
 import { browser, $, $$, expect } from "@wdio/globals";
-import { readConfig, readPreset, presetExists } from "../helpers/seed.js";
+import {
+  readConfig,
+  readPreset,
+  presetExists,
+  readVariant,
+  readVariants,
+  variantExists,
+} from "../helpers/seed.js";
 
 const BYPASS = 'button[title^="Drop the EQ filters"]';
 
@@ -438,5 +445,79 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
       timeout: 5000,
       timeoutMsg: "toggling Auto off did not re-enable the slider",
     });
+  });
+});
+
+// ── Sub-presets: pad / tip variants inside one preset ────────────────────────
+describe("sub-presets (pad / tip variants)", () => {
+  before(showAll);
+
+  it("creates a pad variant of the selected preset and switches to it", async () => {
+    // The create button's label follows the selected preset's device type.
+    await apply("Vocal"); // iem
+    const btn = await $("button.variant-btn");
+    await btn.waitForEnabled({ timeout: 10000 });
+    expect(await btn.getText()).toBe("Tip roll");
+    await apply("BassBoost"); // headphone
+    await browser.waitUntil(async () => (await btn.getText()) === "Pad roll", {
+      timeout: 5000,
+      timeoutMsg: "create button did not switch to Pad roll",
+    });
+
+    await btn.click();
+    const input = await $(".create input");
+    expect(await input.getAttribute("placeholder")).toBe("Pad name");
+    await input.setValue("Dekoni");
+    await (await $(".create-actions .primary")).click();
+
+    // Both the seeded Default and the new variant exist, the new one is
+    // selected, and the preset file mirrors it (a copy of what it had).
+    await browser.waitUntil(
+      () => variantExists("BassBoost", "Default") && variantExists("BassBoost", "Dekoni"),
+      { timeout: 10000, timeoutMsg: "variant files were not written" },
+    );
+    expect(readVariants().BassBoost?.selected).toBe("Dekoni");
+    expect(readPreset("BassBoost")).toBe(readVariant("BassBoost", "Dekoni"));
+    expect(readPreset("BassBoost")).toContain("Fc 60 Hz"); // BassBoost's own filters
+
+    // The row grew a dropdown trigger naming the selected pads.
+    const row = await rowFor("BassBoost");
+    await browser.waitUntil(
+      async () => (await (await row.$(".variant-current")).getText()).trim() === "Dekoni pads",
+      { timeout: 10000, timeoutMsg: "row did not show the selected variant" },
+    );
+    // No extra list rows: variants live inside the preset's row.
+    expect((await presetNames()).filter((n) => n === "BassBoost").length).toBe(1);
+  });
+
+  it("picks another variant from the row's dropdown, and the preset keeps loading it", async () => {
+    const row = await rowFor("BassBoost");
+    await (await row.$(".variant-trigger")).click();
+    const menu = await $(".variant-menu");
+    await menu.waitForExist({ timeout: 5000 });
+    for (const item of await menu.$$(".variant-item")) {
+      if ((await item.getText()).trim() === "Default pads") {
+        await item.click();
+        break;
+      }
+    }
+    await browser.waitUntil(() => readVariants().BassBoost?.selected === "Default", {
+      timeout: 10000,
+      timeoutMsg: "picking Default pads did not update the selection",
+    });
+    expect(readPreset("BassBoost")).toBe(readVariant("BassBoost", "Default"));
+    await browser.waitUntil(
+      async () => (await (await row.$(".variant-current")).getText()).trim() === "Default pads",
+      { timeout: 10000, timeoutMsg: "row did not show Default pads" },
+    );
+
+    // Clicking the preset itself loads it as-is: the selection sticks.
+    await apply("Studio");
+    await apply("BassBoost");
+    await browser.waitUntil(() => readConfig().includes("fastpeq:preset=BassBoost"), {
+      timeout: 10000,
+      timeoutMsg: "BassBoost was not re-applied",
+    });
+    expect(readVariants().BassBoost?.selected).toBe("Default");
   });
 });
