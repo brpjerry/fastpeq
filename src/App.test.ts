@@ -1222,6 +1222,62 @@ describe("App sub-presets", () => {
     vi.mocked(api.getPreset).mockResolvedValue({ lines: [] });
   });
 
+  it("shows the created variant and keeps the edits when saving the tuning fails", async () => {
+    withVariants();
+    vi.mocked(api.savePreset).mockClear().mockRejectedValueOnce("HD600.txt is read-only");
+    vi.mocked(api.getPreset).mockResolvedValue({
+      lines: [
+        {
+          kind: "Filter",
+          value: {
+            enabled: true,
+            kind: "Peak",
+            freq: 120,
+            gain: 2,
+            q: 1.2,
+            index: 1,
+            channel: { kind: "both" },
+          },
+        },
+      ],
+    });
+    const { container } = render(App);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    await fireEvent.click(rowFor(container, "Sennheiser HD600").querySelector(".name")!);
+    const gain = await waitFor(() => {
+      const el = container.querySelector<HTMLInputElement>(".field.gain input[type='range']");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    await fireEvent.input(gain, { target: { value: "5" } });
+    const saveBtn = container.querySelector<HTMLButtonElement>(".actions .primary")!;
+    await waitFor(() => expect(saveBtn.disabled).toBe(false)); // the editor is dirty
+
+    vi.mocked(api.presetVariants).mockResolvedValue({
+      "Sennheiser HD600": {
+        variants: ["Brainwavz", "Default", "Dekoni"],
+        selected: "Brainwavz",
+      },
+    });
+    await fireEvent.click(variantBtn(container));
+    const input = container.querySelector<HTMLInputElement>(".create input")!;
+    await fireEvent.input(input, { target: { value: "Brainwavz" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(container.querySelector(".toast")!.textContent).toContain("could not save the tuning"),
+    );
+    // The variant was created and selected, so the panel says so...
+    await waitFor(() =>
+      expect(trigger(container, "Sennheiser HD600")!.textContent!.trim()).toBe("Brainwavz pads"),
+    );
+    // ...the editor keeps the unsaved edits (its Save now writes them into it)...
+    expect(saveBtn.disabled).toBe(false);
+    // ...and nothing was applied on top of the failure.
+    expect(api.applyPreset).toHaveBeenCalledTimes(1); // the row click only
+    vi.mocked(api.getPreset).mockResolvedValue({ lines: [] });
+  });
+
   it("rejects a variant name that is taken — including the Default a first roll seeds", async () => {
     withLibrary(); // no variants anywhere yet
     const { container } = render(App);

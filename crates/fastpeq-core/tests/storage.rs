@@ -1463,3 +1463,67 @@ fn rename_preset_rolls_back_when_its_variants_cannot_move() {
         set(&["Default", "Dekoni"], "Dekoni")
     );
 }
+
+#[test]
+fn a_new_preset_never_inherits_variants_left_under_its_name() {
+    let (_apo, presets, manager) = history_manager("var-orphan");
+    let stock = band(1000.0, 3.0);
+    manager.save_preset("HD600", &stock).unwrap();
+    manager.create_variant("HD600", "Dekoni").unwrap();
+
+    // The preset file went missing behind the app's back...
+    fs::remove_file(presets.path().join("HD600.txt")).unwrap();
+    assert!(manager.list_presets().unwrap().is_empty());
+    // ...and a new preset is written under the name: it starts plain, and its
+    // content never lands in the old selected variant.
+    let fresh = band(500.0, 1.0);
+    manager.save_preset("HD600", &fresh).unwrap();
+    assert_eq!(manager.load_preset("HD600").unwrap(), fresh);
+    assert!(manager.variant_sets().unwrap().is_empty());
+    assert_eq!(manager.selected_variant("HD600"), None);
+    assert!(!presets.path().join(".variants/HD600").exists());
+    // The leftovers are parked in the archive, intact, for hand recovery.
+    let archive = presets.path().join(".history/.deleted/HD600");
+    let parked: Vec<PathBuf> = fs::read_dir(&archive)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    assert_eq!(parked.len(), 1, "{parked:?}");
+    assert_eq!(
+        parse(&fs::read_to_string(parked[0].join("Dekoni.txt")).unwrap()),
+        stock
+    );
+    assert!(parked[0].join("Default.txt").exists());
+}
+
+/// A switch is both halves or neither: with the sidecar unwritable, the preset
+/// file must not be left holding the other variant's content (the next save
+/// would land it in the wrong variant).
+#[cfg(windows)]
+#[test]
+fn select_variant_puts_the_preset_file_back_when_the_sidecar_cannot_be_written() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_apo, presets, manager) = history_manager("var-select-locked");
+    let stock = band(1000.0, 3.0);
+    let pads = band(2000.0, -2.0);
+    manager.save_preset("HD600", &stock).unwrap();
+    manager.create_variant("HD600", "Dekoni").unwrap();
+    manager.save_preset("HD600", &pads).unwrap(); // Dekoni = pads, selected
+
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(presets.path().join(".variants.json"))
+        .unwrap();
+    assert!(manager.select_variant("HD600", "Default").is_err());
+    drop(lock);
+
+    assert_eq!(manager.load_preset("HD600").unwrap(), pads);
+    assert_eq!(manager.selected_variant("HD600").as_deref(), Some("Dekoni"));
+    assert_eq!(
+        manager.store().load_variant("HD600", "Default").unwrap(),
+        stock
+    );
+}

@@ -190,11 +190,14 @@ pub fn preset_categories(state: State<'_, AppState>) -> Result<BTreeMap<String, 
 
 #[tauri::command]
 pub fn set_category(
+    app: AppHandle,
     state: State<'_, AppState>,
     name: String,
     category: Option<Category>,
 ) -> Result<(), String> {
-    state.set_category(&name, category)
+    state.set_category(&name, category)?;
+    let _ = tray::refresh(&app); // the tray words a variant by its category
+    Ok(())
 }
 
 // --- Variants (sub-presets): one per set of pads / tips, see `docs/PERSISTENCE.md`
@@ -385,10 +388,20 @@ pub fn load_ui_state(state: State<'_, AppState>, key: String) -> Result<Option<S
     state.ui_state(&key)
 }
 
-/// Persist a UI state document (see [`load_ui_state`]).
+/// Persist a UI state document (see [`load_ui_state`]). The prefs document
+/// carries the sub-presets switch, which the tray label honours.
 #[tauri::command]
-pub fn save_ui_state(state: State<'_, AppState>, key: String, json: String) -> Result<(), String> {
-    state.set_ui_state(&key, &json)
+pub fn save_ui_state(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key: String,
+    json: String,
+) -> Result<(), String> {
+    state.set_ui_state(&key, &json)?;
+    if key == "prefs" {
+        let _ = tray::refresh(&app);
+    }
+    Ok(())
 }
 
 /// List the system's audio output devices (for the "switch output device" hotkey

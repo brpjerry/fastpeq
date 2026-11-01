@@ -499,7 +499,17 @@
       // lands it in the new variant (the preset file mirrors it), while the
       // previous pads — Default, on a first roll — keep what was saved.
       const tuning = selected === parent ? (editor?.unsavedConfig() ?? null) : null;
-      if (tuning) await api.savePreset(parent, tuning);
+      if (tuning) {
+        try {
+          await api.savePreset(parent, tuning);
+        } catch (e) {
+          // The variant exists and is selected: show that, and keep the unsaved
+          // edits in the editor — its Save now writes them into the new variant.
+          await reload();
+          flash(`Created “${labelFor(parent, name)}”, but could not save the tuning: ${e}`);
+          return;
+        }
+      }
       await reload(); // the dropdown appears whatever the apply below does
       selected = parent;
       editorReloadToken++;

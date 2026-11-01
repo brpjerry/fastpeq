@@ -130,11 +130,29 @@ impl Manager {
 
     /// Write a preset file — and, when the preset has a selected variant, the
     /// variant file it mirrors, so the two never drift apart. Every path that
-    /// writes `<name>.txt` for an existing preset goes through here.
+    /// writes `<name>.txt` goes through here; a preset written under a name
+    /// with no file never inherits variants left under it.
     fn write_preset(&self, name: &str, config: &Config) -> io::Result<()> {
+        if !self.store.exists(name) {
+            self.park_orphan_variants(name)?;
+        }
         self.store.save(name, config)?;
         if let Some(variant) = self.selected_variant(name) {
             self.store.save_variant(name, &variant, config)?;
+        }
+        Ok(())
+    }
+
+    /// `.variants/<name>/` without `<name>.txt` is a leftover: the preset file
+    /// went missing behind the app's back. A preset newly written under that
+    /// name must not inherit it (its first save would land in the old selected
+    /// variant), so the directory is parked in the archive — hand-recoverable,
+    /// like any deleted file — and the stale selection forgotten.
+    fn park_orphan_variants(&self, name: &str) -> io::Result<()> {
+        let dir = self.store.variants_dir(name)?;
+        if dir.is_dir() {
+            self.history().archive_variants(name, &dir)?;
+            self.set_selected(name, None)?;
         }
         Ok(())
     }
@@ -166,12 +184,20 @@ impl Manager {
             None
         };
         if let Err(e) = history.archive_preset(name, &source) {
-            if let Some(parked) = &variants {
-                let _ = history.unarchive_variants(name, &parked.archive, &variants_dir);
+            if let Some(parked) = &variants
+                && let Err(back) = history.unarchive_variants(name, &parked.archive, &variants_dir)
+            {
+                return Err(io::Error::other(format!(
+                    "{e}; and the variants could not be moved back from {}: {back}",
+                    parked.archive
+                )));
             }
             return Err(e);
         }
-        self.set_selected(name, None)?;
+        // Everything has moved: the receipt must reach the caller even if the
+        // sidecar cannot be rewritten. A stale entry there is harmless — it
+        // names a variant whose directory is gone, so nothing resolves it.
+        let _ = self.set_selected(name, None);
         let mut map = self.categories()?;
         if map.remove(name).is_some() {
             self.write_categories(&map)?;
@@ -321,10 +347,21 @@ impl Manager {
 
     /// Copy `config` (`variant`'s content) over `<name>.txt`, then record
     /// `variant` as selected — the sidecar is the last write of every variant
-    /// mutation, so it says what the preset file already is.
+    /// mutation, so it says what the preset file already is. Both or neither:
+    /// should the sidecar write fail, the preset file goes back, since a file
+    /// holding one variant's content under another's name would send the next
+    /// save into the wrong variant.
     fn mirror_variant(&self, name: &str, variant: &str, config: &Config) -> io::Result<()> {
+        let path = self.store.path_for(name)?;
+        let prior = fs::read_to_string(&path).ok();
         self.store.save(name, config)?;
-        self.set_selected(name, Some(variant.trim()))
+        if let Err(e) = self.set_selected(name, Some(variant.trim())) {
+            if let Some(text) = &prior {
+                let _ = writer::write_text_atomic(&path, text);
+            }
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// The mirror invariant can be broken from outside: `<name>.txt` is plain
