@@ -10,7 +10,7 @@
    version="1.1"
    id="svg1"
    sodipodi:docname="earbud.svg"
-   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -49,7 +49,7 @@
      inkscape:window-width="3840"
      inkscape:window-height="2126"
      inkscape:window-x="-11"
-     inkscape:window-y="896"
+     inkscape:window-y="1083"
      inkscape:window-maximized="1"
      inkscape:current-layer="svg1" />
   <circle
@@ -59,7 +59,7 @@
      style="stroke-width:1.4952"
      r="5" />
   <path
-     style="fill:none;stroke-width:1.5;stroke-dasharray:none"
+     style="fill:none"
      d="m 9.8543897,13.541756 0.3982863,6.745182 1.695932,0.01284 m 2.197002,-6.758022 -0.398286,6.745182 -1.695932,0.01284"
      id="path1"
      inkscape:path-effect="#path-effect1"
@@ -67,7 +67,7 @@
      sodipodi:nodetypes="ccc"
      transform="translate(0,-0.99999914)" />
   <path
-     style="fill:none;stroke-width:1;stroke-dasharray:none"
+     style="fill:none"
      d="m 12,20 v 1.5"
      id="path2"
      sodipodi:nodetypes="cc" />

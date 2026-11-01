@@ -10,7 +10,7 @@
    version="1.1"
    id="svg2"
    sodipodi:docname="bluetooth_iem.svg"
-   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -32,7 +32,7 @@
      inkscape:window-width="3840"
      inkscape:window-height="2126"
      inkscape:window-x="-11"
-     inkscape:window-y="896"
+     inkscape:window-y="1083"
      inkscape:window-maximized="1"
      inkscape:current-layer="g2" />
   <g
@@ -49,7 +49,7 @@
        cy="18.794212"
        r="3" />
     <path
-       style="fill:none;stroke-width:1;stroke-dasharray:none"
+       style="fill:none;stroke-width:1.19063;stroke-dasharray:none"
        d="m 11.543426,7.6365554 4.762502,4.7625016 -2.381251,2.381251 V 5.2553045 l 2.381251,2.3812509 -4.762502,4.7625016"
        id="path3-9"
        sodipodi:nodetypes="cccccc" />
