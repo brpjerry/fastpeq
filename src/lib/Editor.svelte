@@ -955,7 +955,7 @@
 
   /** What Save would write, while there are unsaved changes — else `null`.
    *  For actions that carry the live tuning along instead of dropping it: a
-   *  Pad roll made while tuning saves it into the new variant. */
+   *  new pads / tips variant made while tuning saves it into that variant. */
   export function unsavedConfig(): Config | null {
     return dirty ? buildConfig(true) : null;
   }

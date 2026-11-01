@@ -1,9 +1,13 @@
 <script module lang="ts">
-  // Scroll the active preset row into view. Module-scoped so App — which owns
-  // reload/open and the settings/hotkeys subpages — can call the same one
-  // definition instead of duplicating the query.
+  // Scroll the active preset row into view — its selected variant when its
+  // list is expanded (the row's <li> holds the whole list, which can outgrow
+  // the viewport). Module-scoped so App — which owns reload/open and the
+  // settings/hotkeys subpages — can call the same one definition instead of
+  // duplicating the query.
   export function scrollCurrentIntoView() {
-    const el = document.querySelector(".presets .active") as HTMLElement | null;
+    const row = document.querySelector(".presets .active");
+    const el =
+      row?.querySelector<HTMLElement>(".variant-item.sel") ?? (row as HTMLElement | null);
     if (el && typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ block: "center" });
     }
@@ -11,6 +15,7 @@
 </script>
 
 <script lang="ts">
+  import { SvelteSet } from "svelte/reactivity";
   import type { ApoStatus, VariantSet } from "./api";
   import CategoryIcon from "./CategoryIcon.svelte";
   import FloatingMenu from "./FloatingMenu.svelte";
@@ -41,6 +46,7 @@
     onCapture,
     onRename,
     variants = {},
+    expanded = new SvelteSet<string>(),
     subPresets = true,
     onPickVariant,
     onNewVariant,
@@ -72,10 +78,13 @@
     /** Each preset's sub-presets (pad / tip variants) and the selected one;
      * presets without any are absent. */
     variants?: Record<string, VariantSet>;
-    /** The global sub-presets switch (Settings). Off hides the per-row dropdown
-     * and the create button; a preset still loads whichever variant is selected. */
+    /** Presets whose variant list is expanded. Owned by App (session state that
+     * outlives this panel's remounts); the panel adds and removes names. */
+    expanded?: SvelteSet<string>;
+    /** The global sub-presets switch (Settings). Off hides the per-row expand
+     * caret and the create button; a preset still loads whichever variant is selected. */
     subPresets?: boolean;
-    /** A variant was picked from a row's dropdown: select it and load it. */
+    /** A variant was picked from a row's variant list: select it and load it. */
     onPickVariant: (name: string, variant: string) => void;
     /** Create a variant of `parent` from its current settings. */
     onNewVariant: (parent: string, name: string) => void;
@@ -193,7 +202,10 @@
     typeFilter = "";
   }
   function submitVariant() {
-    if (selected) onNewVariant(selected, newName);
+    if (selected) {
+      expanded.add(selected); // show the new variant land in the list
+      onNewVariant(selected, newName);
+    }
     cancelCreate();
   }
   // Enter in the name box submits whichever flavour of create is open.
@@ -223,45 +235,28 @@
     onRename(from, renameValue);
   }
 
-  // A preset's variant dropdown (the row's "<variant> pads ▾" trigger). The
-  // menu floats outside the list like the category picker, so a row never
-  // gains nested `.active` elements (scrollCurrentIntoView keys off that class).
+  // A preset's variants expand inline under its row (the caret left of the
+  // category icon). The variant rows never carry `.active` — that class marks
+  // the preset row alone (scrollCurrentIntoView keys off it).
   const hasVariants = (name: string) =>
     subPresets && (variants[name]?.variants.length ?? 0) > 0;
-  let variantMenu = $state<{ name: string; anchor: Anchor; trigger: HTMLElement } | null>(null);
-  let renamingVariant = $state<string | null>(null);
+  let renamingVariant = $state<{ name: string; variant: string } | null>(null);
   let renameVariantValue = $state("");
 
-  function toggleVariantMenu(trigger: HTMLElement, name: string) {
-    renamingVariant = null;
-    if (variantMenu?.name === name) {
-      variantMenu = null;
-      return;
-    }
-    variantMenu = { name, anchor: anchorBelow(trigger, 200), trigger };
+  function toggleExpanded(name: string) {
+    if (expanded.has(name)) expanded.delete(name);
+    else expanded.add(name);
   }
-  function pickVariant(name: string, variant: string) {
-    variantMenu = null;
-    onPickVariant(name, variant);
-  }
-  function removeVariant(name: string, variant: string) {
-    variantMenu = null;
-    onRemoveVariant(name, variant);
-  }
-  function startRenameVariant(variant: string) {
-    renamingVariant = variant;
+  function startRenameVariant(name: string, variant: string) {
+    renamingVariant = { name, variant };
     renameVariantValue = variant;
   }
-  function commitRenameVariant(name: string) {
-    const from = renamingVariant;
-    if (from === null) return;
+  function commitRenameVariant() {
+    const r = renamingVariant;
+    if (r === null) return;
     renamingVariant = null;
-    onRenameVariant(name, from, renameVariantValue);
+    onRenameVariant(r.name, r.variant, renameVariantValue);
   }
-  // A reload can take the preset (or its last variant) out from under an open menu.
-  $effect(() => {
-    if (variantMenu && !hasVariants(variantMenu.name)) variantMenu = null;
-  });
   // The variant form creates for the selected preset; should that selection go
   // away while it is open (the preset was deleted), there is nothing to create for.
   $effect(() => {
@@ -353,66 +348,121 @@
 
   <ul class="presets">
     {#each filteredPresets as name (name)}
+      {@const open = hasVariants(name) && expanded.has(name)}
       <li class:active={name === active} class:selected={name === selected}>
-        {#if renaming === name}
-          <input
-            class="rename-input"
-            bind:value={renameValue}
-            use:focusInput
-            onblur={commitRename}
-            onkeydown={(e) => {
-              if (e.key === "Enter") commitRename();
-              else if (e.key === "Escape") cancelRename();
-            }}
-          />
-        {:else}
-          <button
-            class="cat"
-            class:empty={!categories[name]}
-            onclick={() => cycleCategory(name)}
-            oncontextmenu={(e) => openCatMenu(e, name)}
-            disabled={busy}
-            title={`${categoryLabel(categories[name])} — click to cycle, right-click to choose`}
-          >
-            <CategoryIcon category={categories[name]} />
-          </button>
-          <button
-            class="name"
-            onclick={() => onOpen(name)}
-            ondblclick={() => startRename(name)}
-            oncontextmenu={(e) => {
-              e.preventDefault();
-              onPreview(name);
-            }}
-            title="Click to load (reverts unsaved live changes) · double-click to rename · right-click to preview"
-          >
-            {name}{#if versions[name]}<span class="ver">v{versions[name] + 1}</span>{/if}
-          </button>
-          {#if hasVariants(name)}
-            {@const noun = variantNoun(categories[name])}
-            {@const current = variants[name].selected}
+        <div class="row">
+          {#if renaming === name}
+            <input
+              class="rename-input"
+              bind:value={renameValue}
+              use:focusInput
+              onblur={commitRename}
+              onkeydown={(e) => {
+                if (e.key === "Enter") commitRename();
+                else if (e.key === "Escape") cancelRename();
+              }}
+            />
+          {:else}
+            {#if hasVariants(name)}
+              {@const what = variantNoun(categories[name]) ?? "sub-presets"}
+              <button
+                class="variant-toggle"
+                class:open
+                onclick={() => toggleExpanded(name)}
+                aria-expanded={open}
+                aria-label={`${open ? "Hide" : "Show"} ${name} ${what}`}
+                title={`${open ? "Hide" : "Show"} ${what}`}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9 6l6 6-6 6" />
+                </svg>
+              </button>
+            {/if}
             <button
-              class="variant-trigger"
-              class:open={variantMenu?.name === name}
-              onclick={(e) => toggleVariantMenu(e.currentTarget, name)}
+              class="cat"
+              class:empty={!categories[name]}
+              onclick={() => cycleCategory(name)}
+              oncontextmenu={(e) => openCatMenu(e, name)}
               disabled={busy}
-              aria-haspopup="listbox"
-              aria-expanded={variantMenu?.name === name}
-              title={`Choose ${noun ?? "sub-preset"} · the preset loads the one selected here`}
+              title={`${categoryLabel(categories[name])} — click to cycle, right-click to choose`}
             >
-              <span class="variant-current">{current ? variantLabel(current, noun) : "Choose…"}</span>
-              <svg class="type-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
+              <CategoryIcon category={categories[name]} />
             </button>
+            <button
+              class="name"
+              onclick={() => onOpen(name)}
+              ondblclick={() => startRename(name)}
+              oncontextmenu={(e) => {
+                e.preventDefault();
+                onPreview(name);
+              }}
+              title="Click to load (reverts unsaved live changes) · double-click to rename · right-click to preview"
+            >
+              {name}{#if versions[name]}<span class="ver">v{versions[name] + 1}</span>{/if}
+            </button>
+            <div class="row-actions">
+              <button class="icon" onclick={() => startRename(name)} disabled={busy} title="Rename">
+                &#9998;
+              </button>
+              <button class="danger icon" onclick={() => onRemove(name)} disabled={busy} title="Delete">
+                &#10005;
+              </button>
+            </div>
           {/if}
-          <div class="row-actions">
-            <button class="icon" onclick={() => startRename(name)} disabled={busy} title="Rename">
-              &#9998;
-            </button>
-            <button class="danger icon" onclick={() => onRemove(name)} disabled={busy} title="Delete">
-              &#10005;
-            </button>
+        </div>
+        {#if open}
+          {@const vs = variants[name]}
+          {@const noun = variantNoun(categories[name])}
+          <div class="variants" role="group" aria-label={`${name} ${noun ?? "sub-presets"}`}>
+            {#each vs.variants as v (v)}
+              {@const sel = v === vs.selected}
+              <div class="variant-row">
+                {#if renamingVariant?.name === name && renamingVariant.variant === v}
+                  <input
+                    class="rename-input variant-rename"
+                    bind:value={renameVariantValue}
+                    use:focusInput
+                    onblur={commitRenameVariant}
+                    onkeydown={(e) => {
+                      if (e.key === "Enter") commitRenameVariant();
+                      else if (e.key === "Escape") renamingVariant = null;
+                    }}
+                  />
+                {:else}
+                  <button
+                    class="variant-item"
+                    class:sel
+                    aria-current={sel}
+                    onclick={() => onPickVariant(name, v)}
+                    disabled={busy}
+                    title={`${variantLabel(v, noun)} — click to load; the preset loads the one picked here from now on`}
+                  >
+                    <span class="variant-dot" aria-hidden="true"></span>
+                    <span class="variant-label">{variantLabel(v, noun)}</span>
+                  </button>
+                  <div class="row-actions variant-actions">
+                    <button
+                      class="icon"
+                      onclick={() => startRenameVariant(name, v)}
+                      disabled={busy}
+                      title="Rename"
+                      aria-label={`Rename ${variantLabel(v, noun)}`}
+                    >
+                      &#9998;
+                    </button>
+                    <button
+                      class="danger icon"
+                      onclick={() => onRemoveVariant(name, v)}
+                      disabled={busy}
+                      title="Delete"
+                      aria-label={`Delete ${variantLabel(v, noun)}`}
+                    >
+                      &#10005;
+                    </button>
+                  </div>
+                {/if}
+              </div>
+            {/each}
           </div>
         {/if}
       </li>
@@ -549,57 +599,6 @@
   {/if}
 </FloatingMenu>
 
-{#if variantMenu}
-  {@const menu = variantMenu}
-  {@const vs = variants[menu.name]}
-  {@const noun = variantNoun(categories[menu.name])}
-  <FloatingMenu
-    class="cat-menu variant-menu"
-    role="listbox"
-    open={!!vs}
-    anchor={menu.anchor}
-    onDismiss={() => (variantMenu = null)}
-    ignore={menu.trigger}
-    zIndex={81}
-    maxHeight="70vh"
-  >
-    {#each vs?.variants ?? [] as v (v)}
-      {@const sel = v === vs?.selected}
-      <div class="variant-row">
-        {#if renamingVariant === v}
-          <input
-            class="rename-input variant-rename"
-            bind:value={renameVariantValue}
-            use:focusInput
-            onblur={() => commitRenameVariant(menu.name)}
-            onkeydown={(e) => {
-              if (e.key === "Enter") commitRenameVariant(menu.name);
-              else if (e.key === "Escape") renamingVariant = null;
-            }}
-          />
-        {:else}
-          <button
-            class="menu-item variant-item"
-            class:sel
-            role="option"
-            aria-selected={sel}
-            onclick={() => pickVariant(menu.name, v)}
-            title="Click to load"
-          >
-            {variantLabel(v, noun)}
-          </button>
-          <button class="icon variant-action" onclick={() => startRenameVariant(v)} disabled={busy} title="Rename">
-            &#9998;
-          </button>
-          <button class="danger icon variant-action" onclick={() => removeVariant(menu.name, v)} disabled={busy} title="Delete">
-            &#10005;
-          </button>
-        {/if}
-      </div>
-    {/each}
-  </FloatingMenu>
-{/if}
-
 <style>
   .ghost.on {
     background: var(--accent);
@@ -685,21 +684,28 @@
     display: block;
   }
 
+  /* The list reaches into the panel's 14px left padding and pads 21px back,
+     so a 21px gutter lies inside its scroll box: the expand carets hang there
+     without being clipped. The rows sit 7px in from the panel padding; the
+     icon-to-name spacing gives 6px of that back (see .cat, .name). */
   .presets {
     list-style: none;
-    margin: 0;
-    padding: 0;
+    margin: 0 0 0 -14px;
+    padding: 0 0 0 21px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
   }
   .presets li {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+    position: relative; /* anchors the expand caret */
     padding: 3px 4px;
     border-radius: 8px;
     border: 1px solid transparent;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
   .presets li.selected {
     border-color: var(--border);
@@ -724,6 +730,7 @@
     border-radius: 6px;
     color: var(--text);
     overflow: hidden;
+    margin-right: -2px; /* 2px to the name, not the row's 4px gap */
   }
   .cat:hover:not(:disabled) {
     background: #2b3038;
@@ -749,7 +756,7 @@
     text-align: left;
     background: transparent;
     border: none;
-    padding: 5px 8px;
+    padding: 5px 8px 5px 4px;
   }
   /* Version badge: stays small and gray even on the accent-colored
      active/selected row. */
@@ -763,80 +770,95 @@
   .name:hover {
     background: var(--panel-2);
   }
-  /* The row's variant dropdown trigger ("<variant> pads ▾"). A sibling of the
-     name button, so the name's own text stays clean for scanning and tests. */
-  .variant-trigger {
-    flex: none;
-    display: inline-flex;
+  /* The expand caret, left of the category icon: it hangs in the list's
+     gutter (see .presets), outside the row's border, so rows with and
+     without variants keep the same layout. A sibling of the name button, so
+     the name's own text stays clean for scanning and tests. */
+  .variant-toggle {
+    position: absolute;
+    left: -22px; /* from the li's padding box: its 1px border + the 21px gutter */
+    top: 3px; /* level with the row, below the li's top padding */
+    width: 21px;
+    height: 26px;
+    display: flex;
     align-items: center;
-    gap: 3px;
-    max-width: 45%;
-    padding: 3px 6px;
-    border: 1px solid var(--border);
-    background: var(--panel-2);
-    border-radius: 6px;
-    font-size: 11px;
+    justify-content: center;
+    padding: 0 0 0 1px; /* 1px more room left of the chevron than right of it */
+    border: none;
+    background: transparent;
+    border-radius: 4px;
     color: var(--muted);
   }
-  .variant-trigger:hover:not(:disabled),
-  .variant-trigger.open {
-    background: #2b3038;
-    border-color: #3a4150;
+  .variant-toggle:hover {
+    background: transparent; /* no box behind the caret from the global button:hover */
     color: var(--text);
   }
-  .variant-current {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .variant-toggle svg {
+    width: 14px;
+    height: 14px;
+    transition: transform 0.12s ease;
   }
-  .variant-trigger .type-caret {
-    width: 12px;
-    height: 12px;
+  .variant-toggle.open svg {
+    transform: rotate(90deg);
   }
-  .variant-trigger.open .type-caret {
-    transform: rotate(180deg);
+  /* The expanded variants: a guide line hangs from the category icon's centre
+     (half its 26px) and the items line up with the name button (26px icon +
+     2px). */
+  .variants {
+    margin: 1px 0 2px 13px;
+    padding-left: 14px;
+    border-left: 1px solid var(--border);
   }
   .variant-row {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
+    min-height: 26px;
   }
   .variant-item {
     flex: 1;
     min-width: 0;
-    color: var(--text);
-  }
-  .variant-action {
-    flex: none;
-    width: 24px;
-    height: 24px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: none;
+    gap: 7px;
+    text-align: left;
     background: transparent;
-    border-radius: 5px;
+    border: none;
+    padding: 3px 8px 3px 4px; /* the dot starts where the name's text does */
     font-size: 12px;
     color: var(--muted);
-    opacity: 0;
   }
-  .variant-row:hover .variant-action,
-  .variant-action:focus-visible {
-    opacity: 1;
+  .variant-label {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .variant-action:hover:not(:disabled) {
+  .variant-item:hover:not(:disabled) {
     background: var(--panel-2);
     color: var(--text);
   }
-  .danger.variant-action:hover:not(:disabled) {
-    color: var(--danger);
+  .variant-item.sel {
+    color: var(--text);
+    font-weight: 600;
+  }
+  /* Radio-style marker: the one the preset loads is filled. */
+  .variant-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    opacity: 0.6;
+  }
+  .variant-item.sel .variant-dot {
+    background: var(--accent);
+    border-color: var(--accent);
+    opacity: 1;
   }
   .variant-rename {
-    flex: 1;
-    margin: 2px;
-    font-size: 13px;
+    margin: 2px 0;
+    font-size: 12px;
   }
   .row-actions {
     display: flex;
@@ -865,6 +887,16 @@
     border-color: var(--danger);
     color: var(--danger);
   }
+  /* A variant's smaller icons, centred under the preset row's. */
+  .variant-actions {
+    gap: 8px;
+    margin-right: 2px;
+  }
+  .variant-actions .icon {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
   .rename-input {
     flex: 1;
     margin: 1px 0;
@@ -883,7 +915,7 @@
     flex: 1;
     min-width: 0;
   }
-  /* "Pad roll" / "Tip roll" / "+ sub-preset": a variant of the selected preset. */
+  /* "+ New Pads" / "+ New Tips" / "+ sub-preset": a variant of the selected preset. */
   .variant-btn {
     flex: 1;
     min-width: 0;

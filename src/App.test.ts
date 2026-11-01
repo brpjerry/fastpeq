@@ -980,19 +980,23 @@ describe("App sub-presets", () => {
       "Sennheiser HD600": { variants: ["Default", "Dekoni"], selected: "Dekoni" },
     });
   }
-  const trigger = (container: ParentNode, name: string) =>
-    rowFor(container, name).querySelector<HTMLButtonElement>(".variant-trigger");
+  // The row's expand caret (only on presets that have variants).
+  const toggle = (container: ParentNode, name: string) =>
+    rowFor(container, name).querySelector<HTMLButtonElement>(".variant-toggle");
   const variantBtn = (container: ParentNode) =>
     container.querySelector<HTMLButtonElement>(".variant-btn")!;
-  async function openMenu(container: ParentNode, name: string) {
-    await fireEvent.click(trigger(container, name)!);
-    await waitFor(() => expect(container.querySelector(".variant-menu")).toBeTruthy());
-    return container.querySelector(".variant-menu")!;
+  async function expand(container: ParentNode, name: string) {
+    await fireEvent.click(toggle(container, name)!);
+    await waitFor(() => expect(rowFor(container, name).querySelector(".variants")).toBeTruthy());
+    return rowFor(container, name).querySelector(".variants")!;
   }
-  const menuRow = (menu: Element, label: string) =>
-    [...menu.querySelectorAll(".variant-row")].find(
+  const variantRow = (list: Element, label: string) =>
+    [...list.querySelectorAll(".variant-row")].find(
       (r) => r.querySelector(".variant-item")?.textContent!.trim() === label,
     )!;
+  // The variant the preset loads: the marked one in its expanded list.
+  const selectedVariant = (container: ParentNode, name: string) =>
+    rowFor(container, name).querySelector(".variant-item.sel")?.textContent!.trim();
 
   beforeEach(() => {
     setSubPresets(true);
@@ -1007,7 +1011,7 @@ describe("App sub-presets", () => {
   it("names the selected variant in the OSD, as the editor words it", async () => {
     withVariants();
     const { container } = render(App);
-    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
 
     focus.cb?.({ payload: false }); // window lost focus
     vi.mocked(emit).mockClear();
@@ -1027,18 +1031,18 @@ describe("App sub-presets", () => {
     withVariants();
     vi.mocked(api.applyPreset).mockRejectedValueOnce("config.txt is read-only");
     const { container } = render(App);
-    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
     vi.mocked(api.getPreset).mockClear();
 
-    const menu = await openMenu(container, "Sennheiser HD600");
-    await fireEvent.click(menuRow(menu, "Default pads").querySelector(".variant-item")!);
+    const list = await expand(container, "Sennheiser HD600");
+    await fireEvent.click(variantRow(list, "Default pads").querySelector(".variant-item")!);
     await waitFor(() =>
       expect(container.querySelector(".toast")!.textContent).toContain("read-only"),
     );
     // The file already mirrors Default, so the editor opened on it regardless
     // (a Save must never write the old variant's filters into the new one)...
     expect(api.getPreset).toHaveBeenCalledWith("Sennheiser HD600");
-    expect(trigger(container, "Sennheiser HD600")!.textContent!.trim()).toBe("Default pads");
+    expect(selectedVariant(container, "Sennheiser HD600")).toBe("Default pads");
     // ...while nothing claims it is playing.
     expect(rowFor(container, "Sennheiser HD600").classList).not.toContain("active");
   });
@@ -1048,35 +1052,53 @@ describe("App sub-presets", () => {
     vi.mocked(api.deleteVariant).mockResolvedValue("Dekoni.txt");
     vi.mocked(api.activePreset).mockResolvedValue("Sennheiser HD600"); // it is playing
     const { container } = render(App);
-    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
 
     vi.mocked(api.applyPreset).mockRejectedValueOnce("config.txt is read-only");
-    const menu = await openMenu(container, "Sennheiser HD600");
-    await fireEvent.click(menuRow(menu, "Dekoni pads").querySelector(".danger.variant-action")!);
+    const list = await expand(container, "Sennheiser HD600");
+    await fireEvent.click(variantRow(list, "Dekoni pads").querySelector(".danger.icon")!);
     await waitFor(() => expect(container.querySelector(".toast-action")).toBeTruthy());
     const text = container.querySelector(".toast")!.textContent!;
     expect(text).toContain("Deleted “Dekoni pads”");
     expect(text).toContain("could not apply: config.txt is read-only");
   });
 
-  it("shows the selected variant on a dropdown trigger, only for presets that have any", async () => {
+  it("shows an expand caret only for presets that have variants, listing them inline", async () => {
     withVariants();
     const { container } = render(App);
     await waitFor(() => expect(rows(container).length).toBe(2));
 
-    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
-    expect(trigger(container, "Sennheiser HD600")!.textContent!.trim()).toBe("Dekoni pads");
-    expect(trigger(container, "64 Audio U12t")).toBeNull();
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
+    expect(toggle(container, "64 Audio U12t")).toBeNull();
     // The name button's own text stays the bare name (the badge/scan contract).
     expect(rowFor(container, "Sennheiser HD600").querySelector(".name")!.textContent!.trim()).toBe(
       "Sennheiser HD600",
     );
+    // Collapsed until the caret is clicked.
+    expect(container.querySelector(".variants")).toBeNull();
+    expect(toggle(container, "Sennheiser HD600")!.getAttribute("aria-expanded")).toBe("false");
+
+    const list = await expand(container, "Sennheiser HD600");
+    expect(toggle(container, "Sennheiser HD600")!.getAttribute("aria-expanded")).toBe("true");
+    const labels = [...list.querySelectorAll(".variant-item")].map((b) => b.textContent!.trim());
+    expect(labels).toEqual(["Default pads", "Dekoni pads"]);
+    expect(selectedVariant(container, "Sennheiser HD600")).toBe("Dekoni pads");
+    // Every variant carries its own rename and delete buttons.
+    for (const label of labels) {
+      const actions = [...variantRow(list, label).querySelectorAll(".row-actions button")];
+      expect(actions.map((b) => b.getAttribute("title"))).toEqual(["Rename", "Delete"]);
+    }
+    // The variant rows are not preset rows.
+    expect(rows(container).length).toBe(2);
+
+    await fireEvent.click(toggle(container, "Sennheiser HD600")!);
+    await waitFor(() => expect(container.querySelector(".variants")).toBeNull());
   });
 
   it("loads the preset (its selected variant) on a row click and on its hotkey", async () => {
     withVariants();
     const { container } = render(App);
-    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
 
     await fireEvent.click(rowFor(container, "Sennheiser HD600").querySelector(".name")!);
     await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD600"));
@@ -1091,17 +1113,13 @@ describe("App sub-presets", () => {
     expect(api.selectVariant).not.toHaveBeenCalled();
   });
 
-  it("picking a variant from the dropdown selects it, then loads the preset", async () => {
+  it("picking a variant from the list selects it, then loads the preset", async () => {
     withVariants();
     const { container } = render(App);
-    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
 
-    const menu = await openMenu(container, "Sennheiser HD600");
-    const labels = [...menu.querySelectorAll(".variant-item")].map((b) => b.textContent!.trim());
-    expect(labels).toEqual(["Default pads", "Dekoni pads"]);
-    expect(menuRow(menu, "Dekoni pads").querySelector(".variant-item")!.classList).toContain("sel");
-
-    await fireEvent.click(menuRow(menu, "Default pads").querySelector(".variant-item")!);
+    const list = await expand(container, "Sennheiser HD600");
+    await fireEvent.click(variantRow(list, "Default pads").querySelector(".variant-item")!);
     await waitFor(() =>
       expect(api.selectVariant).toHaveBeenCalledWith("Sennheiser HD600", "Default"),
     );
@@ -1110,8 +1128,10 @@ describe("App sub-presets", () => {
     expect(vi.mocked(api.selectVariant).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(api.applyPreset).mock.invocationCallOrder[0],
     );
-    await waitFor(() => expect(container.querySelector(".variant-menu")).toBeNull());
-    expect(trigger(container, "Sennheiser HD600")!.textContent!.trim()).toBe("Default pads");
+    // The list stays open, marking the new pick.
+    await waitFor(() =>
+      expect(selectedVariant(container, "Sennheiser HD600")).toBe("Default pads"),
+    );
   });
 
   it("labels the create button by the selected preset's device type", async () => {
@@ -1126,9 +1146,9 @@ describe("App sub-presets", () => {
     expect(variantBtn(container).disabled).toBe(true); // nothing selected yet
     await fireEvent.click(rowFor(container, "Sennheiser HD600").querySelector(".name")!);
     await waitFor(() => expect(variantBtn(container).disabled).toBe(false));
-    expect(variantBtn(container).textContent!.trim()).toBe("Pad roll");
+    expect(variantBtn(container).textContent!.trim()).toBe("+ New Pads");
     await fireEvent.click(rowFor(container, "64 Audio U12t").querySelector(".name")!);
-    await waitFor(() => expect(variantBtn(container).textContent!.trim()).toBe("Tip roll"));
+    await waitFor(() => expect(variantBtn(container).textContent!.trim()).toBe("+ New Tips"));
     await fireEvent.click(rowFor(container, "Genelec").querySelector(".name")!);
     await waitFor(() => expect(variantBtn(container).textContent!.trim()).toBe("+ sub-preset"));
   });
@@ -1162,8 +1182,9 @@ describe("App sub-presets", () => {
       expect(api.createVariant).toHaveBeenCalledWith("Sennheiser HD600", "Brainwavz"),
     );
     await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD600"));
+    // The preset's list opens on the new variant, marked as the one it loads.
     await waitFor(() =>
-      expect(trigger(container, "Sennheiser HD600")!.textContent!.trim()).toBe("Brainwavz pads"),
+      expect(selectedVariant(container, "Sennheiser HD600")).toBe("Brainwavz pads"),
     );
     expect(container.querySelector(".create")).toBeNull();
     expect(api.savePreset).not.toHaveBeenCalled(); // never "from scratch"
@@ -1269,7 +1290,7 @@ describe("App sub-presets", () => {
     );
     // The variant was created and selected, so the panel says so...
     await waitFor(() =>
-      expect(trigger(container, "Sennheiser HD600")!.textContent!.trim()).toBe("Brainwavz pads"),
+      expect(selectedVariant(container, "Sennheiser HD600")).toBe("Brainwavz pads"),
     );
     // ...the editor keeps the unsaved edits (its Save now writes them into it)...
     expect(saveBtn.disabled).toBe(false);
@@ -1284,7 +1305,7 @@ describe("App sub-presets", () => {
     await waitFor(() => expect(rows(container).length).toBe(2));
     await fireEvent.click(rowFor(container, "64 Audio U12t").querySelector(".name")!);
     await waitFor(() => expect(variantBtn(container).disabled).toBe(false));
-    expect(variantBtn(container).textContent!.trim()).toBe("Tip roll");
+    expect(variantBtn(container).textContent!.trim()).toBe("+ New Tips");
 
     await fireEvent.click(variantBtn(container));
     const input = container.querySelector<HTMLInputElement>(".create input")!;
@@ -1300,13 +1321,13 @@ describe("App sub-presets", () => {
     expect(api.createVariant).not.toHaveBeenCalled();
   });
 
-  it("hides the dropdown and the create button when sub-presets are switched off", async () => {
+  it("hides the caret and the create button when sub-presets are switched off", async () => {
     withVariants();
     setSubPresets(false);
     const { container } = render(App);
     await waitFor(() => expect(rows(container).length).toBe(2));
 
-    expect(trigger(container, "Sennheiser HD600")).toBeNull();
+    expect(toggle(container, "Sennheiser HD600")).toBeNull();
     expect(container.querySelector(".variant-btn")).toBeNull();
     expect(container.querySelector(".new-btn")).toBeTruthy();
     // The preset still loads — whatever variant its file mirrors.
@@ -1314,14 +1335,14 @@ describe("App sub-presets", () => {
     await waitFor(() => expect(api.applyPreset).toHaveBeenCalledWith("Sennheiser HD600"));
   });
 
-  it("deletes a variant from the dropdown, with Undo re-selecting it", async () => {
+  it("deletes a variant from the list, with Undo re-selecting it", async () => {
     withVariants();
     vi.mocked(api.deleteVariant).mockResolvedValue("Dekoni.txt");
     const { container } = render(App);
-    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
 
-    const menu = await openMenu(container, "Sennheiser HD600");
-    await fireEvent.click(menuRow(menu, "Dekoni pads").querySelector(".danger.variant-action")!);
+    const list = await expand(container, "Sennheiser HD600");
+    await fireEvent.click(variantRow(list, "Dekoni pads").querySelector(".danger.icon")!);
     await waitFor(() =>
       expect(api.deleteVariant).toHaveBeenCalledWith("Sennheiser HD600", "Dekoni"),
     );
@@ -1341,13 +1362,13 @@ describe("App sub-presets", () => {
     );
   });
 
-  it("renames a variant inline from the dropdown", async () => {
+  it("renames a variant inline from the list", async () => {
     withVariants();
     const { container } = render(App);
-    await waitFor(() => expect(trigger(container, "Sennheiser HD600")).toBeTruthy());
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
 
-    const menu = await openMenu(container, "Sennheiser HD600");
-    await fireEvent.click(menuRow(menu, "Dekoni pads").querySelector('[title="Rename"]')!);
+    const list = await expand(container, "Sennheiser HD600");
+    await fireEvent.click(variantRow(list, "Dekoni pads").querySelector('[title="Rename"]')!);
     const input = container.querySelector<HTMLInputElement>(".variant-rename")!;
     expect(input.value).toBe("Dekoni");
     await fireEvent.input(input, { target: { value: "Dekoni Elite" } });
@@ -1356,6 +1377,54 @@ describe("App sub-presets", () => {
     await waitFor(() =>
       expect(api.renameVariant).toHaveBeenCalledWith("Sennheiser HD600", "Dekoni", "Dekoni Elite"),
     );
+  });
+
+  it("offers no variant to pick while an operation is still running", async () => {
+    // A pick landing mid-create would re-point the preset file before the
+    // create saves the tuning, sending it into the wrong pads.
+    withVariants();
+    let finish!: () => void;
+    vi.mocked(api.selectVariant).mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finish = resolve)),
+    );
+    const { container } = render(App);
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
+
+    const list = await expand(container, "Sennheiser HD600");
+    await fireEvent.click(variantRow(list, "Default pads").querySelector(".variant-item")!);
+    const items = () => [...list.querySelectorAll<HTMLButtonElement>(".variant-item")];
+    await waitFor(() => expect(items().every((b) => b.disabled)).toBe(true));
+    await fireEvent.click(variantRow(list, "Dekoni pads").querySelector(".variant-item")!);
+    expect(api.selectVariant).toHaveBeenCalledTimes(1);
+
+    finish();
+    await waitFor(() => expect(items().every((b) => !b.disabled)).toBe(true));
+  });
+
+  it("keeps a preset's variant list open across a rename and a Settings round trip", async () => {
+    withVariants();
+    const { container } = render(App);
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
+    await expand(container, "Sennheiser HD600");
+
+    await fireEvent.dblClick(rowFor(container, "Sennheiser HD600").querySelector(".name")!);
+    const input = container.querySelector(".rename-input")!;
+    await fireEvent.input(input, { target: { value: "Sennheiser HD650" } });
+    vi.mocked(api.listPresets).mockResolvedValue(["64 Audio U12t", "Sennheiser HD650"]);
+    vi.mocked(api.presetVariants).mockResolvedValue({
+      "Sennheiser HD650": { variants: ["Default", "Dekoni"], selected: "Dekoni" },
+    });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(rowFor(container, "Sennheiser HD650")).toBeTruthy());
+    expect(rowFor(container, "Sennheiser HD650").querySelector(".variants")).toBeTruthy();
+
+    // Settings replaces the preset list; coming back rebuilds it, still open.
+    const gear = container.querySelector<HTMLButtonElement>("button.gear")!;
+    await fireEvent.click(gear);
+    await waitFor(() => expect(rows(container).length).toBe(0));
+    await fireEvent.click(gear);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    expect(rowFor(container, "Sennheiser HD650").querySelector(".variants")).toBeTruthy();
   });
 
   it("undoing a preset delete brings its variants back and re-selects", async () => {

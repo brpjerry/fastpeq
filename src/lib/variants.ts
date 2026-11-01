@@ -33,9 +33,9 @@ export function variantLabel(variant: string, noun: VariantNoun): string {
 export function variantCreateLabel(category: string | undefined): string {
   switch (variantNoun(category)) {
     case "pads":
-      return "Pad roll";
+      return "+ New Pads";
     case "tips":
-      return "Tip roll";
+      return "+ New Tips";
     default:
       return "+ sub-preset";
   }

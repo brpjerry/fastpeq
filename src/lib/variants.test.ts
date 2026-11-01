@@ -11,12 +11,12 @@ describe("sub-preset wording", () => {
   it("calls headphone-family variants pads and in-ear-family variants tips", () => {
     for (const c of ["headphone", "estat", "bluetooth_headphone"]) {
       expect(variantNoun(c)).toBe("pads");
-      expect(variantCreateLabel(c)).toBe("Pad roll");
+      expect(variantCreateLabel(c)).toBe("+ New Pads");
       expect(variantPlaceholder(c)).toBe("Pad name");
     }
     for (const c of ["iem", "earbud", "bluetooth_iem", "bluetooth_earbud"]) {
       expect(variantNoun(c)).toBe("tips");
-      expect(variantCreateLabel(c)).toBe("Tip roll");
+      expect(variantCreateLabel(c)).toBe("+ New Tips");
       expect(variantPlaceholder(c)).toBe("Tip name");
     }
   });

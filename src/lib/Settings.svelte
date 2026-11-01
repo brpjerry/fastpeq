@@ -236,9 +236,10 @@
     <section class="settings-section">
       <h3>Sub-presets</h3>
       <p class="hint">
-        Pad / tip variants inside one preset. The Pad roll / Tip roll button copies the selected
-        preset's settings into a new variant, and the preset's list entry becomes a dropdown.
-        Off hides both; each preset keeps loading whichever variant it has selected.
+        Pad / tip variants inside one preset. The + New Pads / + New Tips button copies the
+        selected preset's settings into a new variant, and the preset's list entry gains a caret
+        that expands its variants. Off hides both; each preset keeps loading whichever variant it
+        has selected.
       </p>
       <div class="cat-switches">
         <Switch label="Enable sub-presets" checked={getSubPresets()} onChange={(v) => setSubPresets(v)} />
