@@ -308,8 +308,8 @@ impl Manager {
         self.set_selected(name, Some(variant))
     }
 
-    /// Make `variant` the one `name`'s preset file mirrors: record it, then
-    /// copy its content over `<name>.txt`. Normally no history is recorded —
+    /// Make `variant` the one `name`'s preset file mirrors: copy its content
+    /// over `<name>.txt`, then record it. Normally no history is recorded —
     /// the content being replaced is the previously selected variant's, which
     /// its own file already holds; content no variant holds is snapshotted
     /// first (see [`snapshot_drift`](Self::snapshot_drift)).
@@ -319,11 +319,12 @@ impl Manager {
         self.mirror_variant(name, variant, &config)
     }
 
-    /// Record `variant` as selected and copy `config` (its content) over
-    /// `<name>.txt`.
+    /// Copy `config` (`variant`'s content) over `<name>.txt`, then record
+    /// `variant` as selected — the sidecar is the last write of every variant
+    /// mutation, so it says what the preset file already is.
     fn mirror_variant(&self, name: &str, variant: &str, config: &Config) -> io::Result<()> {
-        self.set_selected(name, Some(variant.trim()))?;
-        self.store.save(name, config)
+        self.store.save(name, config)?;
+        self.set_selected(name, Some(variant.trim()))
     }
 
     /// The mirror invariant can be broken from outside: `<name>.txt` is plain

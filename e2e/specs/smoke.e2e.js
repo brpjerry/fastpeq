@@ -62,8 +62,17 @@ async function rowFor(name) {
   throw new Error(`preset row not found: ${name}`);
 }
 
+// Click a preset row and wait for the apply to land. The panel is `busy` (its
+// buttons disabled) until the backend has applied the preset, so a click fired
+// meanwhile would be lost on a disabled button.
 async function apply(name) {
   await (await (await rowFor(name)).$(".name")).click();
+  await browser.waitUntil(
+    async () => ((await (await rowFor(name)).getAttribute("class")) || "").includes("active"),
+    { timeout: 10000, timeoutMsg: `${name} never became active` },
+  );
+  const newBtn = await $("button.new-btn");
+  if (await newBtn.isExisting()) await newBtn.waitForEnabled({ timeout: 10000 });
 }
 
 // Reset the list view: clear the search box and set the type filter back to
@@ -100,7 +109,9 @@ async function pickBandType(band, token) {
 
 // Create a new (empty) preset via the "+ New preset" → "From scratch" flow.
 async function createPreset(name) {
-  await $("button.new-btn").click();
+  const newBtn = await $("button.new-btn");
+  await newBtn.waitForEnabled({ timeout: 10000 }); // a previous action may still be busy
+  await newBtn.click();
   await (await $(".create input")).setValue(name);
   await (await $(".create-actions .primary")).click();
   await browser.waitUntil(async () => (await presetNames()).includes(name), {
@@ -471,12 +482,15 @@ describe("sub-presets (pad / tip variants)", () => {
     await (await $(".create-actions .primary")).click();
 
     // Both the seeded Default and the new variant exist, the new one is
-    // selected, and the preset file mirrors it (a copy of what it had).
+    // selected (the sidecar is the last thing written), and the preset file
+    // mirrors it (a copy of what it had).
     await browser.waitUntil(
-      () => variantExists("BassBoost", "Default") && variantExists("BassBoost", "Dekoni"),
-      { timeout: 10000, timeoutMsg: "variant files were not written" },
+      () =>
+        variantExists("BassBoost", "Default") &&
+        variantExists("BassBoost", "Dekoni") &&
+        readVariants().BassBoost?.selected === "Dekoni",
+      { timeout: 10000, timeoutMsg: "variant files / selection were not written" },
     );
-    expect(readVariants().BassBoost?.selected).toBe("Dekoni");
     expect(readPreset("BassBoost")).toBe(readVariant("BassBoost", "Dekoni"));
     expect(readPreset("BassBoost")).toContain("Fc 60 Hz"); // BassBoost's own filters
 
@@ -501,11 +515,13 @@ describe("sub-presets (pad / tip variants)", () => {
         break;
       }
     }
-    await browser.waitUntil(() => readVariants().BassBoost?.selected === "Default", {
-      timeout: 10000,
-      timeoutMsg: "picking Default pads did not update the selection",
-    });
-    expect(readPreset("BassBoost")).toBe(readVariant("BassBoost", "Default"));
+    // The preset file is copied first, then the sidecar records the selection.
+    await browser.waitUntil(
+      () =>
+        readVariants().BassBoost?.selected === "Default" &&
+        readPreset("BassBoost") === readVariant("BassBoost", "Default"),
+      { timeout: 10000, timeoutMsg: "picking Default pads did not update the selection" },
+    );
     await browser.waitUntil(
       async () => (await (await row.$(".variant-current")).getText()).trim() === "Default pads",
       { timeout: 10000, timeoutMsg: "row did not show Default pads" },
