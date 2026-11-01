@@ -756,7 +756,12 @@
   .variant-toggle,
   .caret-slot {
     flex: none;
-    width: 16px;
+    width: 14px;
+    margin-right: -4px; /* cancels the row gap: the name follows tightly */
+  }
+  .variant-toggle + .name,
+  .caret-slot + .name {
+    padding-left: 4px;
   }
   .variant-toggle {
     height: 26px;
@@ -782,10 +787,10 @@
     transform: rotate(90deg);
   }
   /* The expanded variants: a guide line hangs from the caret (26px icon + 4px
-     gap + half the 16px caret) and the items line up with the name button. */
+     gap + half the 14px caret) and the items line up with the name button. */
   .variants {
-    margin: 1px 0 2px 38px;
-    padding-left: 11px;
+    margin: 1px 0 2px 37px;
+    padding-left: 6px;
     border-left: 1px solid var(--border);
   }
   .variant-row {
@@ -803,7 +808,7 @@
     text-align: left;
     background: transparent;
     border: none;
-    padding: 3px 8px;
+    padding: 3px 8px 3px 4px;
     font-size: 12px;
     color: var(--muted);
   }
