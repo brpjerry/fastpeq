@@ -677,16 +677,16 @@ impl AppState {
         Ok(())
     }
 
-    /// Delete a preset. Returns the id of its `delete` history revision — the
-    /// undo handle for the frontend's toast — or `None` when nothing could be
-    /// snapshotted (no Undo is offered then).
-    pub fn delete(&self, name: &str) -> Result<Option<String>, String> {
-        let revision = self
+    /// Delete a preset. Returns the undo handles for the frontend's toast: the
+    /// id of its `delete` history revision (`None` when nothing could be
+    /// snapshotted — no Undo is offered then) and its parked variants, if any.
+    pub fn delete(&self, name: &str) -> Result<fastpeq_core::DeleteReceipt, String> {
+        let receipt = self
             .manager()
             .delete_preset(name)
             .map_err(|e| e.to_string())?;
         self.invalidate_active(); // a deleted preset can no longer be "active"
-        Ok(revision)
+        Ok(receipt)
     }
 
     pub fn rename(&self, from: &str, to: &str) -> Result<(), String> {
@@ -992,6 +992,91 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
+    // --- Variants (sub-presets) ------------------------------------------------
+    //
+    // These only touch preset files and the `.variants.json` sidecar, never the
+    // live config: the active preset is stamp-based, so its cache stays valid
+    // (the frontend applies the preset itself after a select/create).
+
+    /// Every preset's variants with its selection; presets without any are absent.
+    pub fn preset_variants(&self) -> Result<BTreeMap<String, fastpeq_core::VariantSet>, String> {
+        self.manager().variant_sets().map_err(|e| e.to_string())
+    }
+
+    /// Add a variant copied from the preset's current content, and select it.
+    pub fn create_variant(&self, name: &str, variant: &str) -> Result<(), String> {
+        self.manager()
+            .create_variant(name, variant)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Make `variant` the one the preset file mirrors.
+    pub fn select_variant(&self, name: &str, variant: &str) -> Result<(), String> {
+        self.manager()
+            .select_variant(name, variant)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Delete a variant; returns its undo handle (its archived file).
+    pub fn delete_variant(&self, name: &str, variant: &str) -> Result<Option<String>, String> {
+        self.manager()
+            .delete_variant(name, variant)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Undo a variant delete (the caller re-selects it if it was selected).
+    pub fn restore_variant(&self, name: &str, variant: &str, handle: &str) -> Result<(), String> {
+        self.manager()
+            .restore_variant(name, variant, handle)
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn rename_variant(&self, name: &str, from: &str, to: &str) -> Result<(), String> {
+        self.manager()
+            .rename_variant(name, from, to)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Undo-delete's second half: bring a deleted preset's parked variants back.
+    pub fn restore_variants(&self, name: &str, archive: &str) -> Result<(), String> {
+        self.manager()
+            .restore_variants(name, archive)
+            .map_err(|e| e.to_string())
+    }
+
+    /// The active preset as the tray names it: "<name> · <variant> pads" when
+    /// the preset has a selected variant and the window shows sub-presets (the
+    /// Settings switch), worded as the window words it; else just the name.
+    pub fn active_label(&self) -> Option<String> {
+        let name = self.active()?;
+        let manager = self.manager();
+        let Some(variant) = manager
+            .selected_variant(&name)
+            .filter(|_| self.sub_presets_shown())
+        else {
+            return Some(name);
+        };
+        let category = manager.categories().ok().and_then(|mut m| m.remove(&name));
+        Some(
+            match fastpeq_core::category::variant_noun(category.as_deref()) {
+                Some(noun) => format!("{name} · {variant} {noun}"),
+                None => format!("{name} · {variant}"),
+            },
+        )
+    }
+
+    /// The frontend's "Enable sub-presets" preference (default on) — the one
+    /// UI-state value the backend peeks at, tolerantly, so the tray hides
+    /// variants when the window does. Anything unreadable reads as on.
+    fn sub_presets_shown(&self) -> bool {
+        self.ui_state("prefs")
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+            .and_then(|prefs| prefs.get("subPresets")?.as_bool())
+            .unwrap_or(true)
+    }
+
     /// The cached tone overlay (the sidecar is its persistence layer).
     pub fn tone(&self) -> Result<Tone, String> {
         Ok(self.tone_cache())
@@ -1060,7 +1145,8 @@ impl AppState {
 
     /// A persisted UI state document, or `None` when it has never been saved.
     /// Like the hotkey bindings, the backend never interprets the content — it
-    /// only rejects keys outside the allowlist.
+    /// only rejects keys outside the allowlist. (The one tolerant exception is
+    /// the tray's read of the sub-presets switch, `sub_presets_shown`.)
     pub fn ui_state(&self, key: &str) -> Result<Option<String>, String> {
         ui_state_shape(key)?;
         Ok(std::fs::read_to_string(ui_state_path(&self.data_dir, key)).ok())

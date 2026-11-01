@@ -34,6 +34,19 @@ describe("payloadForHotkey", () => {
     expect(payloadForHotkey(hk({ action: "preset", preset: "Gone" }), ctx())).toBeNull();
   });
 
+  it("preset names its selected sub-preset after the name", () => {
+    expect(
+      payloadForHotkey(
+        hk({ action: "preset", preset: "HD600" }),
+        ctx({ presetName: "HD600", presetVariant: "Dekoni" }),
+      ),
+    ).toEqual({ title: "Preset", detail: "HD600 · Dekoni" });
+    // A variant without a resolved preset is still nothing to show.
+    expect(
+      payloadForHotkey(hk({ action: "preset", preset: "Gone" }), ctx({ presetVariant: "Dekoni" })),
+    ).toBeNull();
+  });
+
   it("device shows the cached name, falling back to the id, or nothing", () => {
     expect(
       payloadForHotkey(hk({ action: "device", device: "id1", deviceName: "USB DAC" }), ctx()),

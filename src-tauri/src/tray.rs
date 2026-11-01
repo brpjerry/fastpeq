@@ -74,7 +74,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         "Bypassed".to_string()
     } else {
         state
-            .active()
+            .active_label()
             .unwrap_or_else(|| "No preset active".to_string())
     };
     menu.append(&MenuItem::with_id(

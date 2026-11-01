@@ -1080,3 +1080,21 @@ describe("Editor version tags", () => {
     });
   });
 });
+
+describe("Editor header subtitle", () => {
+  it("shows the selected sub-preset after the name, muted, and nothing otherwise", async () => {
+    const { container, unmount } = renderEditor(cfg(0, [[100, 3, 1]]), { subtitle: "Dekoni pads" });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    const h2 = container.querySelector(".panel-head h2")!;
+    expect(h2.textContent!.replace(/\s+/g, " ").trim()).toBe("Test · Dekoni pads");
+    expect(h2.querySelector(".subtitle")).toBeTruthy();
+    expect(h2.getAttribute("title")).toBe("Test · Dekoni pads");
+    unmount();
+
+    const plain = renderEditor(cfg(0, [[100, 3, 1]]));
+    await waitFor(() => expect(bandCount(plain.container)).toBe(1));
+    const bare = plain.container.querySelector(".panel-head h2")!;
+    expect(bare.textContent!.trim()).toBe("Test");
+    expect(bare.querySelector(".subtitle")).toBeNull();
+  });
+});

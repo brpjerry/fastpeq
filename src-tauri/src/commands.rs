@@ -3,7 +3,7 @@
 
 use crate::state::{ApoStatus, AppState, HardwareStatus};
 use crate::tray;
-use fastpeq_core::{Category, Config, ImportReport, OffloadMode, Tone};
+use fastpeq_core::{Category, Config, DeleteReceipt, ImportReport, OffloadMode, Tone, VariantSet};
 use std::collections::BTreeMap;
 use tauri::{AppHandle, Manager, State};
 
@@ -58,17 +58,18 @@ pub fn capture_current(
     Ok(())
 }
 
-/// Delete a preset. Resolves to the id of its `delete` history revision (the
-/// undo handle), or `null` when nothing could be snapshotted.
+/// Delete a preset. Resolves to its undo handles: the id of its `delete`
+/// history revision (`null` when nothing could be snapshotted) and its parked
+/// variants, if it had any.
 #[tauri::command]
 pub fn delete_preset(
     app: AppHandle,
     state: State<'_, AppState>,
     name: String,
-) -> Result<Option<String>, String> {
-    let revision = state.delete(&name)?;
+) -> Result<DeleteReceipt, String> {
+    let receipt = state.delete(&name)?;
     let _ = tray::refresh(&app);
-    Ok(revision)
+    Ok(receipt)
 }
 
 #[tauri::command]
@@ -189,11 +190,105 @@ pub fn preset_categories(state: State<'_, AppState>) -> Result<BTreeMap<String, 
 
 #[tauri::command]
 pub fn set_category(
+    app: AppHandle,
     state: State<'_, AppState>,
     name: String,
     category: Option<Category>,
 ) -> Result<(), String> {
-    state.set_category(&name, category)
+    state.set_category(&name, category)?;
+    let _ = tray::refresh(&app); // the tray words a variant by its category
+    Ok(())
+}
+
+// --- Variants (sub-presets): one per set of pads / tips, see `docs/PERSISTENCE.md`
+
+/// Every preset's variants with the selected one; presets without any are absent.
+#[tauri::command]
+pub fn preset_variants(state: State<'_, AppState>) -> Result<BTreeMap<String, VariantSet>, String> {
+    state.preset_variants()
+}
+
+/// Add a variant copied from the preset's current content and select it (the
+/// first one also seeds "Default" from that content).
+#[tauri::command]
+pub fn create_variant(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    variant: String,
+) -> Result<(), String> {
+    state.create_variant(&name, &variant)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+/// Make `variant` the one the preset file mirrors (the caller then applies the
+/// preset to hear it).
+#[tauri::command]
+pub fn select_variant(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    variant: String,
+) -> Result<(), String> {
+    state.select_variant(&name, &variant)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+/// Delete a variant. Resolves to its undo handle for `restore_variant` (the
+/// archived file's name), or `null` when there was no file to archive.
+#[tauri::command]
+pub fn delete_variant(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    variant: String,
+) -> Result<Option<String>, String> {
+    let revision = state.delete_variant(&name, &variant)?;
+    let _ = tray::refresh(&app);
+    Ok(revision)
+}
+
+/// Undo a variant delete: move the archived file back as that variant's.
+#[tauri::command]
+pub fn restore_variant(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    variant: String,
+    handle: String,
+) -> Result<(), String> {
+    state.restore_variant(&name, &variant, &handle)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rename_variant(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    state.rename_variant(&name, &from, &to)?;
+    let _ = tray::refresh(&app);
+    Ok(())
+}
+
+/// Undo-delete's second half: bring a deleted preset's parked variants back
+/// (`archive` is the handle from `delete_preset`'s receipt).
+#[tauri::command]
+pub fn restore_variants(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    archive: String,
+) -> Result<(), String> {
+    state.restore_variants(&name, &archive)?;
+    let _ = tray::refresh(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -293,10 +388,20 @@ pub fn load_ui_state(state: State<'_, AppState>, key: String) -> Result<Option<S
     state.ui_state(&key)
 }
 
-/// Persist a UI state document (see [`load_ui_state`]).
+/// Persist a UI state document (see [`load_ui_state`]). The prefs document
+/// carries the sub-presets switch, which the tray label honours.
 #[tauri::command]
-pub fn save_ui_state(state: State<'_, AppState>, key: String, json: String) -> Result<(), String> {
-    state.set_ui_state(&key, &json)
+pub fn save_ui_state(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key: String,
+    json: String,
+) -> Result<(), String> {
+    state.set_ui_state(&key, &json)?;
+    if key == "prefs" {
+        let _ = tray::refresh(&app);
+    }
+    Ok(())
 }
 
 /// List the system's audio output devices (for the "switch output device" hotkey

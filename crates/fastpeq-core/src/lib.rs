@@ -25,7 +25,9 @@ pub use apo::env;
 pub use apo::{Channel, Config, Filter, FilterKind, Line, parse, serialize};
 pub use category::Category;
 pub use history::{PresetHistory, Revision, RevisionOp};
-pub use manager::{ImportReport, Manager};
+pub use manager::{
+    ArchivedVariants, DEFAULT_VARIANT, DeleteReceipt, ImportReport, Manager, VariantSet,
+};
 pub use offload::{
     HardwareProfile, HwBand, HwFilterType, OffloadMode, Split, biquad_coeffs, peak_gain_db, split,
 };

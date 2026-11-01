@@ -14,7 +14,8 @@
   import { addTarget, initTargets } from "./lib/targets.svelte";
   import { renamePresetView, clearPresetView, initPresetView } from "./lib/preset-view.svelte";
   import { parseRew, normalize, downsample } from "./lib/measurement";
-  import { getToneStep, defaultBandCount, initPrefs } from "./lib/prefs.svelte";
+  import { getToneStep, defaultBandCount, initPrefs, getSubPresets } from "./lib/prefs.svelte";
+  import { DEFAULT_VARIANT, variantLabel, variantNoun } from "./lib/variants";
   import { initTheme } from "./lib/theme";
   import { createDebounce, createTrailingThrottle } from "./lib/throttle";
   import { getHotkeys, accelerators, initHotkeys, renameHotkeyPreset, updateHotkey, type Hotkey } from "./lib/hotkeys.svelte";
@@ -25,6 +26,7 @@
   let presets = $state<string[]>([]);
   let categories = $state<Record<string, string>>({});
   let versions = $state<Record<string, number>>({}); // history counts → "vN" badges
+  let variants = $state<Record<string, api.VariantSet>>({}); // sub-presets per preset (absent = none)
   let active = $state<string | null>(null);
   let selected = $state<string | null>(null);
   let toast = $state<Toast | null>(null); // see showToast below
@@ -149,6 +151,7 @@
       tone, // setKnob already updated this synchronously
       bypassed: !isBypassed, // toggleBypass flips it; this is the state it becomes
       presetName: h.preset && presets.includes(h.preset) ? h.preset : undefined,
+      presetVariant: variantSubtitle(h.preset),
     });
     if (payload) emit(OSD_EVENT, payload).catch(() => {});
   }
@@ -204,10 +207,11 @@
     // The backend works with or without Equalizer APO (without it, presets run
     // against a private config dir and only hardware offload is audible), so
     // the library always loads — the banner explains the difference.
-    const [pres, cats, vers, act, byp, tn] = await Promise.all([
+    const [pres, cats, vers, vars, act, byp, tn] = await Promise.all([
       api.listPresets(),
       api.presetCategories(),
       api.presetVersions(),
+      api.presetVariants(),
       api.activePreset(),
       api.bypassed(), // backend owns bypass state (tray/hotkey too)
       api.getTone(),
@@ -215,6 +219,7 @@
     presets = pres;
     categories = cats;
     versions = vers;
+    variants = vars;
     active = act;
     isBypassed = byp;
     tone = tn;
@@ -407,14 +412,14 @@
   const remove = (name: string) =>
     guard(async () => {
       const category = categories[name] ?? null;
-      const revision = await api.deletePreset(name);
+      const receipt = await api.deletePreset(name);
       if (selected === name) selected = null;
       await reload();
-      if (revision) {
+      if (receipt.revision) {
         showToast(
           {
             text: `Deleted “${name}”`,
-            action: { label: "Undo", run: () => undoDelete(name, revision, category) },
+            action: { label: "Undo", run: () => undoDelete(name, receipt, category) },
             onExpire: () => clearPresetView(name),
           },
           8000,
@@ -426,14 +431,150 @@
       }
     });
 
-  const undoDelete = (name: string, revision: string, category: string | null) =>
+  // Undo brings back the preset file, then its parked variants (re-selecting
+  // the one that was selected, which also restores the exact file rather than
+  // the normalized snapshot), then its category.
+  const undoDelete = (name: string, receipt: api.DeleteReceipt, category: string | null) =>
     guard(async () => {
-      await api.restoreRevision(name, revision);
+      if (!receipt.revision) return;
+      await api.restoreRevision(name, receipt.revision);
+      if (receipt.variants) {
+        await api.restoreVariants(name, receipt.variants.archive);
+        if (receipt.variants.selected) await api.selectVariant(name, receipt.variants.selected);
+      }
       if (category !== null) await api.setCategory(name, category);
       await reload();
       selected = name; // bring the resurrected preset back into the editor
       flash(`Restored “${name}”`);
     });
+
+  // --- Sub-presets (pad / tip variants) ---------------------------------------
+  // The backend keeps the preset file equal to the selected variant, so every
+  // path below ends in the ordinary apply/reload; only the selection changes.
+
+  const variantNounFor = (name: string) => variantNoun(categories[name]);
+  const labelFor = (name: string, variant: string) => variantLabel(variant, variantNounFor(name));
+
+  // "<variant> pads" for a preset with a selected variant, when the feature is
+  // on — what the editor header and the OSD show after the preset's name (the
+  // tray words its label the same way, backend-side).
+  function variantSubtitle(name: string | null | undefined): string | undefined {
+    if (!name || !getSubPresets()) return undefined;
+    const current = variants[name]?.selected;
+    return current ? labelFor(name, current) : undefined;
+  }
+  const editorSubtitle = $derived(variantSubtitle(selected) ?? null);
+  let editor = $state.raw<ReturnType<typeof Editor> | undefined>(undefined); // bind:this
+
+  // Picking from a row's dropdown is the explicit selection: it sticks (the
+  // row click and the hotkey load it from now on) and plays right away. The
+  // preset file changes under the editor, so the editor follows it *before*
+  // the live apply: should that fail, it must not keep showing the old
+  // variant's filters under the new name (a Save would write them into it).
+  const pickVariant = (name: string, variant: string) =>
+    guard(async () => {
+      await api.selectVariant(name, variant);
+      const vs = variants[name];
+      if (vs) variants = { ...variants, [name]: { ...vs, selected: variant } };
+      selected = name;
+      editorReloadToken++;
+      await api.applyPreset(name);
+      active = name;
+      await tick();
+      scrollCurrentIntoView();
+    });
+
+  const newVariant = (parent: string, nameRaw: string) =>
+    guard(async () => {
+      const name = nameRaw.trim();
+      if (!name) { flash("Type a name first"); return; }
+      // A first variant also seeds "Default", so that name is taken up front.
+      const taken = variants[parent]?.variants ?? [DEFAULT_VARIANT];
+      if (taken.some((v) => v.toLowerCase() === name.toLowerCase())) {
+        flash(`“${name}” already exists`);
+        return;
+      }
+      await api.createVariant(parent, name);
+      // Rolled while tuning: the tuning was meant for these pads. Saving it now
+      // lands it in the new variant (the preset file mirrors it), while the
+      // previous pads — Default, on a first roll — keep what was saved.
+      const tuning = selected === parent ? (editor?.unsavedConfig() ?? null) : null;
+      if (tuning) {
+        try {
+          await api.savePreset(parent, tuning);
+        } catch (e) {
+          // The variant exists and is selected: show that, and keep the unsaved
+          // edits in the editor — its Save now writes them into the new variant.
+          await reload();
+          flash(`Created “${labelFor(parent, name)}”, but could not save the tuning: ${e}`);
+          return;
+        }
+      }
+      await reload(); // the dropdown appears whatever the apply below does
+      selected = parent;
+      editorReloadToken++;
+      await api.applyPreset(parent);
+      active = parent;
+      flash(`Created “${labelFor(parent, name)}” for “${parent}”`);
+    });
+
+  // Deleting the selected variant makes the backend fall back to another one
+  // (rewriting the preset file), so the editor and the live sound follow it.
+  const removeVariant = (name: string, variant: string) =>
+    guard(async () => {
+      const wasSelected = variants[name]?.selected === variant;
+      const handle = await api.deleteVariant(name, variant);
+      await reload();
+      if (wasSelected && selected === name) editorReloadToken++;
+      // The delete is done whatever the live apply does: its Undo is offered
+      // either way, with any apply error on the same toast.
+      let applyError: string | null = null;
+      if (wasSelected && active === name) {
+        try {
+          await api.applyPreset(name);
+        } catch (e) {
+          applyError = String(e);
+        }
+      }
+      const text =
+        `Deleted “${labelFor(name, variant)}”` +
+        (applyError ? `, but could not apply: ${applyError}` : "");
+      if (handle) {
+        showToast(
+          {
+            text,
+            action: { label: "Undo", run: () => undoDeleteVariant(name, variant, handle, wasSelected) },
+          },
+          8000,
+        );
+      } else {
+        flash(text);
+      }
+    });
+
+  const undoDeleteVariant = (name: string, variant: string, handle: string, reselect: boolean) =>
+    guard(async () => {
+      await api.restoreVariant(name, variant, handle);
+      if (reselect) await api.selectVariant(name, variant);
+      await reload();
+      if (reselect && selected === name) editorReloadToken++;
+      if (reselect && active === name) await api.applyPreset(name);
+      flash(`Restored “${labelFor(name, variant)}”`);
+    });
+
+  const renameVariant = (name: string, from: string, toRaw: string) => {
+    const to = toRaw.trim();
+    if (!to || to === from) return;
+    const taken = variants[name]?.variants ?? [];
+    if (taken.some((v) => v !== from && v.toLowerCase() === to.toLowerCase())) {
+      flash(`“${to}” already exists`);
+      return;
+    }
+    guard(async () => {
+      await api.renameVariant(name, from, to);
+      await reload();
+    });
+  };
 
 
   // Returning from Settings recreates the preset list (resetting its scroll to
@@ -674,11 +815,19 @@
       onNewPreset={newPreset}
       onCapture={capture}
       onRename={commitRename}
+      {variants}
+      subPresets={getSubPresets()}
+      onPickVariant={pickVariant}
+      onNewVariant={newVariant}
+      onRemoveVariant={removeVariant}
+      onRenameVariant={renameVariant}
     />
 
     {#if selected}
       <Editor
+        bind:this={editor}
         name={selected}
+        subtitle={editorSubtitle}
         {tone}
         bypassed={isBypassed}
         apoState={status?.output_state ?? "unknown"}

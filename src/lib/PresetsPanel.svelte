@@ -11,12 +11,13 @@
 </script>
 
 <script lang="ts">
-  import type { ApoStatus } from "./api";
+  import type { ApoStatus, VariantSet } from "./api";
   import CategoryIcon from "./CategoryIcon.svelte";
   import FloatingMenu from "./FloatingMenu.svelte";
   import { anchorBelow, type Anchor } from "./floating";
   import { getSpecialtyIcons, getBluetoothIcons } from "./prefs.svelte";
   import { CATEGORIES, CATEGORY_LABELS, CATEGORY_NONE } from "./constants";
+  import { variantCreateLabel, variantLabel, variantNoun, variantPlaceholder } from "./variants";
 
 
   let {
@@ -39,6 +40,12 @@
     onNewPreset,
     onCapture,
     onRename,
+    variants = {},
+    subPresets = true,
+    onPickVariant,
+    onNewVariant,
+    onRemoveVariant,
+    onRenameVariant,
   }: {
     presets: string[];
     categories: Record<string, string>;
@@ -62,6 +69,18 @@
     onNewPreset: (name: string) => void;
     onCapture: (name: string) => void;
     onRename: (from: string, to: string) => void;
+    /** Each preset's sub-presets (pad / tip variants) and the selected one;
+     * presets without any are absent. */
+    variants?: Record<string, VariantSet>;
+    /** The global sub-presets switch (Settings). Off hides the per-row dropdown
+     * and the create button; a preset still loads whichever variant is selected. */
+    subPresets?: boolean;
+    /** A variant was picked from a row's dropdown: select it and load it. */
+    onPickVariant: (name: string, variant: string) => void;
+    /** Create a variant of `parent` from its current settings. */
+    onNewVariant: (parent: string, name: string) => void;
+    onRemoveVariant: (name: string, variant: string) => void;
+    onRenameVariant: (name: string, from: string, to: string) => void;
   } = $props();
 
   let query = $state("");
@@ -143,12 +162,19 @@
     typeMenu = null;
   }
 
-  let creating = $state(false);
+  // The create form at the bottom: a new preset, or a variant of the selected
+  // preset (same form, one Create button — a variant always copies its parent).
+  let creating = $state<false | "preset" | "variant">(false);
   let newName = $state("");
 
   function startCreate() {
     newName = "";
-    creating = true;
+    creating = "preset";
+  }
+  function startCreateVariant() {
+    if (!selected) return;
+    newName = "";
+    creating = "variant";
   }
   function cancelCreate() {
     creating = false;
@@ -165,6 +191,15 @@
     cancelCreate();
     query = "";
     typeFilter = "";
+  }
+  function submitVariant() {
+    if (selected) onNewVariant(selected, newName);
+    cancelCreate();
+  }
+  // Enter in the name box submits whichever flavour of create is open.
+  function submitDefault() {
+    if (creating === "variant") submitVariant();
+    else submitCreate();
   }
 
   let renaming = $state<string | null>(null);
@@ -187,6 +222,51 @@
     renaming = null;
     onRename(from, renameValue);
   }
+
+  // A preset's variant dropdown (the row's "<variant> pads ▾" trigger). The
+  // menu floats outside the list like the category picker, so a row never
+  // gains nested `.active` elements (scrollCurrentIntoView keys off that class).
+  const hasVariants = (name: string) =>
+    subPresets && (variants[name]?.variants.length ?? 0) > 0;
+  let variantMenu = $state<{ name: string; anchor: Anchor; trigger: HTMLElement } | null>(null);
+  let renamingVariant = $state<string | null>(null);
+  let renameVariantValue = $state("");
+
+  function toggleVariantMenu(trigger: HTMLElement, name: string) {
+    renamingVariant = null;
+    if (variantMenu?.name === name) {
+      variantMenu = null;
+      return;
+    }
+    variantMenu = { name, anchor: anchorBelow(trigger, 200), trigger };
+  }
+  function pickVariant(name: string, variant: string) {
+    variantMenu = null;
+    onPickVariant(name, variant);
+  }
+  function removeVariant(name: string, variant: string) {
+    variantMenu = null;
+    onRemoveVariant(name, variant);
+  }
+  function startRenameVariant(variant: string) {
+    renamingVariant = variant;
+    renameVariantValue = variant;
+  }
+  function commitRenameVariant(name: string) {
+    const from = renamingVariant;
+    if (from === null) return;
+    renamingVariant = null;
+    onRenameVariant(name, from, renameVariantValue);
+  }
+  // A reload can take the preset (or its last variant) out from under an open menu.
+  $effect(() => {
+    if (variantMenu && !hasVariants(variantMenu.name)) variantMenu = null;
+  });
+  // The variant form creates for the selected preset; should that selection go
+  // away while it is open (the preset was deleted), there is nothing to create for.
+  $effect(() => {
+    if (creating === "variant" && !selected) cancelCreate();
+  });
 
   let prevQuery = "";
   let prevFilter = "";
@@ -308,6 +388,24 @@
           >
             {name}{#if versions[name]}<span class="ver">v{versions[name] + 1}</span>{/if}
           </button>
+          {#if hasVariants(name)}
+            {@const noun = variantNoun(categories[name])}
+            {@const current = variants[name].selected}
+            <button
+              class="variant-trigger"
+              class:open={variantMenu?.name === name}
+              onclick={(e) => toggleVariantMenu(e.currentTarget, name)}
+              disabled={busy}
+              aria-haspopup="listbox"
+              aria-expanded={variantMenu?.name === name}
+              title={`Choose ${noun ?? "sub-preset"} · the preset loads the one selected here`}
+            >
+              <span class="variant-current">{current ? variantLabel(current, noun) : "Choose…"}</span>
+              <svg class="type-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          {/if}
           <div class="row-actions">
             <button class="icon" onclick={() => startRename(name)} disabled={busy} title="Rename">
               &#9998;
@@ -328,45 +426,71 @@
   </ul>
 
   {#if creating}
-    <div class="create">
+    {@const parentCategory = categories[selected ?? ""]}
+    <div class="create" class:variant={creating === "variant"}>
       <input
-        placeholder="New preset name"
+        placeholder={creating === "variant" ? variantPlaceholder(parentCategory) : "New preset name"}
         bind:value={newName}
         use:focusInput
         onkeydown={(e) => {
-          if (e.key === "Enter") submitCreate();
+          if (e.key === "Enter") submitDefault();
           else if (e.key === "Escape") cancelCreate();
         }}
         disabled={busy || !status}
       />
       <div class="create-actions">
-        <button
-          class="primary"
-          onclick={submitCreate}
-          disabled={busy || !status}
-          title="Start from {bandCount} empty bands (set the count in Settings)"
-        >
-          From scratch
-        </button>
-        <button
-          class="capture-btn"
-          onclick={submitCapture}
-          disabled={busy || !status}
-          title="Save the current live Equalizer APO config as this preset"
-        >
-          Save current
-        </button>
+        {#if creating === "variant"}
+          <button
+            class="primary"
+            onclick={submitVariant}
+            disabled={busy || !status || !selected}
+            title={`Copy “${selected}”, unsaved edits included, into a new ${variantNoun(parentCategory) ?? "sub-preset"} variant and switch to it`}
+          >
+            Create
+          </button>
+        {:else}
+          <button
+            class="primary"
+            onclick={submitCreate}
+            disabled={busy || !status}
+            title="Start from {bandCount} empty bands (set the count in Settings)"
+          >
+            From scratch
+          </button>
+          <button
+            class="capture-btn"
+            onclick={submitCapture}
+            disabled={busy || !status}
+            title="Save the current live Equalizer APO config as this preset"
+          >
+            Save current
+          </button>
+        {/if}
         <button class="ghost create-cancel" onclick={cancelCreate} title="Cancel">Cancel</button>
       </div>
     </div>
   {:else}
-    <button
-      class="primary new-btn"
-      onclick={startCreate}
-      disabled={busy || !status}
-    >
-      + New preset
-    </button>
+    <div class="new-row">
+      <button
+        class="primary new-btn"
+        onclick={startCreate}
+        disabled={busy || !status}
+      >
+        + New preset
+      </button>
+      {#if subPresets}
+        <button
+          class="variant-btn"
+          onclick={startCreateVariant}
+          disabled={busy || !status || !selected}
+          title={selected
+            ? `Add a ${variantNoun(categories[selected]) ?? "sub-preset"} variant of “${selected}”, starting from what the editor shows`
+            : "Select a preset first"}
+        >
+          {variantCreateLabel(categories[selected ?? ""])}
+        </button>
+      {/if}
+    </div>
   {/if}
 </section>
 
@@ -424,6 +548,57 @@
     </button>
   {/if}
 </FloatingMenu>
+
+{#if variantMenu}
+  {@const menu = variantMenu}
+  {@const vs = variants[menu.name]}
+  {@const noun = variantNoun(categories[menu.name])}
+  <FloatingMenu
+    class="cat-menu variant-menu"
+    role="listbox"
+    open={!!vs}
+    anchor={menu.anchor}
+    onDismiss={() => (variantMenu = null)}
+    ignore={menu.trigger}
+    zIndex={81}
+    maxHeight="70vh"
+  >
+    {#each vs?.variants ?? [] as v (v)}
+      {@const sel = v === vs?.selected}
+      <div class="variant-row">
+        {#if renamingVariant === v}
+          <input
+            class="rename-input variant-rename"
+            bind:value={renameVariantValue}
+            use:focusInput
+            onblur={() => commitRenameVariant(menu.name)}
+            onkeydown={(e) => {
+              if (e.key === "Enter") commitRenameVariant(menu.name);
+              else if (e.key === "Escape") renamingVariant = null;
+            }}
+          />
+        {:else}
+          <button
+            class="menu-item variant-item"
+            class:sel
+            role="option"
+            aria-selected={sel}
+            onclick={() => pickVariant(menu.name, v)}
+            title="Click to load"
+          >
+            {variantLabel(v, noun)}
+          </button>
+          <button class="icon variant-action" onclick={() => startRenameVariant(v)} disabled={busy} title="Rename">
+            &#9998;
+          </button>
+          <button class="danger icon variant-action" onclick={() => removeVariant(menu.name, v)} disabled={busy} title="Delete">
+            &#10005;
+          </button>
+        {/if}
+      </div>
+    {/each}
+  </FloatingMenu>
+{/if}
 
 <style>
   .ghost.on {
@@ -588,6 +763,81 @@
   .name:hover {
     background: var(--panel-2);
   }
+  /* The row's variant dropdown trigger ("<variant> pads ▾"). A sibling of the
+     name button, so the name's own text stays clean for scanning and tests. */
+  .variant-trigger {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 45%;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .variant-trigger:hover:not(:disabled),
+  .variant-trigger.open {
+    background: #2b3038;
+    border-color: #3a4150;
+    color: var(--text);
+  }
+  .variant-current {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .variant-trigger .type-caret {
+    width: 12px;
+    height: 12px;
+  }
+  .variant-trigger.open .type-caret {
+    transform: rotate(180deg);
+  }
+  .variant-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .variant-item {
+    flex: 1;
+    min-width: 0;
+    color: var(--text);
+  }
+  .variant-action {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    border-radius: 5px;
+    font-size: 12px;
+    color: var(--muted);
+    opacity: 0;
+  }
+  .variant-row:hover .variant-action,
+  .variant-action:focus-visible {
+    opacity: 1;
+  }
+  .variant-action:hover:not(:disabled) {
+    background: var(--panel-2);
+    color: var(--text);
+  }
+  .danger.variant-action:hover:not(:disabled) {
+    color: var(--danger);
+  }
+  .variant-rename {
+    flex: 1;
+    margin: 2px;
+    font-size: 13px;
+  }
   .row-actions {
     display: flex;
     gap: 4px;
@@ -624,9 +874,20 @@
     padding: 10px 8px;
   }
 
-  .new-btn {
-    width: 100%;
+  .new-row {
+    display: flex;
+    gap: 8px;
     margin-top: 12px;
+  }
+  .new-btn {
+    flex: 1;
+    min-width: 0;
+  }
+  /* "Pad roll" / "Tip roll" / "+ sub-preset": a variant of the selected preset. */
+  .variant-btn {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
   }
   .create {
     display: flex;

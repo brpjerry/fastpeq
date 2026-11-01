@@ -3,7 +3,14 @@
 // runs the whole file, so tests re-apply what they depend on rather than
 // assuming a clean slate.
 import { browser, $, $$, expect } from "@wdio/globals";
-import { readConfig, readPreset, presetExists } from "../helpers/seed.js";
+import {
+  readConfig,
+  readPreset,
+  presetExists,
+  readVariant,
+  readVariants,
+  variantExists,
+} from "../helpers/seed.js";
 
 const BYPASS = 'button[title^="Drop the EQ filters"]';
 
@@ -55,8 +62,17 @@ async function rowFor(name) {
   throw new Error(`preset row not found: ${name}`);
 }
 
+// Click a preset row and wait for the apply to land. The panel is `busy` (its
+// buttons disabled) until the backend has applied the preset, so a click fired
+// meanwhile would be lost on a disabled button.
 async function apply(name) {
   await (await (await rowFor(name)).$(".name")).click();
+  await browser.waitUntil(
+    async () => ((await (await rowFor(name)).getAttribute("class")) || "").includes("active"),
+    { timeout: 10000, timeoutMsg: `${name} never became active` },
+  );
+  const newBtn = await $("button.new-btn");
+  if (await newBtn.isExisting()) await newBtn.waitForEnabled({ timeout: 10000 });
 }
 
 // Reset the list view: clear the search box and set the type filter back to
@@ -93,7 +109,9 @@ async function pickBandType(band, token) {
 
 // Create a new (empty) preset via the "+ New preset" → "From scratch" flow.
 async function createPreset(name) {
-  await $("button.new-btn").click();
+  const newBtn = await $("button.new-btn");
+  await newBtn.waitForEnabled({ timeout: 10000 }); // a previous action may still be busy
+  await newBtn.click();
   await (await $(".create input")).setValue(name);
   await (await $(".create-actions .primary")).click();
   await browser.waitUntil(async () => (await presetNames()).includes(name), {
@@ -438,5 +456,103 @@ describe("editor tooling: compare, undo/redo, auto preamp", () => {
       timeout: 5000,
       timeoutMsg: "toggling Auto off did not re-enable the slider",
     });
+  });
+});
+
+// ── Sub-presets: pad / tip variants inside one preset ────────────────────────
+describe("sub-presets (pad / tip variants)", () => {
+  before(showAll);
+
+  it("creates a pad variant of the selected preset and switches to it", async () => {
+    // The create button's label follows the selected preset's device type.
+    await apply("Vocal"); // iem
+    const btn = await $("button.variant-btn");
+    await btn.waitForEnabled({ timeout: 10000 });
+    expect(await btn.getText()).toBe("Tip roll");
+    await apply("BassBoost"); // headphone
+    await browser.waitUntil(async () => (await btn.getText()) === "Pad roll", {
+      timeout: 5000,
+      timeoutMsg: "create button did not switch to Pad roll",
+    });
+
+    // An edit left unsaved is what a roll is for: it goes into the new pads.
+    // (BassBoost has two seeded bands, Vocal one — so two rows means loaded.)
+    await browser.waitUntil(async () => (await bandRows()).length === 2, {
+      timeout: 10000,
+      timeoutMsg: "BassBoost's bands did not load",
+    });
+    await pickBandType(await firstBand(), "HSC");
+    await browser.waitUntil(async () => (await (await firstBandTok()).getText()).trim() === "HSC", {
+      timeout: 5000,
+      timeoutMsg: "type picker did not switch to HSC",
+    });
+
+    await btn.click();
+    const input = await $(".create input");
+    expect(await input.getAttribute("placeholder")).toBe("Pad name");
+    await input.setValue("Dekoni");
+    await (await $(".create-actions .primary")).click();
+
+    // Both the seeded Default and the new variant exist, the new one is
+    // selected (the sidecar is the last thing written), and the preset file
+    // mirrors it (a copy of what it had).
+    await browser.waitUntil(
+      () =>
+        variantExists("BassBoost", "Default") &&
+        variantExists("BassBoost", "Dekoni") &&
+        readVariants().BassBoost?.selected === "Dekoni",
+      { timeout: 10000, timeoutMsg: "variant files / selection were not written" },
+    );
+    expect(readPreset("BassBoost")).toBe(readVariant("BassBoost", "Dekoni"));
+    expect(readPreset("BassBoost")).toContain("Fc 60 Hz"); // BassBoost's own filters
+    // The unsaved edit went into the new pads; Default kept what was saved.
+    expect(readVariant("BassBoost", "Dekoni")).toContain("HSC");
+    expect(readVariant("BassBoost", "Default")).not.toContain("HSC");
+    await browser.waitUntil(async () => (await (await $(SAVE)).getText()).trim() === "Saved", {
+      timeout: 10000,
+      timeoutMsg: "the editor did not settle on the saved variant",
+    });
+
+    // The row grew a dropdown trigger naming the selected pads.
+    const row = await rowFor("BassBoost");
+    await browser.waitUntil(
+      async () => (await (await row.$(".variant-current")).getText()).trim() === "Dekoni pads",
+      { timeout: 10000, timeoutMsg: "row did not show the selected variant" },
+    );
+    // No extra list rows: variants live inside the preset's row.
+    expect((await presetNames()).filter((n) => n === "BassBoost").length).toBe(1);
+  });
+
+  it("picks another variant from the row's dropdown, and the preset keeps loading it", async () => {
+    const row = await rowFor("BassBoost");
+    await (await row.$(".variant-trigger")).click();
+    const menu = await $(".variant-menu");
+    await menu.waitForExist({ timeout: 5000 });
+    for (const item of await menu.$$(".variant-item")) {
+      if ((await item.getText()).trim() === "Default pads") {
+        await item.click();
+        break;
+      }
+    }
+    // The preset file is copied first, then the sidecar records the selection.
+    await browser.waitUntil(
+      () =>
+        readVariants().BassBoost?.selected === "Default" &&
+        readPreset("BassBoost") === readVariant("BassBoost", "Default"),
+      { timeout: 10000, timeoutMsg: "picking Default pads did not update the selection" },
+    );
+    await browser.waitUntil(
+      async () => (await (await row.$(".variant-current")).getText()).trim() === "Default pads",
+      { timeout: 10000, timeoutMsg: "row did not show Default pads" },
+    );
+
+    // Clicking the preset itself loads it as-is: the selection sticks.
+    await apply("Studio");
+    await apply("BassBoost");
+    await browser.waitUntil(() => readConfig().includes("fastpeq:preset=BassBoost"), {
+      timeout: 10000,
+      timeoutMsg: "BassBoost was not re-applied",
+    });
+    expect(readVariants().BassBoost?.selected).toBe("Default");
   });
 });
