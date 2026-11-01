@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { listen, emit } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -452,6 +453,11 @@
   // The backend keeps the preset file equal to the selected variant, so every
   // path below ends in the ordinary apply/reload; only the selection changes.
 
+  // Presets whose variant list is expanded in the panel. Session view state,
+  // held here rather than in the panel so it survives the Settings / Hotkeys
+  // round trips that remount the panel, and follows a rename.
+  const expandedPresets = new SvelteSet<string>();
+
   const variantNounFor = (name: string) => variantNoun(categories[name]);
   const labelFor = (name: string, variant: string) => variantLabel(variant, variantNounFor(name));
 
@@ -645,6 +651,7 @@
     guard(async () => {
       await api.renamePreset(from, to);
       renamePresetView(from, to);
+      if (expandedPresets.delete(from)) expandedPresets.add(to); // its list stays open
       renameHotkeyPreset(from, to); // bindings key off the name — keep them pointed at it
       if (selected === from) selected = to;
       await reload();
@@ -816,6 +823,7 @@
       onCapture={capture}
       onRename={commitRename}
       {variants}
+      expanded={expandedPresets}
       subPresets={getSubPresets()}
       onPickVariant={pickVariant}
       onNewVariant={newVariant}

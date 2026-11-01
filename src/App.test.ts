@@ -1379,6 +1379,54 @@ describe("App sub-presets", () => {
     );
   });
 
+  it("offers no variant to pick while an operation is still running", async () => {
+    // A pick landing mid-create would re-point the preset file before the
+    // create saves the tuning, sending it into the wrong pads.
+    withVariants();
+    let finish!: () => void;
+    vi.mocked(api.selectVariant).mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finish = resolve)),
+    );
+    const { container } = render(App);
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
+
+    const list = await expand(container, "Sennheiser HD600");
+    await fireEvent.click(variantRow(list, "Default pads").querySelector(".variant-item")!);
+    const items = () => [...list.querySelectorAll<HTMLButtonElement>(".variant-item")];
+    await waitFor(() => expect(items().every((b) => b.disabled)).toBe(true));
+    await fireEvent.click(variantRow(list, "Dekoni pads").querySelector(".variant-item")!);
+    expect(api.selectVariant).toHaveBeenCalledTimes(1);
+
+    finish();
+    await waitFor(() => expect(items().every((b) => !b.disabled)).toBe(true));
+  });
+
+  it("keeps a preset's variant list open across a rename and a Settings round trip", async () => {
+    withVariants();
+    const { container } = render(App);
+    await waitFor(() => expect(toggle(container, "Sennheiser HD600")).toBeTruthy());
+    await expand(container, "Sennheiser HD600");
+
+    await fireEvent.dblClick(rowFor(container, "Sennheiser HD600").querySelector(".name")!);
+    const input = container.querySelector(".rename-input")!;
+    await fireEvent.input(input, { target: { value: "Sennheiser HD650" } });
+    vi.mocked(api.listPresets).mockResolvedValue(["64 Audio U12t", "Sennheiser HD650"]);
+    vi.mocked(api.presetVariants).mockResolvedValue({
+      "Sennheiser HD650": { variants: ["Default", "Dekoni"], selected: "Dekoni" },
+    });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(rowFor(container, "Sennheiser HD650")).toBeTruthy());
+    expect(rowFor(container, "Sennheiser HD650").querySelector(".variants")).toBeTruthy();
+
+    // Settings replaces the preset list; coming back rebuilds it, still open.
+    const gear = container.querySelector<HTMLButtonElement>("button.gear")!;
+    await fireEvent.click(gear);
+    await waitFor(() => expect(rows(container).length).toBe(0));
+    await fireEvent.click(gear);
+    await waitFor(() => expect(rows(container).length).toBe(2));
+    expect(rowFor(container, "Sennheiser HD650").querySelector(".variants")).toBeTruthy();
+  });
+
   it("undoing a preset delete brings its variants back and re-selects", async () => {
     withVariants();
     vi.mocked(api.deletePreset).mockResolvedValue({

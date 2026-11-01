@@ -85,13 +85,14 @@ active preset, status) with a builder so each test sets up its own scenario.
    file in the expanded view surfaces the measurement name + clear control.
 10. ✅ **Sub-presets**: the row's expand caret and inline variant list (only
     for presets that have variants; pick → `selectVariant` then `applyPreset`,
-    rename/delete with Undo), the + New Pads / + New Tips / + sub-preset
-    button and its one-button create form (name-conflict guard incl. the
-    seeded "Default"; unsaved
-    editor edits are saved into the new variant, after the create), the global
-    switch hiding both, undo-delete restoring a preset's parked variants, the
-    OSD naming the variant, and the editor following a picked variant (and
-    Undo staying on offer) even when the live apply fails.
+    rename/delete with Undo, nothing pickable while an operation runs, the
+    list staying open across a preset rename and a Settings round trip), the
+    + New Pads / + New Tips / + sub-preset button and its one-button create
+    form (name-conflict guard incl. the seeded "Default"; unsaved editor edits
+    are saved into the new variant, after the create), the global switch
+    hiding both, undo-delete restoring a preset's parked variants, the OSD
+    naming the variant, and the editor following a picked variant (and Undo
+    staying on offer) even when the live apply fails.
 
 ### Known limitation
 happy-dom has no real layout — `getBoundingClientRect` returns zeros — so menu

@@ -1,9 +1,13 @@
 <script module lang="ts">
-  // Scroll the active preset row into view. Module-scoped so App — which owns
-  // reload/open and the settings/hotkeys subpages — can call the same one
-  // definition instead of duplicating the query.
+  // Scroll the active preset row into view — its selected variant when its
+  // list is expanded (the row's <li> holds the whole list, which can outgrow
+  // the viewport). Module-scoped so App — which owns reload/open and the
+  // settings/hotkeys subpages — can call the same one definition instead of
+  // duplicating the query.
   export function scrollCurrentIntoView() {
-    const el = document.querySelector(".presets .active") as HTMLElement | null;
+    const row = document.querySelector(".presets .active");
+    const el =
+      row?.querySelector<HTMLElement>(".variant-item.sel") ?? (row as HTMLElement | null);
     if (el && typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ block: "center" });
     }
@@ -42,6 +46,7 @@
     onCapture,
     onRename,
     variants = {},
+    expanded = new SvelteSet<string>(),
     subPresets = true,
     onPickVariant,
     onNewVariant,
@@ -73,10 +78,13 @@
     /** Each preset's sub-presets (pad / tip variants) and the selected one;
      * presets without any are absent. */
     variants?: Record<string, VariantSet>;
-    /** The global sub-presets switch (Settings). Off hides the per-row dropdown
-     * and the create button; a preset still loads whichever variant is selected. */
+    /** Presets whose variant list is expanded. Owned by App (session state that
+     * outlives this panel's remounts); the panel adds and removes names. */
+    expanded?: SvelteSet<string>;
+    /** The global sub-presets switch (Settings). Off hides the per-row expand
+     * caret and the create button; a preset still loads whichever variant is selected. */
     subPresets?: boolean;
-    /** A variant was picked from a row's dropdown: select it and load it. */
+    /** A variant was picked from a row's variant list: select it and load it. */
     onPickVariant: (name: string, variant: string) => void;
     /** Create a variant of `parent` from its current settings. */
     onNewVariant: (parent: string, name: string) => void;
@@ -232,7 +240,6 @@
   // the preset row alone (scrollCurrentIntoView keys off it).
   const hasVariants = (name: string) =>
     subPresets && (variants[name]?.variants.length ?? 0) > 0;
-  const expanded = new SvelteSet<string>();
   let renamingVariant = $state<{ name: string; variant: string } | null>(null);
   let renameVariantValue = $state("");
 
@@ -363,7 +370,7 @@
                 class:open
                 onclick={() => toggleExpanded(name)}
                 aria-expanded={open}
-                aria-label={`${open ? "Hide" : "Show"} ${what}`}
+                aria-label={`${open ? "Hide" : "Show"} ${name} ${what}`}
                 title={`${open ? "Hide" : "Show"} ${what}`}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -406,7 +413,7 @@
         {#if open}
           {@const vs = variants[name]}
           {@const noun = variantNoun(categories[name])}
-          <div class="variants" role="listbox" aria-label={`${name} ${noun ?? "sub-presets"}`}>
+          <div class="variants" role="group" aria-label={`${name} ${noun ?? "sub-presets"}`}>
             {#each vs.variants as v (v)}
               {@const sel = v === vs.selected}
               <div class="variant-row">
@@ -425,19 +432,31 @@
                   <button
                     class="variant-item"
                     class:sel
-                    role="option"
-                    aria-selected={sel}
+                    aria-current={sel}
                     onclick={() => onPickVariant(name, v)}
-                    title="Click to load — the preset loads the one picked here from now on"
+                    disabled={busy}
+                    title={`${variantLabel(v, noun)} — click to load; the preset loads the one picked here from now on`}
                   >
                     <span class="variant-dot" aria-hidden="true"></span>
                     <span class="variant-label">{variantLabel(v, noun)}</span>
                   </button>
                   <div class="row-actions variant-actions">
-                    <button class="icon" onclick={() => startRenameVariant(name, v)} disabled={busy} title="Rename">
+                    <button
+                      class="icon"
+                      onclick={() => startRenameVariant(name, v)}
+                      disabled={busy}
+                      title="Rename"
+                      aria-label={`Rename ${variantLabel(v, noun)}`}
+                    >
                       &#9998;
                     </button>
-                    <button class="danger icon" onclick={() => onRemoveVariant(name, v)} disabled={busy} title="Delete">
+                    <button
+                      class="danger icon"
+                      onclick={() => onRemoveVariant(name, v)}
+                      disabled={busy}
+                      title="Delete"
+                      aria-label={`Delete ${variantLabel(v, noun)}`}
+                    >
                       &#10005;
                     </button>
                   </div>
@@ -771,7 +790,7 @@
     color: var(--muted);
   }
   .variant-toggle:hover {
-    background: transparent;
+    background: transparent; /* no box behind the caret from the global button:hover */
     color: var(--text);
   }
   .variant-toggle svg {
@@ -815,7 +834,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .variant-item:hover {
+  .variant-item:hover:not(:disabled) {
     background: var(--panel-2);
     color: var(--text);
   }

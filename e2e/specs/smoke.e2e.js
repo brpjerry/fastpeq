@@ -526,7 +526,10 @@ describe("sub-presets (pad / tip variants)", () => {
 
   it("picks another variant from the row's list, and the preset keeps loading it", async () => {
     const row = await rowFor("BassBoost");
-    const list = await row.$(".variants"); // still open from creating the pads
+    // Creating the pads opened the list; open it here too, should that not hold.
+    const toggle = await row.$(".variant-toggle");
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    const list = await row.$(".variants");
     await list.waitForExist({ timeout: 5000 });
     for (const item of await list.$$(".variant-item")) {
       if ((await item.getText()).trim() === "Default pads") {
