@@ -462,6 +462,82 @@ describe("Editor", () => {
     expect(container.querySelector(".field.q")).toBeNull();
   });
 
+  // A number box that doesn't hold a number reads as "" — cleared to retype, or
+  // a lone "-" / "." on the way to a value, which the browser reports as "" too.
+  const numberBox = (root: ParentNode, field: string) =>
+    root.querySelector<HTMLInputElement>(`.field.${field} input[type='number']`)!;
+  const saveLabel = (root: ParentNode) =>
+    root.querySelector(".actions .primary")!.textContent!.trim();
+
+  it("keeps a peak's Q field while its box is cleared to retype", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 3, 2]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    vi.mocked(api.applyLive).mockClear();
+
+    // Clearing the Q used to null it, un-rendering the Q field mid-edit — the
+    // peak then looked like a Q-less shelf and went live without a Q.
+    await fireEvent.input(numberBox(container, "q"), { target: { value: "" } });
+    expect(container.querySelector(".field.q")).not.toBeNull();
+    expect(numberBox(container, "q").value).toBe("");
+
+    await fireEvent.input(numberBox(container, "q"), { target: { value: "1.5" } });
+    await fireEvent.change(numberBox(container, "q"));
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({ q: 1.5 });
+  });
+
+  it("holds the gain while its box is half-typed", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 3, 2]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    vi.mocked(api.applyLive).mockClear();
+    const slider = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
+
+    // The "-" of "-4": the slider stays put rather than snapping to 0.
+    await fireEvent.input(numberBox(container, "gain"), { target: { value: "" } });
+    expect(slider.value).toBe("3");
+
+    await fireEvent.input(numberBox(container, "gain"), { target: { value: "-4" } });
+    expect(slider.value).toBe("-4");
+    await fireEvent.change(numberBox(container, "gain"));
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({ gain: -4 });
+  });
+
+  it("puts a box left blank back to the band's value without counting an edit", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 3, 2]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    for (const field of ["freq", "gain", "q"]) {
+      await fireEvent.input(numberBox(container, field), { target: { value: "" } });
+      await fireEvent.change(numberBox(container, field));
+    }
+    expect(
+      [...container.querySelectorAll<HTMLInputElement>(".band input[type='number']")].map(
+        (i) => i.value,
+      ),
+    ).toEqual(["1000", "3", "2"]);
+    expect(saveLabel(container)).toBe("Saved");
+  });
+
+  it("still commits a number typed before the box was cleared", async () => {
+    const { container } = renderEditor(cfg(0, [[1000, 3, 2]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+    vi.mocked(api.applyLive).mockClear();
+
+    // The band moved to 5 as it was typed; clearing the box after doesn't undo
+    // that, so committing the blank box still sends 5.
+    await fireEvent.input(numberBox(container, "gain"), { target: { value: "5" } });
+    await fireEvent.input(numberBox(container, "gain"), { target: { value: "" } });
+    await fireEvent.change(numberBox(container, "gain"));
+    expect(numberBox(container, "gain").value).toBe("5");
+    expect(saveLabel(container)).toBe("Save");
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
+    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({ gain: 5 });
+  });
+
   it("opens the balance popover and dismisses it on an outside click", async () => {
     const { container } = renderEditor(cfg(-10, [[1000, 0, 1]]));
     await waitFor(() => expect(bandCount(container)).toBe(1));
