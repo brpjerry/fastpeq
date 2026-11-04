@@ -468,6 +468,17 @@ describe("Editor", () => {
     root.querySelector<HTMLInputElement>(`.field.${field} input[type='number']`)!;
   const saveLabel = (root: ParentNode) =>
     root.querySelector(".actions .primary")!.textContent!.trim();
+  /** Focus a box and type into it, one input event per value, as a browser would. */
+  async function typeInto(root: ParentNode, field: string, ...values: string[]) {
+    await fireEvent.focus(numberBox(root, field));
+    for (const value of values) {
+      await fireEvent.input(numberBox(root, field), { target: { value } });
+    }
+  }
+  const appliedFilter = () =>
+    (vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config).lines.find(
+      (l) => l.kind === "Filter",
+    )?.value;
 
   it("keeps a peak's Q field while its box is cleared to retype", async () => {
     const { container } = renderEditor(cfg(0, [[1000, 3, 2]]));
@@ -476,15 +487,51 @@ describe("Editor", () => {
 
     // Clearing the Q used to null it, un-rendering the Q field mid-edit — the
     // peak then looked like a Q-less shelf and went live without a Q.
-    await fireEvent.input(numberBox(container, "q"), { target: { value: "" } });
+    await typeInto(container, "q", "");
     expect(container.querySelector(".field.q")).not.toBeNull();
     expect(numberBox(container, "q").value).toBe("");
 
-    await fireEvent.input(numberBox(container, "q"), { target: { value: "1.5" } });
+    // An apply from elsewhere while the box is blank still sends the last Q.
+    const slider = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
+    await fireEvent.input(slider, { target: { value: "4" } });
+    await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
+    expect(appliedFilter()).toMatchObject({ gain: 4, q: 2 });
+
+    vi.mocked(api.applyLive).mockClear();
+    await typeInto(container, "q", "1.5");
     await fireEvent.change(numberBox(container, "q"));
     await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
-    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
-    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({ q: 1.5 });
+    expect(appliedFilter()).toMatchObject({ q: 1.5 });
+  });
+
+  it("keeps a slope shelf's slope box while it is cleared", async () => {
+    const { container } = renderEditor({
+      lines: [
+        {
+          kind: "Filter",
+          value: {
+            enabled: true,
+            kind: "LowShelfQ",
+            freq: 100,
+            gain: 6,
+            q: null,
+            slope: 12,
+            index: 1,
+            channel: { kind: "both" },
+          },
+        },
+      ],
+    });
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    // A null slope used to flip the row from its slope box to a Q box.
+    await typeInto(container, "slope", "");
+    expect(container.querySelectorAll(".field.q")).toHaveLength(1);
+    expect(container.querySelector(".field.slope")).not.toBeNull();
+
+    await fireEvent.change(numberBox(container, "slope"));
+    expect(numberBox(container, "slope").value).toBe("12");
+    expect(saveLabel(container)).toBe("Saved");
   });
 
   it("holds the gain while its box is half-typed", async () => {
@@ -494,7 +541,7 @@ describe("Editor", () => {
     const slider = container.querySelector<HTMLInputElement>(".field.gain input[type='range']")!;
 
     // The "-" of "-4": the slider stays put rather than snapping to 0.
-    await fireEvent.input(numberBox(container, "gain"), { target: { value: "" } });
+    await typeInto(container, "gain", "");
     expect(slider.value).toBe("3");
 
     await fireEvent.input(numberBox(container, "gain"), { target: { value: "-4" } });
@@ -510,7 +557,7 @@ describe("Editor", () => {
     await waitFor(() => expect(bandCount(container)).toBe(1));
 
     for (const field of ["freq", "gain", "q"]) {
-      await fireEvent.input(numberBox(container, field), { target: { value: "" } });
+      await typeInto(container, field, "");
       await fireEvent.change(numberBox(container, field));
     }
     expect(
@@ -528,14 +575,32 @@ describe("Editor", () => {
 
     // The band moved to 5 as it was typed; clearing the box after doesn't undo
     // that, so committing the blank box still sends 5.
-    await fireEvent.input(numberBox(container, "gain"), { target: { value: "5" } });
-    await fireEvent.input(numberBox(container, "gain"), { target: { value: "" } });
+    await typeInto(container, "gain", "5", "");
     await fireEvent.change(numberBox(container, "gain"));
     expect(numberBox(container, "gain").value).toBe("5");
     expect(saveLabel(container)).toBe("Save");
     await waitFor(() => expect(api.applyLive).toHaveBeenCalled());
-    const applied = vi.mocked(api.applyLive).mock.calls.at(-1)![0] as Config;
-    expect(applied.lines.find((l) => l.kind === "Filter")?.value).toMatchObject({ gain: 5 });
+    expect(appliedFilter()).toMatchObject({ gain: 5 });
+  });
+
+  it("counts no edit when typing returns a box to its value before it is left blank", async () => {
+    // 18 dB is past the default 12 dB limit: an edit of it would pull it in.
+    const { container } = renderEditor(cfg(0, [[1000, 18, 2]]));
+    await waitFor(() => expect(bandCount(container)).toBe(1));
+
+    // Typed away and back, then left: the value is what it was on focus, so the
+    // browser fires no change at all.
+    await typeInto(container, "gain", "5", "18");
+    await fireEvent.blur(numberBox(container, "gain"));
+    // A later edit that clears the box and leaves it changes nothing...
+    await typeInto(container, "gain", "");
+    await fireEvent.change(numberBox(container, "gain"));
+    // ...nor does one that types away and back, then clears it.
+    await typeInto(container, "gain", "5", "18", "");
+    await fireEvent.change(numberBox(container, "gain"));
+
+    expect(numberBox(container, "gain").value).toBe("18");
+    expect(saveLabel(container)).toBe("Saved");
   });
 
   it("opens the balance popover and dismisses it on an outside click", async () => {

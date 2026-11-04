@@ -106,21 +106,19 @@
   // Only the focused box can be blank, so one marker covers the row.
   type NumberField = "freq" | "gain" | "q" | "slope";
   let blank = $state<NumberField | null>(null);
-  let moved: NumberField | null = null; // typing changed it since its last commit
+  let since: number | null = null; // the focused box's value at focus / last commit
   const entry = (f: NumberField) => (blank === f ? null : band[f]);
   function enter(f: NumberField, v: number | null) {
     blank = v === null ? f : null;
-    if (v === null || v === band[f]) return;
-    band[f] = v;
-    moved = f;
+    if (v !== null) band[f] = v;
   }
   function commit(f: NumberField, then: () => void) {
     const wasBlank = blank === f;
     blank = null;
     // A box left blank changed nothing — unless a number typed before it was
-    // cleared already moved the band, which then commits as usual.
-    if (!wasBlank || moved === f) then();
-    moved = null;
+    // cleared moved the band from where this edit began, which then commits.
+    if (!wasBlank || band[f] !== since) then();
+    since = band[f];
   }
 </script>
 
@@ -157,6 +155,7 @@
       max="24000"
       step="1"
       bind:value={() => entry("freq"), (v) => enter("freq", v)}
+      onfocus={() => (since = band.freq)}
       onchange={() => commit("freq", onChange)}
     />
     <small>Hz</small>
@@ -185,6 +184,7 @@
         max={gainBound}
         step="0.1"
         bind:value={() => entry("gain"), (v) => enter("gain", v)}
+        onfocus={() => (since = band.gain)}
         onchange={() => commit("gain", changeGain)}
       />
       <small>dB</small>
@@ -199,6 +199,7 @@
         max="36"
         step="0.1"
         bind:value={() => entry("slope"), (v) => enter("slope", v)}
+        onfocus={() => (since = band.slope)}
         onchange={() => commit("slope", onChange)}
       />
       <small>dB/oct</small>
@@ -213,6 +214,7 @@
         max="36"
         step="0.1"
         bind:value={() => entry("q"), (v) => enter("q", v)}
+        onfocus={() => (since = band.q)}
         onchange={() => commit("q", onChange)}
       />
     </span>
