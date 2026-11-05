@@ -15,6 +15,13 @@
 //! FASTPEQ_BLESS_BINDINGS=1 cargo test -p fastpeq-win32-bindgen
 //! ```
 //!
-//! In PowerShell: `$env:FASTPEQ_BLESS_BINDINGS = 1; cargo test -p fastpeq-win32-bindgen`.
+//! In PowerShell, clear the variable afterwards. Otherwise every later test run
+//! in that session regenerates the file instead of checking it:
+//!
+//! ```text
+//! $env:FASTPEQ_BLESS_BINDINGS = 1; cargo test -p fastpeq-win32-bindgen; Remove-Item Env:FASTPEQ_BLESS_BINDINGS
+//! ```
+//!
+//! Only the value `1` regenerates, and an up-to-date file is never rewritten.
 //! The generator formats its output with `rustfmt`, so it needs the rustfmt
 //! component installed.

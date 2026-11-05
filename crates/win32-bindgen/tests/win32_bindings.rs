@@ -16,28 +16,36 @@ fn win32_bindings_are_current() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let args = manifest.join("bindings.txt");
     let checked_in = manifest.join("../../src-tauri/src/win32.rs");
-    let raw = Path::new(env!("CARGO_TARGET_TMPDIR")).join("win32.rs");
+    // Every run on this target dir shares CARGO_TARGET_TMPDIR, so name the
+    // output per process: overlapping runs (an IDE and a terminal, say) must
+    // not read each other's half-written file.
+    let raw =
+        Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("win32-{}.rs", std::process::id()));
 
+    // Panics on a filter that names no API, so a typo in bindings.txt fails here.
     windows_bindgen::bindgen(["--out", path_str(&raw), "--etc", path_str(&args)]);
-    let generated = format!(
-        "{HEADER}{}",
-        std::fs::read_to_string(&raw).expect("read the generated bindings")
-    );
-
-    if std::env::var_os("FASTPEQ_BLESS_BINDINGS").is_some() {
-        std::fs::write(&checked_in, &generated).expect("write src-tauri/src/win32.rs");
-        return;
-    }
+    let output = std::fs::read_to_string(&raw);
+    let _ = std::fs::remove_file(&raw);
+    let generated = format!("{HEADER}{}", output.expect("read the generated bindings"));
 
     // The repo checks text out as LF (.gitattributes), but a checkout made
     // without that setting shouldn't fail on line endings alone.
     let current = std::fs::read_to_string(&checked_in)
         .unwrap_or_default()
         .replace("\r\n", "\n");
-    assert!(
-        current == generated,
+    if current == generated {
+        return;
+    }
+
+    // Only the exact value `1` regenerates, so `FASTPEQ_BLESS_BINDINGS=0` (or
+    // an empty value) means off, as it reads.
+    if std::env::var_os("FASTPEQ_BLESS_BINDINGS").is_some_and(|v| v == "1") {
+        std::fs::write(&checked_in, &generated).expect("write src-tauri/src/win32.rs");
+        return;
+    }
+    panic!(
         "src-tauri/src/win32.rs is out of date with crates/win32-bindgen/bindings.txt or the \
-         windows-bindgen version. Regenerate it with \
+         windows-bindgen / Windows metadata version. Regenerate it with \
          `FASTPEQ_BLESS_BINDINGS=1 cargo test -p fastpeq-win32-bindgen` and commit the result."
     );
 }
