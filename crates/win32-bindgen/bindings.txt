@@ -1,0 +1,60 @@
+// windows-bindgen arguments for src-tauri/src/win32.rs, the app's Win32 API
+// bindings. Every argument except `--out` lives here; tests/win32_bindings.rs
+// supplies the output path, checks the checked-in file is current, and
+// regenerates it after you edit this list:
+//
+//     FASTPEQ_BLESS_BINDINGS=1 cargo test -p fastpeq-win32-bindgen
+//
+// The default metadata puts every Win32 API in the single `Windows.Win32`
+// namespace, so the filters below are bare names. List only what the app
+// calls; bindgen pulls in each item's dependencies (PROPVARIANT's union
+// members, IStream, ...) on its own.
+
+// One module, no `Windows::Win32` nesting.
+--flat
+
+// Emit `_Impl` traits only for interfaces the app implements with
+// `#[implement]`. Without this, bindgen emits one for every Win32 interface.
+--implement
+    Windows.Win32.IMMNotificationClient
+
+--filter
+    // COM runtime (audio.rs, lib.rs)
+    CLSCTX_ALL
+    COINIT_MULTITHREADED
+    CoCreateInstance
+    CoInitializeEx
+    CoTaskMemFree
+    CoUninitialize
+    RPC_E_CHANGED_MODE
+
+    // Core Audio device enumeration and default-device notifications (audio.rs)
+    DEVICE_STATE_ACTIVE
+    eCommunications
+    eConsole
+    eMultimedia
+    eRender
+    IMMDevice
+    IMMDeviceCollection
+    IMMDeviceEnumerator
+    IMMNotificationClient
+    MMDeviceEnumerator
+
+    // Endpoint friendly name (audio.rs)
+    IPropertyStore
+    PKEY_Device_FriendlyName
+    PROPVARIANT
+    PropVariantClear
+    STGM_READ
+    VT_LPWSTR
+
+    // OSD overlay: virtual desktops and non-activating show/raise (lib.rs)
+    GetForegroundWindow
+    HWND_TOPMOST
+    IVirtualDesktopManager
+    SetWindowPos
+    SWP_NOACTIVATE
+    SWP_NOMOVE
+    SWP_NOSIZE
+    SWP_SHOWWINDOW
+    VirtualDesktopManager

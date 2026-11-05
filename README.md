@@ -138,6 +138,7 @@ A hard split between a UI-agnostic Rust core and a thin Tauri + Svelte shell.
 |-----------|------|
 | `crates/fastpeq-core` | Detect APO, parse/edit/serialize configs, preset store, atomic writes, hardware/software split + biquad math (`offload`) |
 | `crates/fastpeq-hw` | Hardware-EQ device drivers (USB HID) + `fastpeq-hw-cli`, a driver-development CLI that drives the same surface without the GUI |
+| `crates/win32-bindgen` | Dev tooling: generates the shell's checked-in Win32 bindings (`src-tauri/src/win32.rs`) with `windows-bindgen` and tests that they're current. To add an API, list it in `bindings.txt` and run `FASTPEQ_BLESS_BINDINGS=1 cargo test -p fastpeq-win32-bindgen` |
 | `src-tauri` | Tauri 2 commands, system tray, configurable global hotkeys, single-instance, Windows startup entry |
 | `src/` | Svelte + TS UI: preset list, band editor, response curve, curve editor |
 
