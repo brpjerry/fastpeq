@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/fastpeq-core", "crates/fastpeq-hw", "src-tauri"]
+members = ["crates/fastpeq-core", "crates/fastpeq-hw", "crates/win32-bindgen", "src-tauri"]
 # Bare `cargo build`/`cargo test` act on the core and hardware crates only, so
 # they don't require the frontend to be built first. The Tauri app is built
 # explicitly via the Tauri CLI (or `cargo build -p fastpeq`).

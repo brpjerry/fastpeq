@@ -6,7 +6,8 @@
 //! `IMMDeviceEnumerator`; setting the default endpoint uses the **undocumented**
 //! `IPolicyConfig` COM interface — the same mechanism nircmd / SoundVolumeView /
 //! AudioSwitcher rely on, stable since Windows 7. We declare it by hand because
-//! it isn't part of the public Windows metadata the `windows` crate is built from.
+//! it isn't part of the public Windows metadata that `windows-bindgen` generates
+//! the rest of our Win32 bindings (`crate::win32`) from.
 //!
 //! The non-Windows build provides stubs so the crate still compiles and tests
 //! stay green off-Windows, mirroring `fastpeq_core::apo::env::detect`.
@@ -33,22 +34,15 @@ mod imp {
     #![allow(non_snake_case)]
 
     use super::AudioDevice;
-    use core::ffi::c_void;
-    use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-    use windows::Win32::Foundation::PROPERTYKEY;
-    use windows::Win32::Media::Audio::{
-        DEVICE_STATE, DEVICE_STATE_ACTIVE, EDataFlow, ERole, IMMDeviceEnumerator,
-        IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator, eCommunications,
-        eConsole, eMultimedia, eRender,
-    };
-    use windows::Win32::System::Com::{
+    use crate::win32::{
         CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
-        CoUninitialize, STGM_READ,
+        CoUninitialize, DEVICE_STATE_ACTIVE, EDataFlow, ERole, IMMDevice, IMMDeviceEnumerator,
+        IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
+        PKEY_Device_FriendlyName, PROPERTYKEY, PROPVARIANT, PropVariantClear, STGM_READ, VT_LPWSTR,
+        eCommunications, eConsole, eMultimedia, eRender,
     };
-    use windows::Win32::System::Variant::VT_LPWSTR;
-    use windows::core::{
-        GUID, HRESULT, IUnknown, IUnknown_Vtbl, PCWSTR, PWSTR, implement, interface,
-    };
+    use core::ffi::c_void;
+    use windows_core::{GUID, HRESULT, IUnknown, PCWSTR, PWSTR, implement, interface};
 
     /// CLSID of the policy-config class object that implements `IPolicyConfig`.
     const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
@@ -95,11 +89,7 @@ mod imp {
         ) -> HRESULT;
         /// Make `device_id` the default for the given role (eConsole / eMultimedia
         /// / eCommunications). This is the one method we actually use.
-        unsafe fn SetDefaultEndpoint(
-            &self,
-            device_id: PCWSTR,
-            role: windows::Win32::Media::Audio::ERole,
-        ) -> HRESULT;
+        unsafe fn SetDefaultEndpoint(&self, device_id: PCWSTR, role: ERole) -> HRESULT;
         unsafe fn SetEndpointVisibility(&self, _id: PCWSTR, _visible: i32) -> HRESULT;
     }
 
@@ -114,7 +104,7 @@ mod imp {
             // SAFETY: standard COM init. S_FALSE means COM was already initialized
             // on this thread (we still pair an uninit); RPC_E_CHANGED_MODE means
             // it was initialized as STA elsewhere — fine, we just don't own it.
-            let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED as u32) };
             ComGuard { owned: hr.is_ok() }
         }
     }
@@ -141,8 +131,45 @@ mod imp {
         // string whose ownership we now hold and free here.
         unsafe {
             let s = p.to_string().unwrap_or_default();
-            CoTaskMemFree(Some(p.0 as *const c_void));
+            CoTaskMemFree(p.0.cast::<c_void>());
             s
+        }
+    }
+
+    /// A `PROPVARIANT` we own, cleared on drop. The generated binding is a
+    /// plain struct, so freeing what it points to (the friendly name's wide
+    /// string) is up to us.
+    struct PropVariant(PROPVARIANT);
+
+    impl Drop for PropVariant {
+        fn drop(&mut self) {
+            // SAFETY: the value came from `IPropertyStore::GetValue`, is owned
+            // by this guard alone, and is cleared exactly once, here.
+            let _ = unsafe { PropVariantClear(&mut self.0) };
+        }
+    }
+
+    /// The endpoint's non-empty friendly name, e.g. `"Speakers (Realtek(R)
+    /// Audio)"`.
+    ///
+    /// SAFETY: COM must be initialized on the calling thread.
+    unsafe fn friendly_name(device: &IMMDevice) -> Option<String> {
+        // SAFETY: COM is initialized (caller contract). PKEY_Device_FriendlyName
+        // is a VT_LPWSTR PROPVARIANT, so `pwszVal` is only read after checking
+        // `vt`; the guard frees the string after it's copied into a `String`.
+        unsafe {
+            let store = device.OpenPropertyStore(STGM_READ as u32).ok()?;
+            let prop = PropVariant(store.GetValue(&PKEY_Device_FriendlyName).ok()?);
+            let value = &prop.0.Anonymous.Anonymous;
+            if value.vt.0 != VT_LPWSTR as u16 {
+                return None;
+            }
+            value
+                .Anonymous
+                .pwszVal
+                .to_string()
+                .ok()
+                .filter(|s| !s.is_empty())
         }
     }
 
@@ -152,7 +179,7 @@ mod imp {
         // interfaces we own; raw pointers come straight from Core Audio.
         unsafe {
             let enumerator: IMMDeviceEnumerator =
-                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL as u32)
                     .map_err(|e| e.to_string())?;
 
             // The current default; used only to flag the active row. A missing
@@ -165,7 +192,7 @@ mod imp {
                 .unwrap_or_default();
 
             let collection = enumerator
-                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE as u32)
                 .map_err(|e| e.to_string())?;
             let count = collection.GetCount().map_err(|e| e.to_string())?;
 
@@ -173,22 +200,7 @@ mod imp {
             for i in 0..count {
                 let device = collection.Item(i).map_err(|e| e.to_string())?;
                 let id = take_pwstr(device.GetId().map_err(|e| e.to_string())?);
-                // PKEY_Device_FriendlyName is a VT_LPWSTR PROPVARIANT; read the
-                // wide string straight out of the union (the PROPVARIANT's Drop
-                // frees the buffer after we've copied it into a Rust String).
-                let name = device
-                    .OpenPropertyStore(STGM_READ)
-                    .ok()
-                    .and_then(|store| store.GetValue(&PKEY_Device_FriendlyName).ok())
-                    .and_then(|prop| {
-                        if prop.Anonymous.Anonymous.vt == VT_LPWSTR {
-                            prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string().ok()
-                        } else {
-                            None
-                        }
-                    })
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| id.clone());
+                let name = friendly_name(&device).unwrap_or_else(|| id.clone());
                 let is_default = !id.is_empty() && id == default_id;
                 out.push(AudioDevice {
                     id,
@@ -206,8 +218,9 @@ mod imp {
         // SAFETY: COM is initialized; `id_w` outlives every call below; the
         // policy-config object is created and used on this thread only.
         unsafe {
-            let policy: IPolicyConfig = CoCreateInstance(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL)
-                .map_err(|e| e.to_string())?;
+            let policy: IPolicyConfig =
+                CoCreateInstance(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL as u32)
+                    .map_err(|e| e.to_string())?;
             // Set all three roles so both the default and default-communication
             // device follow, matching what users expect from device switchers.
             for role in [eConsole, eMultimedia, eCommunications] {
@@ -226,26 +239,14 @@ mod imp {
     /// output *changes*).
     pub fn default_output() -> Option<(String, String)> {
         let _com = ComGuard::new();
-        // SAFETY: guarded by the COM init above; the endpoint + its property store
-        // are owned here, and the id and friendly-name PROPVARIANT are read like in
-        // `list_devices`.
+        // SAFETY: guarded by the COM init above; the endpoint is owned here, and
+        // its id and friendly name are read like in `list_devices`.
         unsafe {
             let enumerator: IMMDeviceEnumerator =
-                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL as u32).ok()?;
             let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
             let id = take_pwstr(device.GetId().ok()?);
-            let name = device
-                .OpenPropertyStore(STGM_READ)
-                .ok()
-                .and_then(|store| store.GetValue(&PKEY_Device_FriendlyName).ok())
-                .and_then(|prop| {
-                    if prop.Anonymous.Anonymous.vt == VT_LPWSTR {
-                        prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string().ok()
-                    } else {
-                        None
-                    }
-                })
-                .filter(|s| !s.is_empty())?;
+            let name = friendly_name(&device)?;
             Some((id, name))
         }
     }
@@ -279,12 +280,13 @@ mod imp {
                     CoCreateInstance::<_, IMMDeviceEnumerator>(
                         &MMDeviceEnumerator,
                         None,
-                        CLSCTX_ALL,
+                        CLSCTX_ALL as u32,
                     )
                     .and_then(|enumerator| {
                         let client: IMMNotificationClient = OutputWatcher { tx }.into();
                         enumerator
                             .RegisterEndpointNotificationCallback(&client)
+                            .ok()
                             .map(|()| (enumerator, client))
                     })
                 };
@@ -324,7 +326,7 @@ mod imp {
             flow: EDataFlow,
             role: ERole,
             _id: &PCWSTR,
-        ) -> windows::core::Result<()> {
+        ) -> windows_core::Result<()> {
             // Only the console render default drives offload; the other roles
             // fire alongside it on a normal switch and would just double up.
             if flow == eRender && role == eConsole {
@@ -332,16 +334,16 @@ mod imp {
             }
             Ok(())
         }
-        fn OnDeviceStateChanged(&self, _: &PCWSTR, _: DEVICE_STATE) -> windows::core::Result<()> {
+        fn OnDeviceStateChanged(&self, _: &PCWSTR, _: u32) -> windows_core::Result<()> {
             Ok(())
         }
-        fn OnDeviceAdded(&self, _: &PCWSTR) -> windows::core::Result<()> {
+        fn OnDeviceAdded(&self, _: &PCWSTR) -> windows_core::Result<()> {
             Ok(())
         }
-        fn OnDeviceRemoved(&self, _: &PCWSTR) -> windows::core::Result<()> {
+        fn OnDeviceRemoved(&self, _: &PCWSTR) -> windows_core::Result<()> {
             Ok(())
         }
-        fn OnPropertyValueChanged(&self, _: &PCWSTR, _: &PROPERTYKEY) -> windows::core::Result<()> {
+        fn OnPropertyValueChanged(&self, _: &PCWSTR, _: &PROPERTYKEY) -> windows_core::Result<()> {
             Ok(())
         }
     }

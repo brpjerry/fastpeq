@@ -1,0 +1,17 @@
+[package]
+name = "fastpeq-win32-bindgen"
+description = "Generates and checks the app's checked-in Win32 bindings (src-tauri/src/win32.rs)"
+license = "MIT"
+edition = "2024"
+# Dev tooling only: never built into the app or released, so it has no version
+# for `npm run bump-version` to track.
+publish = false
+
+# A crate of its own rather than a test in `src-tauri`: if a `windows-core` bump
+# leaves the old `win32.rs` unable to compile, the generator still builds, so it
+# can write the fixed file.
+#
+# Keep `windows-bindgen` on the same version as `windows-core` in
+# src-tauri/Cargo.toml (Dependabot's `windows-rs` group bumps them together).
+[dev-dependencies]
+windows-bindgen = "0.100"
