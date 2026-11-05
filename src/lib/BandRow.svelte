@@ -94,6 +94,32 @@
     band.gain = clampGainTo(band.gain, gainLimit);
     onChange();
   }
+
+  // The number boxes bind through `entry` / `enter` rather than straight to the
+  // band. Svelte's bind:value writes null for a number box that doesn't hold a
+  // number — one cleared to retype, or a lone "-" or "." on the way to a value
+  // — and a null in the band would un-render the field being typed into (an
+  // emptied Q leaves a peak looking like a Q-less shelf; an emptied slope flips
+  // to the Q box), snap the gain slider to 0, and reach the graph and the next
+  // apply. So the band keeps its last value while a box is blank, and
+  // committing the blank box (Enter / leaving it) just shows that value again.
+  // Only the focused box can be blank, so one marker covers the row.
+  type NumberField = "freq" | "gain" | "q" | "slope";
+  let blank = $state<NumberField | null>(null);
+  let since: number | null = null; // the focused box's value at focus / last commit
+  const entry = (f: NumberField) => (blank === f ? null : band[f]);
+  function enter(f: NumberField, v: number | null) {
+    blank = v === null ? f : null;
+    if (v !== null) band[f] = v;
+  }
+  function commit(f: NumberField, then: () => void) {
+    const wasBlank = blank === f;
+    blank = null;
+    // A box left blank changed nothing — unless a number typed before it was
+    // cleared moved the band from where this edit began, which then commits.
+    if (!wasBlank || band[f] !== since) then();
+    since = band[f];
+  }
 </script>
 
 <div
@@ -123,7 +149,15 @@
     }}
   />
   <span class="field freq">
-    <input type="number" min="10" max="24000" step="1" bind:value={band.freq} onchange={onChange} />
+    <input
+      type="number"
+      min="10"
+      max="24000"
+      step="1"
+      bind:value={() => entry("freq"), (v) => enter("freq", v)}
+      onfocus={() => (since = band.freq)}
+      onchange={() => commit("freq", onChange)}
+    />
     <small>Hz</small>
   </span>
   {#if kindHasGain(band.kind)}
@@ -149,8 +183,9 @@
         min={-gainBound}
         max={gainBound}
         step="0.1"
-        bind:value={band.gain}
-        onchange={changeGain}
+        bind:value={() => entry("gain"), (v) => enter("gain", v)}
+        onfocus={() => (since = band.gain)}
+        onchange={() => commit("gain", changeGain)}
       />
       <small>dB</small>
     </span>
@@ -158,14 +193,30 @@
   {#if band.slope !== null && kindHasSlope(band.kind)}
     <!-- A shelf given as a slope (e.g. from PEACE) edits that slope instead. -->
     <span class="field q slope" title="Shelf slope in dB per octave">
-      <input type="number" min="0.1" max="36" step="0.1" bind:value={band.slope} onchange={onChange} />
+      <input
+        type="number"
+        min="0.1"
+        max="36"
+        step="0.1"
+        bind:value={() => entry("slope"), (v) => enter("slope", v)}
+        onfocus={() => (since = band.slope)}
+        onchange={() => commit("slope", onChange)}
+      />
       <small>dB/oct</small>
     </span>
   {:else if band.q !== null}
     <!-- Every Q type has one; an LS/HS/LP/HP only when its line gave one. -->
     <span class="field q">
       <small>Q</small>
-      <input type="number" min="0.1" max="36" step="0.1" bind:value={band.q} onchange={onChange} />
+      <input
+        type="number"
+        min="0.1"
+        max="36"
+        step="0.1"
+        bind:value={() => entry("q"), (v) => enter("q", v)}
+        onfocus={() => (since = band.q)}
+        onchange={() => commit("q", onChange)}
+      />
     </span>
   {/if}
   <button class="danger remove" onclick={onRemove} title="Remove band">
