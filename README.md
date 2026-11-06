@@ -98,6 +98,36 @@ npm test                        # unit/component tests (vp test)
 npx vp fmt                      # apply formatting
 ```
 
+### Accepted npm advisories
+
+`npm audit` reports advisories against three packages that no in-range update
+fixes yet. All three are dev tooling only. The installers embed only the Vite
+build in `dist/`, and none of these packages ends up in it. Their Dependabot
+alerts are dismissed as tolerable risk. Revisit an entry when
+`npm ls minimatch glob deepmerge` no longer shows the affected version.
+
+- **`minimatch` < 11.0.1**: a crafted glob pattern can blow up preprocessing
+  time ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)).
+  It comes in through the E2E stack: `mocha` and the `glob` 13 it depends on
+  (from `@wdio/mocha-framework`), and `readdir-glob` (from `webdriverio` →
+  `archiver`). The only patterns any of them see are our own:
+  the `specs` glob in `e2e/wdio.conf.js`. webdriverio uses archiver only to zip
+  browser extensions with `append()`, so readdir-glob never runs. Don't add an
+  `overrides` entry to force minimatch 11. glob 13's entry point is a bundle
+  with its own copy of minimatch inlined, so an override would hide the alert
+  but leave the code in place. mocha and readdir-glob also both declare `^10`.
+- **`glob` 9.0.0–14.0.1**: an aborted walk keeps reading directories
+  ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)).
+  It comes in through the same E2E path. It only matters when a caller limits
+  an untrusted walk with an `AbortSignal`, and nothing here passes one.
+- **`deepmerge` ≤ 4.3.1**: a crafted source object can poison the merged
+  result's prototype
+  ([GHSA-gcqx-w48m-w2h4](https://github.com/advisories/GHSA-gcqx-w48m-w2h4)).
+  `@sveltejs/vite-plugin-svelte` uses it at build time to merge its defaults
+  with `svelte.config.js` and the inline plugin options. All of those are
+  written in this repo. There is no fixed release, and the latest plugin still
+  depends on it.
+
 ## Releasing
 
 Update the application version with the repository helper, which keeps the
