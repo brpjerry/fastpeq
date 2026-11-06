@@ -108,9 +108,9 @@ alerts are dismissed as tolerable risk. Revisit an entry when
 
 - **`minimatch` < 11.0.1**: a crafted glob pattern can blow up preprocessing
   time ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)).
-  It comes in through the E2E stack: `mocha` and `glob` 13 (from
-  `@wdio/mocha-framework` and `@wdio/config`), and `readdir-glob` (from
-  `webdriverio` → `archiver`). The only patterns any of them see are our own:
+  It comes in through the E2E stack: `mocha` and the `glob` 13 it depends on
+  (from `@wdio/mocha-framework`), and `readdir-glob` (from `webdriverio` →
+  `archiver`). The only patterns any of them see are our own:
   the `specs` glob in `e2e/wdio.conf.js`. webdriverio uses archiver only to zip
   browser extensions with `append()`, so readdir-glob never runs. Don't add an
   `overrides` entry to force minimatch 11. glob 13's entry point is a bundle
